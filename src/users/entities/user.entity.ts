@@ -48,6 +48,18 @@ export class User {
   @Column({ type: 'boolean', default: false })
   isVerified: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isEmailVerified: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  isPhoneVerified: boolean;
+
+  @Column({ type: 'uuid', nullable: true })
+  profilePhotoFileId: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  hapticsEnabled: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
