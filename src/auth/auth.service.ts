@@ -334,6 +334,15 @@ export class AuthService {
     }
 
     user.isVerified = true;
+
+    if (user.email === identifier) {
+      user.isEmailVerified = true;
+    }
+
+    if (user.phone === identifier) {
+      user.isPhoneVerified = true;
+    }
+
     await this.userRepository.save(user);
 
     return {

@@ -9,6 +9,8 @@ import {
 export enum OtpPurpose {
   ACCOUNT_VERIFICATION = 'account_verification',
   PASSWORD_RESET = 'password_reset',
+  CHANGE_EMAIL = 'change_email',
+  CHANGE_PHONE = 'change_phone',
 }
 
 @Entity('otps')
@@ -17,21 +19,25 @@ export class Otp {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', length: 320 })
   identifier: string;
 
-  @Column({ type: 'enum', enum: OtpPurpose })
+  @Column({
+    type: 'varchar',
+    length: 50,
+    default: OtpPurpose.ACCOUNT_VERIFICATION,
+  })
   purpose: OtpPurpose;
 
-  @Column()
+  @Column({ type: 'varchar', length: 255 })
   code: string;
 
-  @Column()
+  @Column({ type: 'timestamptz' })
   expiresAt: Date;
 
-  @Column({ default: 0 })
+  @Column({ type: 'integer', default: 0 })
   attemptCount: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }
