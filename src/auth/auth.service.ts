@@ -24,6 +24,7 @@ import { EmailService } from '../notifications/email.service';
 import { SmsService } from '../notifications/sms.service';
 import { Otp, OtpPurpose } from '../users/entities/otp.entity';
 import { User, UserRole } from '../users/entities/user.entity';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
@@ -40,6 +41,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly smsService: SmsService,
     private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
   ) {}
 
   private normalizeIdentifier(identifier: string): string {
@@ -153,6 +155,24 @@ export class AuthService {
     await this.smsService.sendOtp(normalizedIdentifier, otp);
   }
 
+  private getDevOtpResponse(otp: string) {
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    const emailBypass =
+      this.configService.get<string>('EMAIL_BYPASS')?.trim() === 'true';
+
+    const smsBypass =
+      this.configService.get<string>('SMS_BYPASS')?.trim() === 'true';
+
+    if (isProduction || (!emailBypass && !smsBypass)) {
+      return {};
+    }
+
+    return {
+      devOtp: otp,
+    };
+  }
+
   async signup(signupDto: SignupDto) {
     const fullName = signupDto.fullName.trim();
     const email = signupDto.email?.trim().toLowerCase() || null;
@@ -208,9 +228,15 @@ export class AuthService {
 
     await this.sendOtp(identifier, otp, OtpPurpose.ACCOUNT_VERIFICATION);
 
+    // return {
+    //   message: 'Account created successfully. Please verify your OTP.',
+    //   identifier,
+    // };
+
     return {
       message: 'Account created successfully. Please verify your OTP.',
       identifier,
+      ...this.getDevOtpResponse(otp),
     };
   }
 
@@ -335,8 +361,13 @@ export class AuthService {
 
     await this.sendOtp(identifier, otp, OtpPurpose.ACCOUNT_VERIFICATION);
 
+    // return {
+    //   message: 'Verification code sent successfully.',
+    // };
+
     return {
       message: 'Verification code sent successfully.',
+      ...this.getDevOtpResponse(otp),
     };
   }
 
@@ -357,8 +388,13 @@ export class AuthService {
 
     await this.sendOtp(identifier, otp, OtpPurpose.PASSWORD_RESET);
 
+    // return {
+    //   message: 'If an account exists, a reset code has been sent.',
+    // };
+
     return {
       message: 'If an account exists, a reset code has been sent.',
+      ...this.getDevOtpResponse(otp),
     };
   }
 
