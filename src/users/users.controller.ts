@@ -10,7 +10,6 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import { Request } from 'express';
 
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -27,10 +26,7 @@ import {
 } from './dto/user-profile.dto';
 import { User, UserRole } from './entities/user.entity';
 import { UsersService } from './users.service';
-
-interface AuthenticatedRequest extends Request {
-  user?: User;
-}
+import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -145,7 +141,7 @@ export class UsersController {
   }
 
   private getCurrentUserId(request: AuthenticatedRequest): string {
-    const userId = request.user?.id;
+    const userId = request.user?.id ?? request.user?.sub;
 
     if (!userId) {
       throw new UnauthorizedException('Authenticated user not found');

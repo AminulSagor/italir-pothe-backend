@@ -4,33 +4,66 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from '../users/entities/user.entity';
+
+import { User, UserRole } from '../users/entities/user.entity';
+
+export interface JwtPayload {
+  sub: string;
+  id?: string;
+  fullName?: string;
+  email?: string | null;
+  phone?: string | null;
+  role: UserRole | string;
+}
+
+export interface AuthenticatedUser {
+  id: string;
+  sub: string;
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+  role: UserRole;
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
-    private configService: ConfigService,
-    @InjectRepository(User) private userRepository: Repository<User>,
+    private readonly configService: ConfigService,
+
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      // Add the "!" here
       secretOrKey: configService.get<string>('JWT_SECRET')!,
     });
   }
 
-  async validate(payload: { sub: string; role: string }) {
-    // Check if user still exists in the database
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    const userId = payload.sub || payload.id;
+
+    if (!userId) {
+      throw new UnauthorizedException('Invalid token payload');
+    }
+
     const user = await this.userRepository.findOne({
-      where: { id: payload.sub },
+      where: {
+        id: userId,
+      },
     });
 
     if (!user) {
-      throw new UnauthorizedException();
+      throw new UnauthorizedException('User account no longer exists');
     }
 
-    // This return value is injected into the Request object (req.user)
-    return user;
+    return {
+      id: user.id,
+      sub: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+    };
   }
 }

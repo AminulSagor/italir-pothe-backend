@@ -444,6 +444,10 @@ export class AuthService {
   private generateToken(user: User) {
     const payload = {
       sub: user.id,
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
       role: user.role,
     };
 
@@ -456,6 +460,11 @@ export class AuthService {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        isVerified: user.isVerified,
+        isEmailVerified: user.isEmailVerified,
+        isPhoneVerified: user.isPhoneVerified,
+        profilePhotoFileId: user.profilePhotoFileId,
+        hapticsEnabled: user.hapticsEnabled,
       },
     };
   }
