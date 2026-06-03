@@ -21,6 +21,7 @@ export enum FilePurpose {
   CAF_HERO_VIDEO = 'caf_hero_video',
   CAF_CHECKLIST_PDF = 'caf_checklist_pdf',
   PROFILE_AVATAR = 'profile_avatar',
+  WEBINAR_THUMBNAIL = 'webinar_thumbnail',
 }
 
 export enum FileVisibility {
