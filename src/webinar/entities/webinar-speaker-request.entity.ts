@@ -40,6 +40,12 @@ export class WebinarSpeakerRequest {
   })
   speakingPermission: WebinarSpeakerRequestPermission;
 
+  @Column({ type: 'uuid', nullable: true })
+  respondedByAdminId: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  respondedAt: Date | null;
+
   @ManyToOne(() => Webinar, (webinar) => webinar.speakerRequests, {
     onDelete: 'CASCADE',
   })

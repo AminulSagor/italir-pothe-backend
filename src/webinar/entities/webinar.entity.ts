@@ -52,6 +52,15 @@ export class Webinar {
   @Column({ type: 'uuid', nullable: true })
   updatedByAdminId: string | null;
 
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  agoraChannelName: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  liveStartedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  liveEndedAt: Date | null;
+
   @OneToMany(
     () => WebinarAudienceCourse,
     (audienceCourse) => audienceCourse.webinar,

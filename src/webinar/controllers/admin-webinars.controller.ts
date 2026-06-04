@@ -110,6 +110,17 @@ export class AdminWebinarsController {
     );
   }
 
+  @Post(':id/host-token')
+  async getHostToken(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.webinarsService.getHostToken(
+      id,
+      this.getCurrentAdminId(request),
+    );
+  }
+
   @Get(':id/speaker-requests')
   async getSpeakerRequest(
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -122,16 +133,26 @@ export class AdminWebinarsController {
   async approveSpeakerRequest(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.webinarsService.approveSpeakerRequest(id, userId);
+    return this.webinarsService.approveSpeakerRequest(
+      id,
+      userId,
+      this.getCurrentAdminId(request),
+    );
   }
 
   @Patch(':id/speaker-requests/:userId/reject')
   async rejectSpeakerRequest(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.webinarsService.rejectSpeakerRequest(id, userId);
+    return this.webinarsService.rejectSpeakerRequest(
+      id,
+      userId,
+      this.getCurrentAdminId(request),
+    );
   }
 
   @Delete(':id')

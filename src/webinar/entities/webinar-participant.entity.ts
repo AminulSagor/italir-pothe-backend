@@ -19,6 +19,7 @@ export enum WebinarParticipantSpeakingPermission {
 
 @Entity('webinar_participants')
 @Index(['webinarId', 'userId'], { unique: true })
+@Index(['webinarId', 'agoraUid'], { unique: true })
 export class WebinarParticipant {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -30,6 +31,15 @@ export class WebinarParticipant {
   @Index()
   @Column({ type: 'uuid' })
   userId: string;
+
+  @Column({ type: 'integer', nullable: true })
+  agoraUid: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  joinedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  leftAt: Date | null;
 
   @Column({
     type: 'varchar',

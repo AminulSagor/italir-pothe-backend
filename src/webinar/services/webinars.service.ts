@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
 
 import { File, FileUploadStatus } from 'src/files/entities/file.entity';
@@ -24,11 +25,16 @@ import {
   WebinarSpeakerRequestPermission,
 } from '../entities/webinar-speaker-request.entity';
 import { Webinar, WebinarStatus } from '../entities/webinar.entity';
+import { WebinarGateway } from '../gateways/webinar.gateway';
+import { AgoraLiveRole, AgoraTokenService } from './agora-token.service';
 
 type WebinarUserRaw = {
   userId: string;
   role: UserRole;
   profilePhotoStorageKey: string | null;
+  agoraUid?: number | string | null;
+  joinedAt?: Date | string | null;
+  leftAt?: Date | string | null;
   speakingPermission:
     | WebinarParticipantSpeakingPermission
     | WebinarSpeakerRequestPermission;
@@ -57,6 +63,8 @@ export class WebinarsService {
     private readonly webinarSpeakerRequestRepository: Repository<WebinarSpeakerRequest>,
 
     private readonly s3Service: S3Service,
+    private readonly agoraTokenService: AgoraTokenService,
+    private readonly webinarGateway: WebinarGateway,
   ) {}
 
   async createWebinar(dto: CreateWebinarDto, adminId: string) {
@@ -69,6 +77,9 @@ export class WebinarsService {
       status: dto.status ?? WebinarStatus.DRAFT,
       createdByAdminId: adminId,
       updatedByAdminId: null,
+      agoraChannelName: null,
+      liveStartedAt: null,
+      liveEndedAt: null,
     });
 
     const savedWebinar = await this.webinarRepository.save(webinar);
@@ -125,21 +136,253 @@ export class WebinarsService {
   }
 
   async startWebinar(id: string, adminId: string) {
-    return this.updateWebinarStatus(
-      id,
-      WebinarStatus.LIVE,
-      adminId,
-      'Webinar started successfully.',
-    );
+    const webinar = await this.findWebinarEntityById(id);
+
+    webinar.status = WebinarStatus.LIVE;
+    webinar.updatedByAdminId = adminId;
+    webinar.agoraChannelName = this.getAgoraChannelName(webinar);
+    webinar.liveStartedAt = new Date();
+    webinar.liveEndedAt = null;
+
+    await this.webinarRepository.save(webinar);
+
+    const webinarResponse = await this.buildWebinarResponse(webinar.id);
+
+    this.webinarGateway.emitWebinarStarted(webinar.id, {
+      webinar: webinarResponse,
+    });
+
+    return {
+      message: 'Webinar started successfully.',
+      webinar: webinarResponse,
+    };
   }
 
   async endWebinar(id: string, adminId: string) {
-    return this.updateWebinarStatus(
-      id,
-      WebinarStatus.COMPLETED,
-      adminId,
-      'Webinar ended successfully.',
+    const webinar = await this.findWebinarEntityById(id);
+
+    webinar.status = WebinarStatus.COMPLETED;
+    webinar.updatedByAdminId = adminId;
+    webinar.liveEndedAt = new Date();
+
+    await this.webinarRepository.save(webinar);
+
+    const webinarResponse = await this.buildWebinarResponse(webinar.id);
+
+    this.webinarGateway.emitWebinarEnded(webinar.id, {
+      webinar: webinarResponse,
+    });
+
+    return {
+      message: 'Webinar ended successfully.',
+      webinar: webinarResponse,
+    };
+  }
+
+  async getHostToken(webinarId: string, adminId: string) {
+    const webinar = await this.findLiveWebinarById(webinarId);
+    const uid = this.createAgoraUid(webinar.id, adminId);
+
+    return this.buildAgoraTokenResponse({
+      webinar,
+      uid,
+      role: AgoraLiveRole.PUBLISHER,
+    });
+  }
+
+  async joinWebinar(webinarId: string, userId: string) {
+    const webinar = await this.findLiveWebinarById(webinarId);
+    const participant = await this.upsertJoinedParticipant(webinar.id, userId);
+    const participantResponse = await this.findParticipantResponse(
+      webinar.id,
+      userId,
     );
+
+    this.webinarGateway.emitParticipantListUpdated(webinar.id, {
+      action: 'joined',
+      participant: participantResponse,
+    });
+
+    return {
+      message: 'Webinar joined successfully.',
+      token: this.buildAgoraTokenResponse({
+        webinar,
+        uid: participant.agoraUid!,
+        role: AgoraLiveRole.SUBSCRIBER,
+      }),
+      participant: participantResponse,
+    };
+  }
+
+  async leaveWebinar(webinarId: string, userId: string) {
+    await this.findWebinarEntityById(webinarId);
+
+    const participant = await this.webinarParticipantRepository.findOne({
+      where: {
+        webinarId,
+        userId,
+      },
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Participant not found');
+    }
+
+    participant.leftAt = new Date();
+    await this.webinarParticipantRepository.save(participant);
+
+    const participantResponse = await this.findParticipantResponse(
+      webinarId,
+      userId,
+    );
+
+    this.webinarGateway.emitParticipantListUpdated(webinarId, {
+      action: 'left',
+      participant: participantResponse,
+    });
+
+    return {
+      message: 'Webinar left successfully.',
+      participant: participantResponse,
+    };
+  }
+
+  async leaveStage(webinarId: string, userId: string) {
+    await this.findLiveWebinarById(webinarId);
+
+    const participant = await this.webinarParticipantRepository.findOne({
+      where: {
+        webinarId,
+        userId,
+      },
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Participant not found');
+    }
+
+    participant.speakingPermission = WebinarParticipantSpeakingPermission.REJECTED;
+    await this.webinarParticipantRepository.save(participant);
+
+    const speakerRequest = await this.webinarSpeakerRequestRepository.findOne({
+      where: {
+        webinarId,
+        userId,
+      },
+    });
+
+    if (speakerRequest) {
+      speakerRequest.speakingPermission = WebinarSpeakerRequestPermission.REJECTED;
+      speakerRequest.respondedAt = new Date();
+      await this.webinarSpeakerRequestRepository.save(speakerRequest);
+    }
+
+    const participantResponse = await this.findParticipantResponse(
+      webinarId,
+      userId,
+    );
+
+    this.webinarGateway.emitParticipantListUpdated(webinarId, {
+      action: 'left_stage',
+      participant: participantResponse,
+    });
+
+    return {
+      message: 'Stage left successfully.',
+      participant: participantResponse,
+    };
+  }
+
+  async requestToSpeak(webinarId: string, userId: string) {
+    await this.findLiveWebinarById(webinarId);
+
+    const participant = await this.webinarParticipantRepository.findOne({
+      where: {
+        webinarId,
+        userId,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Please join the webinar first.');
+    }
+
+    if (
+      participant.speakingPermission ===
+      WebinarParticipantSpeakingPermission.GRANTED
+    ) {
+      throw new BadRequestException('Speaker permission is already granted.');
+    }
+
+    let speakerRequest = await this.webinarSpeakerRequestRepository.findOne({
+      where: {
+        webinarId,
+        userId,
+      },
+    });
+
+    if (!speakerRequest) {
+      speakerRequest = this.webinarSpeakerRequestRepository.create({
+        webinarId,
+        userId,
+      });
+    }
+
+    speakerRequest.speakingPermission = WebinarSpeakerRequestPermission.REQUESTED;
+    speakerRequest.respondedByAdminId = null;
+    speakerRequest.respondedAt = null;
+
+    await this.webinarSpeakerRequestRepository.save(speakerRequest);
+
+    const speakerRequestResponse = await this.findSpeakerRequestResponse(
+      webinarId,
+      userId,
+    );
+
+    this.webinarGateway.emitSpeakerRequestCreated(webinarId, {
+      speakerRequest: speakerRequestResponse,
+    });
+
+    return {
+      message: 'Speaker request submitted successfully.',
+      speakerRequest: speakerRequestResponse,
+    };
+  }
+
+  async getSpeakerToken(webinarId: string, userId: string) {
+    const webinar = await this.findLiveWebinarById(webinarId);
+
+    const participant = await this.webinarParticipantRepository.findOne({
+      where: {
+        webinarId,
+        userId,
+      },
+    });
+
+    if (!participant) {
+      throw new BadRequestException('Please join the webinar first.');
+    }
+
+    if (
+      participant.speakingPermission !==
+      WebinarParticipantSpeakingPermission.GRANTED
+    ) {
+      throw new BadRequestException('Speaker permission has not been granted.');
+    }
+
+    if (!participant.agoraUid) {
+      participant.agoraUid = await this.getAvailableAgoraUid(webinarId, userId);
+      await this.webinarParticipantRepository.save(participant);
+    }
+
+    return {
+      message: 'Speaker token generated successfully.',
+      token: this.buildAgoraTokenResponse({
+        webinar,
+        uid: participant.agoraUid,
+        role: AgoraLiveRole.PUBLISHER,
+      }),
+    };
   }
 
   async getParticipantsList(webinarId: string, query: PaginationQueryDto) {
@@ -169,9 +412,13 @@ export class WebinarsService {
         'participantUser.id AS "userId"',
         'participantUser.role AS "role"',
         'profileFile.storageKey AS "profilePhotoStorageKey"',
+        'participant.agoraUid AS "agoraUid"',
+        'participant.joinedAt AS "joinedAt"',
+        'participant.leftAt AS "leftAt"',
         'participant.speakingPermission AS "speakingPermission"',
       ])
-      .orderBy('participant.createdAt', 'ASC')
+      .orderBy('participant.joinedAt', 'DESC', 'NULLS LAST')
+      .addOrderBy('participant.createdAt', 'DESC')
       .skip((pagination.page - 1) * pagination.limit)
       .take(pagination.limit)
       .getRawMany<WebinarUserRaw>();
@@ -235,6 +482,13 @@ export class WebinarsService {
     });
   }
 
+  async getLiveWebinarsList(query: PaginationQueryDto) {
+    return this.getWebinarsListByStatus({
+      status: WebinarStatus.LIVE,
+      query,
+    });
+  }
+
   async getAdminUpcomingWebinarsList(
     adminId: string,
     query: PaginationQueryDto,
@@ -262,20 +516,22 @@ export class WebinarsService {
     });
   }
 
-  async approveSpeakerRequest(webinarId: string, userId: string) {
+  async approveSpeakerRequest(webinarId: string, userId: string, adminId: string) {
     return this.updateSpeakerRequestPermission({
       webinarId,
       userId,
+      adminId,
       speakerRequestPermission: WebinarSpeakerRequestPermission.GRANTED,
       participantPermission: WebinarParticipantSpeakingPermission.GRANTED,
       successMessage: 'Speaker permission approved successfully.',
     });
   }
 
-  async rejectSpeakerRequest(webinarId: string, userId: string) {
+  async rejectSpeakerRequest(webinarId: string, userId: string, adminId: string) {
     return this.updateSpeakerRequestPermission({
       webinarId,
       userId,
+      adminId,
       speakerRequestPermission: WebinarSpeakerRequestPermission.REJECTED,
       participantPermission: WebinarParticipantSpeakingPermission.REJECTED,
       successMessage: 'Speaker permission rejected successfully.',
@@ -290,25 +546,6 @@ export class WebinarsService {
     return {
       message: 'Webinar deleted successfully.',
       webinarId: id,
-    };
-  }
-
-  private async updateWebinarStatus(
-    id: string,
-    status: WebinarStatus,
-    adminId: string,
-    successMessage: string,
-  ) {
-    const webinar = await this.findWebinarEntityById(id);
-
-    webinar.status = status;
-    webinar.updatedByAdminId = adminId;
-
-    await this.webinarRepository.save(webinar);
-
-    return {
-      message: successMessage,
-      webinar: await this.buildWebinarResponse(webinar.id),
     };
   }
 
@@ -348,6 +585,7 @@ export class WebinarsService {
   private async updateSpeakerRequestPermission(params: {
     webinarId: string;
     userId: string;
+    adminId: string;
     speakerRequestPermission: WebinarSpeakerRequestPermission;
     participantPermission: WebinarParticipantSpeakingPermission;
     successMessage: string;
@@ -366,6 +604,8 @@ export class WebinarsService {
     }
 
     speakerRequest.speakingPermission = params.speakerRequestPermission;
+    speakerRequest.respondedByAdminId = params.adminId;
+    speakerRequest.respondedAt = new Date();
     await this.webinarSpeakerRequestRepository.save(speakerRequest);
 
     await this.upsertParticipantSpeakingPermission(
@@ -374,13 +614,56 @@ export class WebinarsService {
       params.participantPermission,
     );
 
+    const participantResponse = await this.findParticipantResponse(
+      params.webinarId,
+      params.userId,
+    );
+
+    if (
+      params.speakerRequestPermission === WebinarSpeakerRequestPermission.GRANTED
+    ) {
+      this.webinarGateway.emitSpeakerRequestApproved(params.webinarId, {
+        participant: participantResponse,
+      });
+    } else {
+      this.webinarGateway.emitSpeakerRequestRejected(params.webinarId, {
+        participant: participantResponse,
+      });
+    }
+
     return {
       message: params.successMessage,
-      participant: await this.findParticipantResponse(
-        params.webinarId,
-        params.userId,
-      ),
+      participant: participantResponse,
     };
+  }
+
+  private async upsertJoinedParticipant(
+    webinarId: string,
+    userId: string,
+  ): Promise<WebinarParticipant> {
+    let participant = await this.webinarParticipantRepository.findOne({
+      where: {
+        webinarId,
+        userId,
+      },
+    });
+
+    if (!participant) {
+      participant = this.webinarParticipantRepository.create({
+        webinarId,
+        userId,
+        speakingPermission: WebinarParticipantSpeakingPermission.REJECTED,
+      });
+    }
+
+    if (!participant.agoraUid) {
+      participant.agoraUid = await this.getAvailableAgoraUid(webinarId, userId);
+    }
+
+    participant.joinedAt = new Date();
+    participant.leftAt = null;
+
+    return this.webinarParticipantRepository.save(participant);
   }
 
   private async upsertParticipantSpeakingPermission(
@@ -399,6 +682,9 @@ export class WebinarsService {
       participant = this.webinarParticipantRepository.create({
         webinarId,
         userId,
+        agoraUid: await this.getAvailableAgoraUid(webinarId, userId),
+        joinedAt: new Date(),
+        leftAt: null,
       });
     }
 
@@ -423,6 +709,9 @@ export class WebinarsService {
         'participantUser.id AS "userId"',
         'participantUser.role AS "role"',
         'profileFile.storageKey AS "profilePhotoStorageKey"',
+        'participant.agoraUid AS "agoraUid"',
+        'participant.joinedAt AS "joinedAt"',
+        'participant.leftAt AS "leftAt"',
         'participant.speakingPermission AS "speakingPermission"',
       ])
       .getRawOne<WebinarUserRaw>();
@@ -434,6 +723,33 @@ export class WebinarsService {
     return this.mapWebinarUserResponse(participant);
   }
 
+  private async findSpeakerRequestResponse(webinarId: string, userId: string) {
+    const speakerRequest = await this.webinarSpeakerRequestRepository
+      .createQueryBuilder('speakerRequest')
+      .innerJoin('speakerRequest.user', 'requestUser')
+      .leftJoin(
+        File,
+        'profileFile',
+        'profileFile.id = requestUser.profilePhotoFileId AND profileFile.uploadStatus = :uploadStatus',
+        { uploadStatus: FileUploadStatus.UPLOADED },
+      )
+      .where('speakerRequest.webinarId = :webinarId', { webinarId })
+      .andWhere('speakerRequest.userId = :userId', { userId })
+      .select([
+        'requestUser.id AS "userId"',
+        'requestUser.role AS "role"',
+        'profileFile.storageKey AS "profilePhotoStorageKey"',
+        'speakerRequest.speakingPermission AS "speakingPermission"',
+      ])
+      .getRawOne<WebinarUserRaw>();
+
+    if (!speakerRequest) {
+      throw new NotFoundException('Speaker request not found');
+    }
+
+    return this.mapWebinarUserResponse(speakerRequest);
+  }
+
   private async findWebinarEntityById(id: string): Promise<Webinar> {
     const webinar = await this.webinarRepository.findOne({
       where: {
@@ -443,6 +759,21 @@ export class WebinarsService {
 
     if (!webinar) {
       throw new NotFoundException('Webinar not found');
+    }
+
+    return webinar;
+  }
+
+  private async findLiveWebinarById(id: string): Promise<Webinar> {
+    const webinar = await this.findWebinarEntityById(id);
+
+    if (webinar.status !== WebinarStatus.LIVE) {
+      throw new BadRequestException('Webinar is not live.');
+    }
+
+    if (!webinar.agoraChannelName) {
+      webinar.agoraChannelName = this.getAgoraChannelName(webinar);
+      await this.webinarRepository.save(webinar);
     }
 
     return webinar;
@@ -478,6 +809,9 @@ export class WebinarsService {
       thumbnailImageUrl: webinar.thumbnailImageUrl,
       sendNotification: webinar.sendNotification,
       status: webinar.status,
+      agoraChannelName: webinar.agoraChannelName,
+      liveStartedAt: webinar.liveStartedAt,
+      liveEndedAt: webinar.liveEndedAt,
       audienceSettings: {
         isForAllUsers: courseIds.length === 0,
         courseIds,
@@ -572,7 +906,67 @@ export class WebinarsService {
         ? this.s3Service.createPublicUrl(webinarUser.profilePhotoStorageKey)
         : null,
       role: webinarUser.role,
+      agoraUid:
+        webinarUser.agoraUid === null || webinarUser.agoraUid === undefined
+          ? null
+          : Number(webinarUser.agoraUid),
+      joinedAt: webinarUser.joinedAt ?? null,
+      leftAt: webinarUser.leftAt ?? null,
       speakingPermission: webinarUser.speakingPermission,
     };
+  }
+
+  private buildAgoraTokenResponse(params: {
+    webinar: Webinar;
+    uid: number;
+    role: AgoraLiveRole;
+  }) {
+    return this.agoraTokenService.buildRtcToken({
+      channelName: this.getAgoraChannelName(params.webinar),
+      uid: params.uid,
+      role: params.role,
+    });
+  }
+
+  private getAgoraChannelName(webinar: Webinar): string {
+    return webinar.agoraChannelName ?? `webinar_${webinar.id}`;
+  }
+
+  private async getAvailableAgoraUid(
+    webinarId: string,
+    userId: string,
+  ): Promise<number> {
+    const baseUid = this.createAgoraUid(webinarId, userId);
+    let uid = baseUid;
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const existingParticipant = await this.webinarParticipantRepository.findOne({
+        where: {
+          webinarId,
+          agoraUid: uid,
+        },
+      });
+
+      if (!existingParticipant || existingParticipant.userId === userId) {
+        return uid;
+      }
+
+      uid = this.nextAgoraUid(baseUid, attempt + 1);
+    }
+
+    throw new BadRequestException('Could not generate a unique Agora uid.');
+  }
+
+  private createAgoraUid(webinarId: string, userId: string): number {
+    const hash = createHash('sha256')
+      .update(`${webinarId}:${userId}`)
+      .digest();
+    const value = hash.readUInt32BE(0);
+
+    return (value % 2147483646) + 1;
+  }
+
+  private nextAgoraUid(baseUid: number, attempt: number): number {
+    return ((baseUid + attempt) % 2147483646) + 1;
   }
 }

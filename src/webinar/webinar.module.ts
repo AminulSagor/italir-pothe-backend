@@ -10,6 +10,8 @@ import { WebinarAudienceCourse } from './entities/webinar-audience-course.entity
 import { WebinarParticipant } from './entities/webinar-participant.entity';
 import { WebinarSpeakerRequest } from './entities/webinar-speaker-request.entity';
 import { Webinar } from './entities/webinar.entity';
+import { WebinarGateway } from './gateways/webinar.gateway';
+import { AgoraTokenService } from './services/agora-token.service';
 import { WebinarsService } from './services/webinars.service';
 
 @Module({
@@ -25,7 +27,7 @@ import { WebinarsService } from './services/webinars.service';
     ]),
   ],
   controllers: [AdminWebinarsController, WebinarsController],
-  providers: [WebinarsService],
+  providers: [WebinarsService, AgoraTokenService, WebinarGateway],
   exports: [WebinarsService],
 })
 export class WebinarModule {}
