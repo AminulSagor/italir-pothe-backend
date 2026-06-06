@@ -7,6 +7,7 @@ import { User } from 'src/users/entities/user.entity';
 import { AdminWebinarsController } from './controllers/admin-webinars.controller';
 import { WebinarsController } from './controllers/webinars.controller';
 import { WebinarAudienceCourse } from './entities/webinar-audience-course.entity';
+import { WebinarChatMessage } from './entities/webinar-chat-message.entity';
 import { WebinarParticipant } from './entities/webinar-participant.entity';
 import { WebinarSpeakerRequest } from './entities/webinar-speaker-request.entity';
 import { Webinar } from './entities/webinar.entity';
@@ -20,6 +21,7 @@ import { WebinarsService } from './services/webinars.service';
     TypeOrmModule.forFeature([
       Webinar,
       WebinarAudienceCourse,
+      WebinarChatMessage,
       WebinarParticipant,
       WebinarSpeakerRequest,
       User,

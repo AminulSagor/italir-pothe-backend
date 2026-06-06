@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -13,7 +14,7 @@ import {
 
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
-import { PaginationQueryDto } from '../dto/webinar.dto';
+import { PaginationQueryDto, SendWebinarChatMessageDto } from '../dto/webinar.dto';
 import { WebinarsService } from '../services/webinars.service';
 
 @Controller('webinars')
@@ -29,6 +30,28 @@ export class WebinarsController {
   @Get('live')
   async getLiveWebinarsList(@Query() query: PaginationQueryDto) {
     return this.webinarsService.getLiveWebinarsList(query);
+  }
+
+  @Get(':id/chat-messages')
+  async getChatMessages(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.webinarsService.getChatMessages(id, query);
+  }
+
+  @Post(':id/chat-messages')
+  async sendChatMessage(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: SendWebinarChatMessageDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.webinarsService.sendChatMessage(
+      id,
+      this.getCurrentUserId(request),
+      request.user?.role,
+      dto,
+    );
   }
 
   @Get(':id/participants')

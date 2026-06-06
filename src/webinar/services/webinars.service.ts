@@ -13,9 +13,11 @@ import { UserRole } from 'src/users/entities/user.entity';
 import {
   CreateWebinarDto,
   PaginationQueryDto,
+  SendWebinarChatMessageDto,
   UpdateWebinarDto,
 } from '../dto/webinar.dto';
 import { WebinarAudienceCourse } from '../entities/webinar-audience-course.entity';
+import { WebinarChatMessage } from '../entities/webinar-chat-message.entity';
 import {
   WebinarParticipant,
   WebinarParticipantSpeakingPermission,
@@ -30,6 +32,7 @@ import { AgoraLiveRole, AgoraTokenService } from './agora-token.service';
 
 type WebinarUserRaw = {
   userId: string;
+  fullName: string;
   role: UserRole;
   profilePhotoStorageKey: string | null;
   agoraUid?: number | string | null;
@@ -37,7 +40,8 @@ type WebinarUserRaw = {
   leftAt?: Date | string | null;
   speakingPermission:
     | WebinarParticipantSpeakingPermission
-    | WebinarSpeakerRequestPermission;
+    | WebinarSpeakerRequestPermission
+    | null;
 };
 
 type PaginationMeta = {
@@ -45,6 +49,18 @@ type PaginationMeta = {
   limit: number;
   totalPages: number;
   totalItems: number;
+};
+
+type WebinarChatMessageRaw = {
+  id: string;
+  webinarId: string;
+  senderUserId: string;
+  senderFullName: string;
+  senderRole: UserRole;
+  senderProfilePhotoStorageKey: string | null;
+  message: string;
+  isHost: boolean;
+  createdAt: Date | string;
 };
 
 @Injectable()
@@ -61,6 +77,9 @@ export class WebinarsService {
 
     @InjectRepository(WebinarSpeakerRequest)
     private readonly webinarSpeakerRequestRepository: Repository<WebinarSpeakerRequest>,
+
+    @InjectRepository(WebinarChatMessage)
+    private readonly webinarChatMessageRepository: Repository<WebinarChatMessage>,
 
     private readonly s3Service: S3Service,
     private readonly agoraTokenService: AgoraTokenService,
@@ -190,6 +209,17 @@ export class WebinarsService {
     });
   }
 
+  async getScreenShareToken(webinarId: string, adminId: string) {
+    const webinar = await this.findLiveWebinarById(webinarId);
+    const uid = this.createAgoraUid(webinar.id, `${adminId}:screen-share`);
+
+    return this.buildAgoraTokenResponse({
+      webinar,
+      uid,
+      role: AgoraLiveRole.PUBLISHER,
+    });
+  }
+
   async joinWebinar(webinarId: string, userId: string) {
     const webinar = await this.findLiveWebinarById(webinarId);
     const participant = await this.upsertJoinedParticipant(webinar.id, userId);
@@ -261,7 +291,7 @@ export class WebinarsService {
       throw new NotFoundException('Participant not found');
     }
 
-    participant.speakingPermission = WebinarParticipantSpeakingPermission.REJECTED;
+    participant.speakingPermission = null;
     await this.webinarParticipantRepository.save(participant);
 
     const speakerRequest = await this.webinarSpeakerRequestRepository.findOne({
@@ -334,6 +364,9 @@ export class WebinarsService {
 
     await this.webinarSpeakerRequestRepository.save(speakerRequest);
 
+    participant.speakingPermission = WebinarParticipantSpeakingPermission.REQUESTED;
+    await this.webinarParticipantRepository.save(participant);
+
     const speakerRequestResponse = await this.findSpeakerRequestResponse(
       webinarId,
       userId,
@@ -399,10 +432,7 @@ export class WebinarsService {
         'profileFile.id = participantUser.profilePhotoFileId AND profileFile.uploadStatus = :uploadStatus',
         { uploadStatus: FileUploadStatus.UPLOADED },
       )
-      .where('participant.webinarId = :webinarId', { webinarId })
-      .andWhere('participant.speakingPermission IN (:...permissions)', {
-        permissions: Object.values(WebinarParticipantSpeakingPermission),
-      });
+      .where('participant.webinarId = :webinarId', { webinarId });
 
     const totalItems = await baseQuery.clone().getCount();
 
@@ -410,6 +440,7 @@ export class WebinarsService {
       .clone()
       .select([
         'participantUser.id AS "userId"',
+        'participantUser.fullName AS "fullName"',
         'participantUser.role AS "role"',
         'profileFile.storageKey AS "profilePhotoStorageKey"',
         'participant.agoraUid AS "agoraUid"',
@@ -457,6 +488,7 @@ export class WebinarsService {
       .clone()
       .select([
         'requestUser.id AS "userId"',
+        'requestUser.fullName AS "fullName"',
         'requestUser.role AS "role"',
         'profileFile.storageKey AS "profilePhotoStorageKey"',
         'speakerRequest.speakingPermission AS "speakingPermission"',
@@ -536,6 +568,92 @@ export class WebinarsService {
       participantPermission: WebinarParticipantSpeakingPermission.REJECTED,
       successMessage: 'Speaker permission rejected successfully.',
     });
+  }
+
+  async getChatMessages(webinarId: string, query: PaginationQueryDto) {
+    await this.findLiveWebinarById(webinarId);
+
+    const pagination = this.normalizePagination(query);
+    const baseQuery = this.webinarChatMessageRepository
+      .createQueryBuilder('chatMessage')
+      .innerJoin('chatMessage.sender', 'senderUser')
+      .leftJoin(
+        File,
+        'profileFile',
+        'profileFile.id = senderUser.profilePhotoFileId AND profileFile.uploadStatus = :uploadStatus',
+        { uploadStatus: FileUploadStatus.UPLOADED },
+      )
+      .where('chatMessage.webinarId = :webinarId', { webinarId });
+
+    const totalItems = await baseQuery.clone().getCount();
+
+    const chatMessages = await baseQuery
+      .clone()
+      .select([
+        'chatMessage.id AS "id"',
+        'chatMessage.webinarId AS "webinarId"',
+        'chatMessage.senderUserId AS "senderUserId"',
+        'senderUser.fullName AS "senderFullName"',
+        'senderUser.role AS "senderRole"',
+        'profileFile.storageKey AS "senderProfilePhotoStorageKey"',
+        'chatMessage.message AS "message"',
+        'chatMessage.isHost AS "isHost"',
+        'chatMessage.createdAt AS "createdAt"',
+      ])
+      .orderBy('chatMessage.createdAt', 'DESC')
+      .skip((pagination.page - 1) * pagination.limit)
+      .take(pagination.limit)
+      .getRawMany<WebinarChatMessageRaw>();
+
+    return {
+      webinarId,
+      chatMessages: chatMessages
+        .map((chatMessage) => this.mapChatMessageResponse(chatMessage))
+        .reverse(),
+      pagination: this.buildPaginationMeta(totalItems, pagination),
+    };
+  }
+
+  async sendChatMessage(
+    webinarId: string,
+    userId: string,
+    userRole: UserRole | string | undefined,
+    dto: SendWebinarChatMessageDto,
+  ) {
+    const webinar = await this.findLiveWebinarById(webinarId);
+    const isHost = userRole === UserRole.ADMIN && webinar.createdByAdminId === userId;
+
+    if (!isHost) {
+      const participant = await this.webinarParticipantRepository.findOne({
+        where: {
+          webinarId,
+          userId,
+        },
+      });
+
+      if (!participant || participant.leftAt) {
+        throw new BadRequestException('Please join the live webinar before chatting.');
+      }
+    }
+
+    const chatMessage = this.webinarChatMessageRepository.create({
+      webinarId,
+      senderUserId: userId,
+      message: dto.message.trim(),
+      isHost,
+    });
+
+    const savedChatMessage = await this.webinarChatMessageRepository.save(chatMessage);
+    const chatMessageResponse = await this.findChatMessageResponse(savedChatMessage.id);
+
+    this.webinarGateway.emitChatMessageCreated(webinarId, {
+      chatMessage: chatMessageResponse,
+    });
+
+    return {
+      message: 'Chat message sent successfully.',
+      chatMessage: chatMessageResponse,
+    };
   }
 
   async deleteWebinar(id: string) {
@@ -652,7 +770,7 @@ export class WebinarsService {
       participant = this.webinarParticipantRepository.create({
         webinarId,
         userId,
-        speakingPermission: WebinarParticipantSpeakingPermission.REJECTED,
+        speakingPermission: null,
       });
     }
 
@@ -707,6 +825,7 @@ export class WebinarsService {
       .andWhere('participant.userId = :userId', { userId })
       .select([
         'participantUser.id AS "userId"',
+        'participantUser.fullName AS "fullName"',
         'participantUser.role AS "role"',
         'profileFile.storageKey AS "profilePhotoStorageKey"',
         'participant.agoraUid AS "agoraUid"',
@@ -737,6 +856,7 @@ export class WebinarsService {
       .andWhere('speakerRequest.userId = :userId', { userId })
       .select([
         'requestUser.id AS "userId"',
+        'requestUser.fullName AS "fullName"',
         'requestUser.role AS "role"',
         'profileFile.storageKey AS "profilePhotoStorageKey"',
         'speakerRequest.speakingPermission AS "speakingPermission"',
@@ -748,6 +868,37 @@ export class WebinarsService {
     }
 
     return this.mapWebinarUserResponse(speakerRequest);
+  }
+
+  private async findChatMessageResponse(chatMessageId: string) {
+    const chatMessage = await this.webinarChatMessageRepository
+      .createQueryBuilder('chatMessage')
+      .innerJoin('chatMessage.sender', 'senderUser')
+      .leftJoin(
+        File,
+        'profileFile',
+        'profileFile.id = senderUser.profilePhotoFileId AND profileFile.uploadStatus = :uploadStatus',
+        { uploadStatus: FileUploadStatus.UPLOADED },
+      )
+      .where('chatMessage.id = :chatMessageId', { chatMessageId })
+      .select([
+        'chatMessage.id AS "id"',
+        'chatMessage.webinarId AS "webinarId"',
+        'chatMessage.senderUserId AS "senderUserId"',
+        'senderUser.fullName AS "senderFullName"',
+        'senderUser.role AS "senderRole"',
+        'profileFile.storageKey AS "senderProfilePhotoStorageKey"',
+        'chatMessage.message AS "message"',
+        'chatMessage.isHost AS "isHost"',
+        'chatMessage.createdAt AS "createdAt"',
+      ])
+      .getRawOne<WebinarChatMessageRaw>();
+
+    if (!chatMessage) {
+      throw new NotFoundException('Chat message not found');
+    }
+
+    return this.mapChatMessageResponse(chatMessage);
   }
 
   private async findWebinarEntityById(id: string): Promise<Webinar> {
@@ -899,9 +1050,26 @@ export class WebinarsService {
     };
   }
 
+  private mapChatMessageResponse(chatMessage: WebinarChatMessageRaw) {
+    return {
+      id: chatMessage.id,
+      webinarId: chatMessage.webinarId,
+      senderUserId: chatMessage.senderUserId,
+      senderFullName: chatMessage.senderFullName,
+      senderRole: chatMessage.senderRole,
+      senderProfilePhoto: chatMessage.senderProfilePhotoStorageKey
+        ? this.s3Service.createPublicUrl(chatMessage.senderProfilePhotoStorageKey)
+        : null,
+      message: chatMessage.message,
+      isHost: chatMessage.isHost,
+      createdAt: chatMessage.createdAt,
+    };
+  }
+
   private mapWebinarUserResponse(webinarUser: WebinarUserRaw) {
     return {
       userId: webinarUser.userId,
+      fullName: webinarUser.fullName,
       profilePhoto: webinarUser.profilePhotoStorageKey
         ? this.s3Service.createPublicUrl(webinarUser.profilePhotoStorageKey)
         : null,

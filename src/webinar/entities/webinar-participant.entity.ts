@@ -13,6 +13,7 @@ import { User } from 'src/users/entities/user.entity';
 import { Webinar } from './webinar.entity';
 
 export enum WebinarParticipantSpeakingPermission {
+  REQUESTED = 'requested',
   GRANTED = 'granted',
   REJECTED = 'rejected',
 }
@@ -41,12 +42,8 @@ export class WebinarParticipant {
   @Column({ type: 'timestamptz', nullable: true })
   leftAt: Date | null;
 
-  @Column({
-    type: 'varchar',
-    length: 30,
-    default: WebinarParticipantSpeakingPermission.REJECTED,
-  })
-  speakingPermission: WebinarParticipantSpeakingPermission;
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  speakingPermission: WebinarParticipantSpeakingPermission | null;
 
   @ManyToOne(() => Webinar, (webinar) => webinar.participants, {
     onDelete: 'CASCADE',

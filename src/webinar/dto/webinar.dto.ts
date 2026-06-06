@@ -162,3 +162,12 @@ export class UpdateWebinarDto {
   @IsIn(Object.values(WebinarStatus))
   status?: WebinarStatus;
 }
+
+
+export class SendWebinarChatMessageDto {
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(1000)
+  @Transform(trimString)
+  message: string;
+}

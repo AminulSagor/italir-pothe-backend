@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 
 import { WebinarAudienceCourse } from './webinar-audience-course.entity';
+import { WebinarChatMessage } from './webinar-chat-message.entity';
 import { WebinarParticipant } from './webinar-participant.entity';
 import { WebinarSpeakerRequest } from './webinar-speaker-request.entity';
 
@@ -66,6 +67,10 @@ export class Webinar {
     (audienceCourse) => audienceCourse.webinar,
   )
   audienceCourses: WebinarAudienceCourse[];
+
+
+  @OneToMany(() => WebinarChatMessage, (chatMessage) => chatMessage.webinar)
+  chatMessages: WebinarChatMessage[];
 
   @OneToMany(() => WebinarParticipant, (participant) => participant.webinar)
   participants: WebinarParticipant[];

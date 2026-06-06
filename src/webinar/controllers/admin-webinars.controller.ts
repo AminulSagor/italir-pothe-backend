@@ -121,6 +121,17 @@ export class AdminWebinarsController {
     );
   }
 
+  @Post(':id/screen-share-token')
+  async getScreenShareToken(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.webinarsService.getScreenShareToken(
+      id,
+      this.getCurrentAdminId(request),
+    );
+  }
+
   @Get(':id/speaker-requests')
   async getSpeakerRequest(
     @Param('id', new ParseUUIDPipe()) id: string,
