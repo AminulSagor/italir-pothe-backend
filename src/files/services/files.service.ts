@@ -60,6 +60,7 @@ export class FilesService {
 
     return {
       storageKey,
+      publicUrl: this.s3Service.createPublicUrl(storageKey),
       signedUploadUrl,
       method: 'PUT',
       headers: {
@@ -121,6 +122,7 @@ export class FilesService {
     return {
       message: 'File confirmed successfully.',
       file: savedFile,
+      publicUrl: this.s3Service.createPublicUrl(savedFile.storageKey),
       mediaAsset,
     };
   }
@@ -134,6 +136,7 @@ export class FilesService {
     return {
       fileId: file.id,
       storageKey: file.storageKey,
+      publicUrl: this.s3Service.createPublicUrl(file.storageKey),
       signedReadUrl,
       expiresInSeconds: this.s3Service.getReadUrlExpiresInSeconds(),
     };
@@ -246,6 +249,7 @@ export class FilesService {
       FilePurpose.QUIZ_IMAGE,
       FilePurpose.SURVIVAL_IMAGE,
       FilePurpose.PROFILE_AVATAR,
+      FilePurpose.WEBINAR_THUMBNAIL,
     ];
 
     const audioPurposes = [
