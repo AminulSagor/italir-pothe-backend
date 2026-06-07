@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { FilesModule } from './files/files.module';
 import { WebinarModule } from './webinar/webinar.module';
+import { CvBuilderModule } from './cv-builder/cv-builder.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { WebinarModule } from './webinar/webinar.module';
     AuthModule,
     FilesModule,
     WebinarModule,
+    CvBuilderModule,
   ],
   controllers: [AppController],
   providers: [AppService],

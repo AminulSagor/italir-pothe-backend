@@ -1,0 +1,415 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
+
+import { CreateCvDocumentDto } from '../dto/cv-document.dto';
+import {
+  CreateCvTemplateDto,
+  CvTemplateListQueryDto,
+  PaginationQueryDto,
+  UpdateCvTemplateDto,
+} from '../dto/cv-template.dto';
+import { CvDocument, CvDocumentStatus } from '../entities/cv-document.entity';
+import {
+  CvTemplate,
+  CvTemplatePageSize,
+  CvTemplateStatus,
+  CvTemplateStyleType,
+} from '../entities/cv-template.entity';
+
+type PaginationMeta = {
+  page: number;
+  limit: number;
+  totalPages: number;
+  totalItems: number;
+};
+
+@Injectable()
+export class CvBuilderService {
+  constructor(
+    @InjectRepository(CvTemplate)
+    private readonly cvTemplateRepository: Repository<CvTemplate>,
+
+    @InjectRepository(CvDocument)
+    private readonly cvDocumentRepository: Repository<CvDocument>,
+  ) {}
+
+  async createTemplate(dto: CreateCvTemplateDto, adminId: string) {
+    const template = this.cvTemplateRepository.create({
+      title: dto.title.trim(),
+      description: this.normalizeNullableString(dto.description),
+      styleType: dto.styleType ?? CvTemplateStyleType.ATS,
+      pageSize: dto.pageSize ?? CvTemplatePageSize.A4,
+      fontFamily: dto.fontFamily?.trim() || 'Inter',
+      primaryColor: dto.primaryColor ?? '#006B3F',
+      accentColor: dto.accentColor ?? '#E6F6F0',
+      isPremium: dto.isPremium ?? false,
+      status: dto.status ?? CvTemplateStatus.DRAFT,
+      previewImageUrl: this.normalizeNullableString(dto.previewImageUrl),
+      schema: this.normalizeSchema(dto.schema),
+      createdByAdminId: adminId,
+    });
+
+    const savedTemplate = await this.cvTemplateRepository.save(template);
+
+    return {
+      message: 'CV template created successfully.',
+      template: this.mapTemplateResponse(savedTemplate),
+    };
+  }
+
+  async updateTemplate(id: string, dto: UpdateCvTemplateDto) {
+    const template = await this.findTemplateEntityById(id);
+
+    if (dto.title !== undefined) template.title = dto.title.trim();
+    if (dto.description !== undefined) {
+      template.description = this.normalizeNullableString(dto.description);
+    }
+    if (dto.styleType !== undefined) template.styleType = dto.styleType;
+    if (dto.pageSize !== undefined) template.pageSize = dto.pageSize;
+    if (dto.fontFamily !== undefined) {
+      template.fontFamily = dto.fontFamily.trim() || 'Inter';
+    }
+    if (dto.primaryColor !== undefined) template.primaryColor = dto.primaryColor;
+    if (dto.accentColor !== undefined) template.accentColor = dto.accentColor;
+    if (dto.isPremium !== undefined) template.isPremium = dto.isPremium;
+    if (dto.status !== undefined) template.status = dto.status;
+    if (dto.previewImageUrl !== undefined) {
+      template.previewImageUrl = this.normalizeNullableString(
+        dto.previewImageUrl,
+      );
+    }
+    if (dto.schema !== undefined) template.schema = this.normalizeSchema(dto.schema);
+
+    const savedTemplate = await this.cvTemplateRepository.save(template);
+
+    return {
+      message: 'CV template updated successfully.',
+      template: this.mapTemplateResponse(savedTemplate),
+    };
+  }
+
+  async deleteTemplate(id: string) {
+    const template = await this.findTemplateEntityById(id);
+    await this.cvTemplateRepository.remove(template);
+
+    return {
+      message: 'CV template deleted successfully.',
+      templateId: id,
+    };
+  }
+
+  async getAdminTemplates(query: CvTemplateListQueryDto) {
+    return this.getTemplatesList(query, false);
+  }
+
+  async getActiveTemplates(query: CvTemplateListQueryDto) {
+    return this.getTemplatesList(query, true);
+  }
+
+  async getTemplateById(id: string, activeOnly = false) {
+    const template = await this.cvTemplateRepository.findOne({
+      where: activeOnly
+        ? {
+            id,
+            status: CvTemplateStatus.ACTIVE,
+          }
+        : { id },
+    });
+
+    if (!template) throw new NotFoundException('CV template not found');
+
+    return {
+      template: this.mapTemplateResponse(template),
+    };
+  }
+
+  async createDocument(dto: CreateCvDocumentDto, userId: string) {
+    const template = await this.cvTemplateRepository.findOne({
+      where: {
+        id: dto.templateId,
+        status: CvTemplateStatus.ACTIVE,
+      },
+    });
+
+    if (!template) throw new NotFoundException('Active CV template not found');
+
+    const document = this.cvDocumentRepository.create({
+      userId,
+      templateId: dto.templateId,
+      title: dto.title.trim(),
+      themeColor: dto.themeColor ?? template.primaryColor,
+      formData: dto.formData,
+      status: CvDocumentStatus.READY,
+    });
+
+    const savedDocument = await this.cvDocumentRepository.save(document);
+
+    return {
+      message: 'CV saved successfully.',
+      document: this.mapDocumentResponse(savedDocument, template),
+    };
+  }
+
+  async getMyDocuments(userId: string, query: PaginationQueryDto) {
+    const pagination = this.normalizePagination(query);
+
+    const [documents, totalItems] = await this.cvDocumentRepository.findAndCount({
+      where: {
+        userId,
+      },
+      relations: ['template'],
+      order: {
+        updatedAt: 'DESC',
+      },
+      skip: (pagination.page - 1) * pagination.limit,
+      take: pagination.limit,
+    });
+
+    return {
+      documents: documents.map((document) =>
+        this.mapDocumentResponse(document, document.template),
+      ),
+      pagination: this.buildPaginationMeta(totalItems, pagination),
+    };
+  }
+
+  private async getTemplatesList(
+    query: CvTemplateListQueryDto,
+    activeOnly: boolean,
+  ) {
+    const pagination = this.normalizePagination(query);
+    const where: FindOptionsWhere<CvTemplate> = {};
+
+    if (activeOnly) where.status = CvTemplateStatus.ACTIVE;
+    if (query.styleType && query.styleType !== 'all') {
+      where.styleType = query.styleType as CvTemplateStyleType;
+    }
+
+    const [templates, totalItems] = await this.cvTemplateRepository.findAndCount({
+      where,
+      order: {
+        createdAt: 'DESC',
+      },
+      skip: (pagination.page - 1) * pagination.limit,
+      take: pagination.limit,
+    });
+
+    return {
+      templates: templates.map((template) => this.mapTemplateResponse(template)),
+      pagination: this.buildPaginationMeta(totalItems, pagination),
+    };
+  }
+
+  private async findTemplateEntityById(id: string): Promise<CvTemplate> {
+    const template = await this.cvTemplateRepository.findOne({ where: { id } });
+
+    if (!template) throw new NotFoundException('CV template not found');
+
+    return template;
+  }
+
+  private mapTemplateResponse(template: CvTemplate) {
+    return {
+      id: template.id,
+      title: template.title,
+      description: template.description,
+      styleType: template.styleType,
+      pageSize: template.pageSize,
+      fontFamily: template.fontFamily,
+      primaryColor: template.primaryColor,
+      accentColor: template.accentColor,
+      isPremium: template.isPremium,
+      status: template.status,
+      previewImageUrl: template.previewImageUrl,
+      schema: template.schema,
+      createdByAdminId: template.createdByAdminId,
+      createdAt: template.createdAt,
+      updatedAt: template.updatedAt,
+    };
+  }
+
+  private mapDocumentResponse(document: CvDocument, template?: CvTemplate | null) {
+    return {
+      id: document.id,
+      templateId: document.templateId,
+      templateTitle: template?.title ?? null,
+      title: document.title,
+      themeColor: document.themeColor,
+      formData: document.formData,
+      status: document.status,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+    };
+  }
+
+  private normalizeNullableString(value?: string | null): string | null {
+    const normalizedValue = value?.trim();
+    return normalizedValue && normalizedValue.length > 0 ? normalizedValue : null;
+  }
+
+  private normalizeSchema(schema?: Record<string, unknown>) {
+    return schema && Object.keys(schema).length > 0
+      ? schema
+      : this.getDefaultTemplateSchema();
+  }
+
+  private normalizePagination(query: PaginationQueryDto) {
+    return {
+      page: query.page ?? 1,
+      limit: query.limit ?? 10,
+    };
+  }
+
+  private buildPaginationMeta(
+    totalItems: number,
+    pagination: { page: number; limit: number },
+  ): PaginationMeta {
+    return {
+      page: pagination.page,
+      limit: pagination.limit,
+      totalPages: Math.ceil(totalItems / pagination.limit),
+      totalItems,
+    };
+  }
+
+  private getDefaultTemplateSchema() {
+    return {
+      sections: [
+        {
+          key: 'contact',
+          title: 'Personal Details',
+          required: true,
+          fields: [
+            { key: 'fullName', label: 'Full name', type: 'text', required: true },
+            { key: 'professionalTitle', label: 'Professional title', type: 'text', required: true },
+            { key: 'email', label: 'Email', type: 'email', required: true },
+            { key: 'phone', label: 'Phone', type: 'phone', required: true },
+            { key: 'location', label: 'Location', type: 'text', required: true },
+          ],
+        },
+        {
+          key: 'summary',
+          title: 'Summary',
+          required: true,
+          fields: [
+            { key: 'summary', label: 'Summary', type: 'textarea', required: true },
+          ],
+        },
+        {
+          key: 'experience',
+          title: 'Professional Experience',
+          required: true,
+          fields: [
+            { key: 'experience', label: 'Experience', type: 'list', required: true },
+          ],
+        },
+        {
+          key: 'education',
+          title: 'Education',
+          required: true,
+          fields: [
+            { key: 'education', label: 'Education', type: 'list', required: true },
+          ],
+        },
+        {
+          key: 'skills',
+          title: 'Skills',
+          required: false,
+          fields: [
+            { key: 'skills', label: 'Skills', type: 'list', required: false },
+          ],
+        },
+      ],
+      colorOptions: ['#006B3F', '#183847', '#646C7A', '#0B4A7D', '#7B4A2F'],
+      layout: {
+        version: 1,
+        page: {
+          size: 'a4',
+          width: 794,
+          height: 1123,
+          unit: 'px',
+          margin: 40,
+          backgroundColor: '#FFFFFF',
+        },
+        elements: [
+          {
+            id: 'sidebar',
+            type: 'rectangle',
+            fieldKey: 'custom',
+            label: 'Left Column Background',
+            placeholder: '',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 1123,
+            zIndex: 1,
+            style: { backgroundColor: '#183847', borderRadius: 0 },
+          },
+          {
+            id: 'name',
+            type: 'text',
+            fieldKey: 'fullName',
+            label: 'Full Name',
+            placeholder: 'Your Name',
+            x: 290,
+            y: 70,
+            width: 360,
+            height: 44,
+            zIndex: 3,
+            style: {
+              fontFamily: 'Inter',
+              fontSize: 28,
+              fontWeight: 800,
+              color: '#183847',
+            },
+          },
+          {
+            id: 'title',
+            type: 'text',
+            fieldKey: 'professionalTitle',
+            label: 'Professional Title',
+            placeholder: 'Professional Title',
+            x: 290,
+            y: 116,
+            width: 360,
+            height: 30,
+            zIndex: 3,
+            style: { fontFamily: 'Inter', fontSize: 16, color: '#4B5563' },
+          },
+          {
+            id: 'contact',
+            type: 'section',
+            fieldKey: 'email',
+            label: 'Contact',
+            placeholder: 'Email • Phone • Location',
+            x: 36,
+            y: 240,
+            width: 180,
+            height: 150,
+            zIndex: 3,
+            style: { fontFamily: 'Inter', fontSize: 12, color: '#FFFFFF' },
+          },
+          {
+            id: 'experience',
+            type: 'section',
+            fieldKey: 'experience',
+            label: 'Work Experience',
+            placeholder: 'Professional Experience',
+            x: 290,
+            y: 190,
+            width: 420,
+            height: 290,
+            zIndex: 3,
+            style: {
+              fontFamily: 'Inter',
+              fontSize: 13,
+              color: '#111827',
+              backgroundColor: '#F3F4F6',
+            },
+          },
+        ],
+      },
+    };
+  }
+}
