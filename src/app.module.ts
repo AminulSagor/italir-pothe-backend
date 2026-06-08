@@ -13,6 +13,7 @@ import { LessonsModule } from './module-2/lessons/lessons.module';
 import { QuizzesModule } from './module-2/quizzes/quizzes.module';
 import { FinalExamModule } from './module-2/final-exam/final-exam.module';
 import { CertificatesModule } from './module-2/certificates/certificates.module';
+import { WebinarModule } from './webinar/webinar.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { CertificatesModule } from './module-2/certificates/certificates.module'
     QuizzesModule,
     FinalExamModule,
     CertificatesModule,
+    WebinarModule,
   ],
   controllers: [AppController],
   providers: [AppService],

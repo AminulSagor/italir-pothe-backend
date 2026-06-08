@@ -20,6 +20,8 @@ import { FilePurpose } from '../entities/file.entity';
 export class S3Service {
   private readonly s3Client: S3Client;
   private readonly bucketName: string;
+  private readonly region: string;
+  private readonly publicBaseUrl?: string;
   private readonly uploadUrlExpiresInSeconds = 15 * 60;
   private readonly readUrlExpiresInSeconds = 15 * 60;
 
@@ -36,6 +38,10 @@ export class S3Service {
     }
 
     this.bucketName = bucketName;
+    this.region = region;
+    this.publicBaseUrl = this.configService.get<string>(
+      'AWS_S3_PUBLIC_BASE_URL',
+    );
 
     const accessKeyId =
       this.configService.get<string>('AWS_ACCESS_KEY_ID') ??
@@ -81,16 +87,13 @@ export class S3Service {
     });
   }
 
-  // async createSignedReadUrl(storageKey: string): Promise<string> {
-  //   const command = new GetObjectCommand({
-  //     Bucket: this.bucketName,
-  //     Key: storageKey,
-  //   });
+createPublicUrl(storageKey: string): string {
+    if (this.publicBaseUrl) {
+      return `${this.publicBaseUrl.replace(/\/$/, '')}/${storageKey}`;
+    }
 
-  //   return getSignedUrl(this.s3Client, command, {
-  //     expiresIn: this.readUrlExpiresInSeconds,
-  //   });
-  // }
+    return `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${storageKey}`;
+  }
 
   async createSignedReadUrl(params: {
     storageKey: string;
