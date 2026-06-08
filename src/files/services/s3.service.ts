@@ -81,10 +81,31 @@ export class S3Service {
     });
   }
 
-  async createSignedReadUrl(storageKey: string): Promise<string> {
+  // async createSignedReadUrl(storageKey: string): Promise<string> {
+  //   const command = new GetObjectCommand({
+  //     Bucket: this.bucketName,
+  //     Key: storageKey,
+  //   });
+
+  //   return getSignedUrl(this.s3Client, command, {
+  //     expiresIn: this.readUrlExpiresInSeconds,
+  //   });
+  // }
+
+  async createSignedReadUrl(params: {
+    storageKey: string;
+    mimeType: string;
+    originalName: string;
+    dispositionType?: 'inline' | 'attachment';
+  }): Promise<string> {
+    const safeFileName = this.sanitizeFileName(params.originalName);
+    const dispositionType = params.dispositionType ?? 'inline';
+
     const command = new GetObjectCommand({
       Bucket: this.bucketName,
-      Key: storageKey,
+      Key: params.storageKey,
+      ResponseContentType: params.mimeType,
+      ResponseContentDisposition: `${dispositionType}; filename="${safeFileName}"`,
     });
 
     return getSignedUrl(this.s3Client, command, {
@@ -105,6 +126,13 @@ export class S3Service {
         'Uploaded file was not found in S3. Please upload the file before confirming.',
       );
     }
+  }
+
+  private sanitizeFileName(fileName: string): string {
+    return fileName
+      .replace(/["\\]/g, '')
+      .replace(/[\r\n]/g, '')
+      .trim();
   }
 
   getUploadUrlExpiresInSeconds(): number {

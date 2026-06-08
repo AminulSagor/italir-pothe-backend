@@ -127,9 +127,12 @@ export class FilesService {
 
   async createSignedReadUrl(fileId: string) {
     const file = await this.findActiveFileById(fileId);
-    const signedReadUrl = await this.s3Service.createSignedReadUrl(
-      file.storageKey,
-    );
+    const signedReadUrl = await this.s3Service.createSignedReadUrl({
+      storageKey: file.storageKey,
+      mimeType: file.mimeType,
+      originalName: file.originalName,
+      dispositionType: 'inline',
+    });
 
     return {
       fileId: file.id,
@@ -261,6 +264,7 @@ export class FilesService {
     ];
 
     const pdfPurposes = [
+      FilePurpose.LESSON_PDF,
       FilePurpose.CERTIFICATE_PDF,
       FilePurpose.CAF_CHECKLIST_PDF,
     ];

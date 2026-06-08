@@ -7,6 +7,12 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { FilesModule } from './files/files.module';
+import { CoursesModule } from './module-2/courses/courses.module';
+import { SyllabusModule } from './module-2/syllabus/syllabus.module';
+import { LessonsModule } from './module-2/lessons/lessons.module';
+import { QuizzesModule } from './module-2/quizzes/quizzes.module';
+import { FinalExamModule } from './module-2/final-exam/final-exam.module';
+import { CertificatesModule } from './module-2/certificates/certificates.module';
 
 @Module({
   imports: [
@@ -34,6 +40,12 @@ import { FilesModule } from './files/files.module';
     UsersModule,
     AuthModule,
     FilesModule,
+    CoursesModule,
+    SyllabusModule,
+    LessonsModule,
+    QuizzesModule,
+    FinalExamModule,
+    CertificatesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -12,6 +12,7 @@ export enum FilePurpose {
   LESSON_VIDEO = 'lesson_video',
   LESSON_AUDIO = 'lesson_audio',
   LESSON_IMAGE = 'lesson_image',
+  LESSON_PDF = 'lesson_pdf',
   QUIZ_AUDIO = 'quiz_audio',
   QUIZ_IMAGE = 'quiz_image',
   EXAM_SPEAKING_AUDIO = 'exam_speaking_audio',
