@@ -7,6 +7,12 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { FilesModule } from './files/files.module';
+import { CoursesModule } from './module-2/courses/courses.module';
+import { SyllabusModule } from './module-2/syllabus/syllabus.module';
+import { LessonsModule } from './module-2/lessons/lessons.module';
+import { QuizzesModule } from './module-2/quizzes/quizzes.module';
+import { FinalExamModule } from './module-2/final-exam/final-exam.module';
+import { CertificatesModule } from './module-2/certificates/certificates.module';
 import { WebinarModule } from './webinar/webinar.module';
 
 @Module({
@@ -35,6 +41,12 @@ import { WebinarModule } from './webinar/webinar.module';
     UsersModule,
     AuthModule,
     FilesModule,
+    CoursesModule,
+    SyllabusModule,
+    LessonsModule,
+    QuizzesModule,
+    FinalExamModule,
+    CertificatesModule,
     WebinarModule,
   ],
   controllers: [AppController],
