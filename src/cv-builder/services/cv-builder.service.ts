@@ -291,6 +291,9 @@ export class CvBuilderService {
         pageBreakStrategy: 'section_boundary',
         overflowBehavior: 'move_to_next_page',
         sectionGap: 16,
+        collapseEmptySections: true,
+        reflowAfterCollapse: true,
+        growDynamicSections: true,
       },
       elements: [
         {
@@ -323,6 +326,8 @@ export class CvBuilderService {
             mode: 'dynamic',
             autoHeight: true,
             allowPageBreak: false,
+            collapseWhenEmpty: true,
+            reflowSiblings: true,
           },
           style: {
             fontFamily: 'Inter',
