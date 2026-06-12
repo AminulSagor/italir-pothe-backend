@@ -1,10 +1,3 @@
-import { Controller, Delete, Param, UseGuards, Req, Get, Query, BadRequestException } from '@nestjs/common';
-import { UsersService } from './users.service';
-import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { UserRole } from './entities/user.entity';
-import { PresenceService } from '../presence/presence.service';
 import {
   Body,
   Controller,
@@ -14,13 +7,17 @@ import {
   Patch,
   Post,
   Req,
-  UnauthorizedException,
   UseGuards,
+  BadRequestException,
+  UnauthorizedException,
+  Query,
 } from '@nestjs/common';
-
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { UsersService } from './users.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole, User } from './entities/user.entity';
+import { PresenceService } from '../presence/presence.service';
 import {
   ChangePasswordDto,
   RequestEmailChangeOtpDto,
@@ -31,8 +28,6 @@ import {
   VerifyEmailChangeOtpDto,
   VerifyPhoneChangeOtpDto,
 } from './dto/user-profile.dto';
-import { User, UserRole } from './entities/user.entity';
-import { UsersService } from './users.service';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 
 @Controller('users')
@@ -42,6 +37,7 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly presenceService: PresenceService,
   ) {}
+
   private sanitize(user: any) {
     return {
       id: user.id,
@@ -54,13 +50,8 @@ export class UsersController {
   }
 
   @Get('me')
-  async getMe(@Req() req: any) {
-    const baseUser = this.sanitize(req.user);
-    const presence = await this.presenceService.getUserPresence(req.user.id);
-    return {
-      ...baseUser,
-      presence,
-    };
+  async getMyProfile(@Req() request: AuthenticatedRequest) {
+    return this.usersService.getMyProfile(this.getCurrentUserId(request));
   }
 
   @Get('all')
@@ -75,10 +66,6 @@ export class UsersController {
     }
     const user = await this.usersService.findByEmail(email.toLowerCase());
     return user ? { found: true, user: this.sanitize(user) } : { found: false };
-  }
-  @Get('me')
-  async getMyProfile(@Req() request: AuthenticatedRequest) {
-    return this.usersService.getMyProfile(this.getCurrentUserId(request));
   }
 
   @Patch('me/name')

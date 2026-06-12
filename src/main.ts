@@ -13,7 +13,6 @@ async function bootstrap() {
     : ['http://localhost:8000'];
 
   app.enableCors({
-    origin: allowedOrigins,
     origin:
       !corsOrigin || corsOrigin === '*'
         ? true
