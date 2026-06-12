@@ -25,6 +25,9 @@ import {
 } from './dto/user-profile.dto';
 import { Otp, OtpPurpose } from './entities/otp.entity';
 import { User, UserRole } from './entities/user.entity';
+import { UserPresence } from '../chat/entities/user-presence.entity';
+import { PresenceStatus } from '../chat/enums/chat.enums';
+import { PresenceService } from '../presence/presence.service';
 import { FilesService } from 'src/files/services/files.service';
 import { FilePurpose } from 'src/files/entities/file.entity';
 
@@ -35,6 +38,32 @@ export class UsersService {
 
   constructor(
     @InjectRepository(User)
+    private userRepository: Repository<User>,
+    private presenceService: PresenceService,
+  ) {}
+
+  async findByEmail(email: string) {
+    return this.userRepository.findOne({ where: { email } });
+  }
+
+  async findAllUsersWithPresence() {
+    const users = await this.userRepository.find();
+    
+    return Promise.all(
+      users.map(async (user) => {
+        const presence = await this.presenceService.getUserPresence(user.id);
+        return {
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified,
+          isOnline: presence.isOnline,
+          lastSeenAt: presence.lastSeenAt,
+        };
+      }),
+    );
     private readonly userRepository: Repository<User>,
 
     @InjectRepository(Otp)

@@ -6,6 +6,9 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { PresenceModule } from './presence/presence.module';
+import { ChatModule } from './chat/chat.module';
+import { UserBlocksModule } from './user-blocks/user-blocks.module';
 import { FilesModule } from './files/files.module';
 import { CoursesModule } from './module-2/courses/courses.module';
 import { SyllabusModule } from './module-2/syllabus/syllabus.module';
@@ -40,6 +43,9 @@ import { WebinarModule } from './webinar/webinar.module';
 
     UsersModule,
     AuthModule,
+    PresenceModule,
+    ChatModule,
+    UserBlocksModule,
     FilesModule,
     CoursesModule,
     SyllabusModule,
