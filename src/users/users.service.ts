@@ -39,7 +39,13 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Otp)
+    private otpRepository: Repository<Otp>,
     private presenceService: PresenceService,
+    private smsService: SmsService,
+    private emailService: EmailService,
+    private filesService: FilesService,
+    private configService: ConfigService,
   ) {}
 
   async findByEmail(email: string) {
@@ -64,16 +70,7 @@ export class UsersService {
         };
       }),
     );
-    private readonly userRepository: Repository<User>,
-
-    @InjectRepository(Otp)
-    private readonly otpRepository: Repository<Otp>,
-
-    private readonly smsService: SmsService,
-    private readonly emailService: EmailService,
-    private readonly filesService: FilesService,
-    private readonly configService: ConfigService,
-  ) {}
+  }
 
   async getMyProfile(userId: string) {
     const user = await this.findUserById(userId);
