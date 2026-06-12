@@ -6,13 +6,41 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
+import { UserPresence } from '../chat/entities/user-presence.entity';
+import { PresenceStatus } from '../chat/enums/chat.enums';
+import { PresenceService } from '../presence/presence.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    private presenceService: PresenceService,
   ) {}
+
+  async findByEmail(email: string) {
+    return this.userRepository.findOne({ where: { email } });
+  }
+
+  async findAllUsersWithPresence() {
+    const users = await this.userRepository.find();
+    
+    return Promise.all(
+      users.map(async (user) => {
+        const presence = await this.presenceService.getUserPresence(user.id);
+        return {
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified,
+          isOnline: presence.isOnline,
+          lastSeenAt: presence.lastSeenAt,
+        };
+      }),
+    );
+  }
 
   async deleteUser(id: string) {
     const user = await this.userRepository.findOne({ where: { id } });
