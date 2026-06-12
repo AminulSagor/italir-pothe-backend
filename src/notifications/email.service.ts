@@ -16,11 +16,11 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {
     const accessKeyId =
       this.configService.get<string>('AWS_ACCESS_KEY_ID') ??
-      this.configService.get<string>('AWS_SES_ACCESS_KEY');
+      this.configService.get<string>('AWS_ACCESS_KEY_ID');
 
     const secretAccessKey =
       this.configService.get<string>('AWS_SECRET_ACCESS_KEY') ??
-      this.configService.get<string>('AWS_SES_SECRET_KEY');
+      this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
 
     this.sesClient = new SESClient({
       region:

@@ -9,6 +9,14 @@ import { UsersModule } from './users/users.module';
 import { PresenceModule } from './presence/presence.module';
 import { ChatModule } from './chat/chat.module';
 import { UserBlocksModule } from './user-blocks/user-blocks.module';
+import { FilesModule } from './files/files.module';
+import { CoursesModule } from './module-2/courses/courses.module';
+import { SyllabusModule } from './module-2/syllabus/syllabus.module';
+import { LessonsModule } from './module-2/lessons/lessons.module';
+import { QuizzesModule } from './module-2/quizzes/quizzes.module';
+import { FinalExamModule } from './module-2/final-exam/final-exam.module';
+import { CertificatesModule } from './module-2/certificates/certificates.module';
+import { WebinarModule } from './webinar/webinar.module';
 
 @Module({
   imports: [
@@ -38,6 +46,14 @@ import { UserBlocksModule } from './user-blocks/user-blocks.module';
     PresenceModule,
     ChatModule,
     UserBlocksModule,
+    FilesModule,
+    CoursesModule,
+    SyllabusModule,
+    LessonsModule,
+    QuizzesModule,
+    FinalExamModule,
+    CertificatesModule,
+    WebinarModule,
   ],
   controllers: [AppController],
   providers: [AppService],
