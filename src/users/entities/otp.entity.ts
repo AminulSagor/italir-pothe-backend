@@ -19,7 +19,7 @@ export class Otp {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 320 })
+  @Column({ type: 'varchar', length: 320, nullable: true })
   identifier: string;
 
   @Column({
@@ -29,10 +29,10 @@ export class Otp {
   })
   purpose: OtpPurpose;
 
-  @Column({ type: 'varchar', length: 255 })
+  @Column({ type: 'varchar', length: 255, nullable: true })
   code: string;
 
-  @Column({ type: 'timestamptz' })
+  @Column({ type: 'timestamptz', nullable: true })
   expiresAt: Date;
 
   @Column({ type: 'integer', default: 0 })

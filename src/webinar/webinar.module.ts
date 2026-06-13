@@ -30,6 +30,6 @@ import { WebinarsService } from './services/webinars.service';
   ],
   controllers: [AdminWebinarsController, WebinarsController],
   providers: [WebinarsService, AgoraTokenService, WebinarGateway],
-  exports: [WebinarsService],
+  exports: [WebinarsService, AgoraTokenService],
 })
 export class WebinarModule {}

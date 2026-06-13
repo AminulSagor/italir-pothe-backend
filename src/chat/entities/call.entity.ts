@@ -26,9 +26,9 @@ export enum CallType {
 }
 
 @Entity('calls')
-@Index(['directConversationId', 'createdAt'])
-@Index(['callerId', 'createdAt'])
-@Index(['recipientId', 'createdAt'])
+@Index(['directConversationId', 'initiatedAt'])
+@Index(['callerId', 'initiatedAt'])
+@Index(['recipientId', 'initiatedAt'])
 @Index(['status'])
 export class Call {
   @PrimaryGeneratedColumn('uuid')
