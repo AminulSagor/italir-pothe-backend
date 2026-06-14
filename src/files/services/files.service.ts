@@ -250,6 +250,7 @@ export class FilesService {
       FilePurpose.SURVIVAL_IMAGE,
       FilePurpose.PROFILE_AVATAR,
       FilePurpose.WEBINAR_THUMBNAIL,
+      FilePurpose.CV_PHOTO,
     ];
 
     const audioPurposes = [

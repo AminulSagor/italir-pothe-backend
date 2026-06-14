@@ -139,7 +139,7 @@ export class CvBuilderService {
       templateId: dto.templateId,
       title: dto.title.trim(),
       themeColor: dto.themeColor ?? template.primaryColor,
-      formData: dto.formData,
+      formData: this.normalizeDocumentFormData(template, dto.formData),
       status: CvDocumentStatus.READY,
     });
 
@@ -241,6 +241,96 @@ export class CvBuilderService {
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
     };
+  }
+
+  private normalizeDocumentFormData(
+    template: CvTemplate,
+    formData: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const schema = this.asRecord(template.schema);
+    const rawSections = schema && Array.isArray(schema.sections) ? schema.sections : [];
+    const normalizedData: Record<string, unknown> = {};
+
+    for (const rawSection of rawSections) {
+      const section = this.asRecord(rawSection);
+      if (!section) continue;
+
+      const sectionKey = this.toNonEmptyString(section.key);
+      if (!sectionKey) continue;
+
+      const rawSectionData = this.asRecord(formData[sectionKey]);
+      if (!rawSectionData) continue;
+
+      const fields = Array.isArray(section.fields) ? section.fields : [];
+      const sectionData: Record<string, unknown> = {};
+
+      for (const rawField of fields) {
+        const field = this.asRecord(rawField);
+        if (!field) continue;
+
+        const fieldKey = this.toNonEmptyString(field.key);
+        if (!fieldKey) continue;
+
+        const rawValue = rawSectionData[fieldKey];
+        const normalizedValue = this.normalizeFieldValue(
+          rawValue,
+          this.toNonEmptyString(field.type) ?? 'text',
+        );
+
+        if (normalizedValue !== undefined) {
+          sectionData[fieldKey] = normalizedValue;
+        }
+      }
+
+      if (Object.keys(sectionData).length > 0) {
+        normalizedData[sectionKey] = sectionData;
+      }
+    }
+
+    return normalizedData;
+  }
+
+  private normalizeFieldValue(value: unknown, fieldType: string): unknown {
+    if (value === null || value === undefined) return undefined;
+
+    if (typeof value === 'string') {
+      const trimmedValue = value.trim();
+      if (!trimmedValue) return undefined;
+
+      if (fieldType.toLowerCase() === 'list') {
+        return trimmedValue
+          .split('\n')
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      return trimmedValue;
+    }
+
+    if (Array.isArray(value)) {
+      const normalizedItems = value
+        .map((item) => (typeof item === 'string' ? item.trim() : item))
+        .filter((item) => item !== null && item !== undefined && item !== '');
+
+      return normalizedItems.length > 0 ? normalizedItems : undefined;
+    }
+
+    return value;
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+
+    return null;
+  }
+
+  private toNonEmptyString(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+
+    const trimmedValue = value.trim();
+    return trimmedValue.length > 0 ? trimmedValue : null;
   }
 
   private normalizeNullableString(value?: string | null): string | null {
@@ -364,6 +454,7 @@ export class CvBuilderService {
             { key: 'email', label: 'Email', type: 'email', required: false },
             { key: 'phone', label: 'Phone', type: 'phone', required: false },
             { key: 'location', label: 'Location', type: 'text', required: false },
+            { key: 'profilePhoto', label: 'Profile photo', type: 'photoUrl', required: false },
           ],
         },
         {

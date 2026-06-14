@@ -22,6 +22,7 @@ export enum FilePurpose {
   CAF_CHECKLIST_PDF = 'caf_checklist_pdf',
   PROFILE_AVATAR = 'profile_avatar',
   WEBINAR_THUMBNAIL = 'webinar_thumbnail',
+  CV_PHOTO = 'cv_photo',
 }
 
 export enum FileVisibility {
