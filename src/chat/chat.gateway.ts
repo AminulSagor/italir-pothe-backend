@@ -10,12 +10,14 @@ import { JwtService } from '@nestjs/jwt';
 import { Logger } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { UserBlocksService } from '../user-blocks/user-blocks.service';
+import { CallService } from './services/call.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { Conversation } from './entities/conversation.entity';
 import { DirectConversation } from './entities/direct-conversation.entity';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
+import { Call, CallStatus, CallType } from './entities/call.entity';
 import { PresenceService } from '../presence/presence.service';
 
 @WebSocketGateway({ namespace: 'chat', cors: true })
@@ -30,6 +32,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly jwtService: JwtService,
     private readonly chatService: ChatService,
+    private readonly callService: CallService,
     private readonly userBlocksService: UserBlocksService,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
@@ -39,6 +42,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly directConversationRepo: Repository<DirectConversation>,
     @InjectRepository(ConversationParticipant)
     private readonly participantRepo: Repository<ConversationParticipant>,
+    @InjectRepository(Call)
+    private readonly callRepo: Repository<Call>,
     private readonly presenceService: PresenceService,
   ) {}
 
@@ -234,5 +239,178 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return { ok: true, messageId: saved.id };
+  }
+
+  @SubscribeMessage('call:initiate')
+  async handleInitiateCall(
+    client: Socket,
+    payload: {
+      directConversationId: string;
+      recipientId: string;
+      callType: 'audio' | 'video';
+    },
+  ) {
+    const user: User = client.data.user;
+    if (!user) return { error: 'Unauthorized' };
+
+    try {
+      // Check if users are blocked
+      await this.userBlocksService.assertCanMessage(user.id, payload.recipientId);
+
+      const callType = payload.callType === 'audio' ? CallType.AUDIO : CallType.VIDEO;
+
+      const call = await this.callService.initiateCall({
+        directConversationId: payload.directConversationId,
+        callerId: user.id,
+        recipientId: payload.recipientId,
+        callType: callType,
+      });
+
+      // Generate token for caller
+      const agoraToken = this.callService.generateAgoraToken({
+        call,
+        userId: user.id,
+      });
+
+      // Notify recipient in their personal room
+      this.sendToUser(payload.recipientId, 'call:incoming', {
+        callId: call.id,
+        callerId: user.id,
+        callerName: user.fullName,
+        callType: payload.callType,
+        timestamp: new Date(),
+      });
+
+      // Send token to caller
+      client.emit('call:initiated', {
+        callId: call.id,
+        agoraToken,
+      });
+
+      this.logger.log(
+        `Call initiated from ${user.id} to ${payload.recipientId}: ${call.id}`,
+      );
+
+      return { ok: true, callId: call.id };
+    } catch (error) {
+      this.logger.error(`Failed to initiate call: ${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  @SubscribeMessage('call:answer')
+  async handleAnswerCall(client: Socket, payload: { callId: string }) {
+    const user: User = client.data.user;
+    if (!user) return { error: 'Unauthorized' };
+
+    try {
+      const call = await this.callService.answerCall(payload.callId, user.id);
+
+      // Generate token for recipient
+      const agoraToken = this.callService.generateAgoraToken({
+        call,
+        userId: user.id,
+      });
+
+      // Notify caller
+      this.sendToUser(call.callerId, 'call:answered', {
+        callId: call.id,
+        timestamp: new Date(),
+      });
+
+      // Send token to recipient
+      client.emit('call:agoraToken', agoraToken);
+
+      this.logger.log(`Call answered: ${payload.callId}`);
+
+      return { ok: true, agoraToken };
+    } catch (error) {
+      this.logger.error(`Failed to answer call: ${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  @SubscribeMessage('call:reject')
+  async handleRejectCall(client: Socket, payload: { callId: string }) {
+    const user: User = client.data.user;
+    if (!user) return { error: 'Unauthorized' };
+
+    try {
+      const call = await this.callService.rejectCall(payload.callId, user.id);
+
+      // Notify caller
+      this.sendToUser(call.callerId, 'call:rejected', {
+        callId: call.id,
+        timestamp: new Date(),
+      });
+
+      this.logger.log(`Call rejected: ${payload.callId}`);
+
+      return { ok: true };
+    } catch (error) {
+      this.logger.error(`Failed to reject call: ${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  @SubscribeMessage('call:end')
+  async handleEndCall(client: Socket, payload: { callId: string }) {
+    const user: User = client.data.user;
+    if (!user) return { error: 'Unauthorized' };
+
+    try {
+      const call = await this.callService.endCall(payload.callId, user.id);
+
+      const otherUserId = user.id === call.callerId ? call.recipientId : call.callerId;
+
+      // Notify the other user
+      this.sendToUser(otherUserId, 'call:ended', {
+        callId: call.id,
+        duration: call.durationSeconds,
+        timestamp: new Date(),
+      });
+
+      this.logger.log(`Call ended: ${payload.callId}, Duration: ${call.durationSeconds}s`);
+
+      return { ok: true, duration: call.durationSeconds };
+    } catch (error) {
+      this.logger.error(`Failed to end call: ${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  @SubscribeMessage('call:history')
+  async handleCallHistory(client: Socket, payload: { directConversationId: string }) {
+    const user: User = client.data.user;
+    if (!user) return { error: 'Unauthorized' };
+
+    try {
+      const history = await this.callService.getCallHistory(
+        payload.directConversationId,
+        50,
+      );
+
+      return { ok: true, calls: history };
+    } catch (error) {
+      this.logger.error(`Failed to fetch call history: ${error.message}`);
+      return { error: error.message };
+    }
+  }
+
+  @SubscribeMessage('call:active')
+  async handleGetActiveCall(client: Socket, payload: { directConversationId: string }) {
+    const user: User = client.data.user;
+    if (!user) return { error: 'Unauthorized' };
+
+    try {
+      const activeCall = await this.callService.getActiveCall(
+        payload.directConversationId,
+      );
+
+      return { ok: true, call: activeCall || null };
+    } catch (error) {
+      this.logger.error(`Failed to fetch active call: ${error.message}`);
+      return { error: error.message };
+    }
   }
 }

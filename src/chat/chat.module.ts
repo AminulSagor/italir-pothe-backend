@@ -5,7 +5,9 @@ import { JwtModule } from '@nestjs/jwt';
 
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
+import { CallController } from './controllers/call.controller';
 import { ChatGateway } from './chat.gateway';
+import { CallService } from './services/call.service';
 import { MessageDeliveryProcessor } from './message-delivery.processor';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
@@ -16,14 +18,17 @@ import { MessageDeliveryJob } from './entities/message-delivery-job.entity';
 import { MessageReceipt } from './entities/message-receipt.entity';
 import { UserDevice } from './entities/user-device.entity';
 import { UserPresence } from './entities/user-presence.entity';
+import { Call } from './entities/call.entity';
 import { User } from '../users/entities/user.entity';
 import { PresenceModule } from '../presence/presence.module';
 import { UserBlocksModule } from '../user-blocks/user-blocks.module';
+import { WebinarModule } from '../webinar/webinar.module';
 
 @Module({
   imports: [
     PresenceModule,
     UserBlocksModule,
+    WebinarModule,
     TypeOrmModule.forFeature([
       Conversation,
       ConversationParticipant,
@@ -34,6 +39,7 @@ import { UserBlocksModule } from '../user-blocks/user-blocks.module';
       MessageReceipt,
       UserDevice,
       UserPresence,
+      Call,
       User,
     ]),
     ConfigModule,
@@ -48,8 +54,8 @@ import { UserBlocksModule } from '../user-blocks/user-blocks.module';
       }),
     }),
   ],
-  controllers: [ChatController],
-  providers: [ChatService, ChatGateway, MessageDeliveryProcessor],
-  exports: [ChatService],
+  controllers: [ChatController, CallController],
+  providers: [ChatService, CallService, ChatGateway, MessageDeliveryProcessor],
+  exports: [ChatService, CallService],
 })
 export class ChatModule {}
