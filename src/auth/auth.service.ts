@@ -20,8 +20,8 @@ import {
   SignupDto,
   VerifyOtpDto,
 } from './dto/auth.dto';
-import { EmailService } from '../notifications/email.service';
-import { SmsService } from '../notifications/sms.service';
+import { EmailService } from '../common/services/email.service';
+import { SmsService } from '../common/services/sms.service';
 import { Otp, OtpPurpose } from '../users/entities/otp.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ConfigService } from '@nestjs/config';

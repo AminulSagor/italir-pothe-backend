@@ -81,6 +81,28 @@ export class QuizSessionsController {
     );
   }
 
+  @Get(':sessionId/review')
+  async getSessionReview(
+    @Param('sessionId') sessionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.quizSessionsService.getSessionReview(
+      sessionId,
+      this.getCurrentUser(request),
+    );
+  }
+
+  @Get(':sessionId/share-card')
+  async getSessionShareCard(
+    @Param('sessionId') sessionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.quizSessionsService.getSessionShareCard(
+      sessionId,
+      this.getCurrentUser(request),
+    );
+  }
+
   private getCurrentUser(request: AuthenticatedRequest) {
     const id = request.user?.id ?? request.user?.sub;
 

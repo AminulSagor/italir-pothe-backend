@@ -102,4 +102,35 @@ export interface QuizSessionResultResponse {
   scorePercentage: number;
   earnedXp: number;
   scoring: QuizScoringBreakdown;
+  lessonTitle?: string | null;
+  completedTitle?: string;
+  completedMessage?: string;
+  timeTakenSeconds?: number;
+  accuracyPercent?: number;
+
+  baseXp?: number;
+  bonusXp?: number;
+  boostMultiplier?: number;
+  boostXp?: number;
+  totalXpEarned?: number;
+
+  xpBoost?: {
+    isActive: boolean;
+    multiplier: number;
+    remainingSeconds: number | null;
+    expiresAt: Date | null;
+  };
+
+  streak?: {
+    currentDays: number;
+    longestDays: number;
+    lastActivityDate: string | null;
+    isUpdatedToday: boolean;
+  };
+
+  league?: {
+    previousRank: number | null;
+    currentRank: number | null;
+    movedUp: boolean;
+  };
 }

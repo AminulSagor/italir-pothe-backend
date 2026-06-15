@@ -260,17 +260,21 @@ export class FilesService {
       FilePurpose.QUIZ_AUDIO,
       FilePurpose.EXAM_SPEAKING_AUDIO,
       FilePurpose.SURVIVAL_AUDIO,
+      FilePurpose.SKILL_BUILDER_AUDIO,
     ];
 
     const videoPurposes = [
       FilePurpose.LESSON_VIDEO,
       FilePurpose.CAF_HERO_VIDEO,
+      FilePurpose.SKILL_BUILDER_VIDEO,
     ];
 
     const pdfPurposes = [
       FilePurpose.LESSON_PDF,
       FilePurpose.CERTIFICATE_PDF,
       FilePurpose.CAF_CHECKLIST_PDF,
+      FilePurpose.SURVIVAL_PDF,
+      FilePurpose.SKILL_BUILDER_PDF,
     ];
 
     if (imagePurposes.includes(filePurpose) && !mimeType.startsWith('image/')) {

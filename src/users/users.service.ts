@@ -10,8 +10,8 @@ import { randomInt } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 
-import { EmailService } from '../notifications/email.service';
-import { SmsService } from '../notifications/sms.service';
+import { EmailService } from '../common/services/email.service';
+import { SmsService } from '../common/services/sms.service';
 
 import {
   ChangePasswordDto,

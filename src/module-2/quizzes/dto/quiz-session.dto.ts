@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDateString,
   IsInt,
   IsOptional,
   IsString,
@@ -51,4 +52,8 @@ export class CompleteQuizSessionDto {
   @IsInt()
   @Min(0)
   totalTimeSeconds?: number;
+
+  @IsOptional()
+  @IsDateString()
+  clientActivityDate?: string;
 }

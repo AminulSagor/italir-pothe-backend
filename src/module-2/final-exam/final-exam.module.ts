@@ -22,6 +22,8 @@ import { ExamQuestionOption } from './entities/exam-question-option.entity';
 import { ExamQuestion } from './entities/exam-question.entity';
 import { ExamSectionRule } from './entities/exam-section-rule.entity';
 import { ExamSequenceItem } from './entities/exam-sequence-item.entity';
+import { DailyChallengesModule } from '../daily-challenges/daily-challenges.module';
+import { ProgressModule } from '../progress/progress.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { ExamSequenceItem } from './entities/exam-sequence-item.entity';
       ExamTemplate,
     ]),
     CertificatesModule,
+    DailyChallengesModule,
+    ProgressModule,
   ],
   controllers: [
     AdminExamsController,
