@@ -140,6 +140,7 @@ export class CvBuilderService {
       title: dto.title.trim(),
       themeColor: dto.themeColor ?? template.primaryColor,
       formData: this.normalizeDocumentFormData(template, dto.formData),
+      templateSnapshot: this.mapTemplateResponse(template),
       status: CvDocumentStatus.READY,
     });
 
@@ -230,17 +231,35 @@ export class CvBuilderService {
   }
 
   private mapDocumentResponse(document: CvDocument, template?: CvTemplate | null) {
+    const templateResponse = this.resolveDocumentTemplateResponse(
+      document,
+      template,
+    );
+
     return {
       id: document.id,
       templateId: document.templateId,
-      templateTitle: template?.title ?? null,
+      templateTitle:
+        this.toNonEmptyString(templateResponse?.['title']) ??
+        template?.title ??
+        null,
       title: document.title,
       themeColor: document.themeColor,
       formData: document.formData,
       status: document.status,
+      template: templateResponse,
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
     };
+  }
+
+  private resolveDocumentTemplateResponse(
+    document: CvDocument,
+    template?: CvTemplate | null,
+  ) {
+    const templateSnapshot = this.asRecord(document.templateSnapshot);
+    if (templateSnapshot) return templateSnapshot;
+    return template ? this.mapTemplateResponse(template) : null;
   }
 
   private normalizeDocumentFormData(

@@ -39,6 +39,9 @@ export class CvDocument {
   @Column({ type: 'jsonb', default: () => `'{}'::jsonb` })
   formData: Record<string, unknown>;
 
+  @Column({ type: 'jsonb', nullable: true })
+  templateSnapshot: Record<string, unknown> | null;
+
   @Index()
   @Column({ type: 'varchar', length: 30, default: CvDocumentStatus.DRAFT })
   status: CvDocumentStatus;
