@@ -111,6 +111,28 @@ export class ChatController {
     });
   }
 
+  @Get('peers')
+  async listPeers(@Req() req: any) {
+    const me = req.user;
+    const parts = await this.participantRepo.find({ where: { userId: me.id } });
+    const conversationIds = parts.map((p) => p.conversationId);
+    if (!conversationIds.length) return [];
+
+    const allParts = await this.participantRepo.find({
+      where: { conversationId: In(conversationIds) },
+      relations: ['user'],
+    });
+
+    const map = new Map<string, any>();
+    for (const p of allParts) {
+      if (p.userId === me.id) continue;
+      if (!p.user) continue;
+      map.set(p.userId, p.user);
+    }
+
+    return Array.from(map.values());
+  }
+
   @Get('conversations/:id/messages')
   async getMessages(
     @Req() req: any,
