@@ -46,6 +46,13 @@ export class UserDevice {
   @Column({ type: 'varchar', length: 512, nullable: true })
   fcmToken: string | null;
 
+  // For iOS CallKit/VoIP later
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  voipToken: string | null;
+
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
+
   @Column({ type: 'timestamptz', nullable: true })
   lastActiveAt: Date | null;
 

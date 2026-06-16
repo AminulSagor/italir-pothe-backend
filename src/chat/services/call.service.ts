@@ -7,10 +7,16 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+
 import { Call, CallStatus, CallType } from '../entities/call.entity';
 import { DirectConversation } from '../entities/direct-conversation.entity';
-import { AgoraTokenService } from '../../webinar/services/agora-token.service';
-import { AgoraLiveRole } from '../../webinar/services/agora-token.service';
+import { User } from '../../users/entities/user.entity';
+import {
+  AgoraTokenService,
+  AgoraLiveRole,
+} from '../../webinar/services/agora-token.service';
+import { UserDeviceService } from './user-device.service';
+import { FirebasePushService } from '../../notifications/firebase-push.service';
 
 @Injectable()
 export class CallService {
@@ -18,10 +24,17 @@ export class CallService {
 
   constructor(
     @InjectRepository(Call)
-    private callRepo: Repository<Call>,
+    private readonly callRepo: Repository<Call>,
+
     @InjectRepository(DirectConversation)
-    private directConversationRepo: Repository<DirectConversation>,
-    private agoraTokenService: AgoraTokenService,
+    private readonly directConversationRepo: Repository<DirectConversation>,
+
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
+
+    private readonly agoraTokenService: AgoraTokenService,
+    private readonly userDeviceService: UserDeviceService,
+    private readonly firebasePushService: FirebasePushService,
   ) {}
 
   async initiateCall(params: {
@@ -29,168 +42,213 @@ export class CallService {
     callerId: string;
     recipientId: string;
     callType: CallType;
-  }) {
-    try {
-      const directConversation = await this.directConversationRepo.findOne({
-        where: { id: params.directConversationId },
-        relations: ['userOne', 'userTwo'],
-      });
+  }): Promise<Call> {
+    const directConversation = await this.directConversationRepo.findOne({
+      where: { id: params.directConversationId },
+    });
 
-      if (!directConversation) {
-        throw new NotFoundException('Conversation not found');
-      }
+    if (!directConversation) {
+      throw new NotFoundException('Conversation not found');
+    }
 
-      // Check if a call is already active
-      const activeCall = await this.callRepo.findOne({
-        where: {
+    if (
+      ![directConversation.userOneId, directConversation.userTwoId].includes(
+        params.callerId,
+      ) ||
+      ![directConversation.userOneId, directConversation.userTwoId].includes(
+        params.recipientId,
+      )
+    ) {
+      throw new BadRequestException('Users are not part of this conversation');
+    }
+
+    const activeOrPendingCall = await this.callRepo.findOne({
+      where: [
+        {
           directConversationId: params.directConversationId,
           status: CallStatus.ACTIVE,
         },
-      });
-
-      if (activeCall) {
-        throw new ConflictException('An active call already exists');
-      }
-
-      // Check if there's a pending call
-      const pendingCall = await this.callRepo.findOne({
-        where: {
+        {
           directConversationId: params.directConversationId,
           status: CallStatus.PENDING,
         },
-      });
+      ],
+    });
 
-      if (pendingCall) {
-        throw new ConflictException('A pending call already exists');
-      }
-
-      const channelName = `call_${params.directConversationId}`;
-      const callerUid = this.generateUid();
-      const recipientUid = this.generateUid();
-
-      const call = this.callRepo.create({
-        directConversationId: params.directConversationId,
-        callerId: params.callerId,
-        recipientId: params.recipientId,
-        callType: params.callType,
-        agoraChannelName: channelName,
-        callerAgoraUid: callerUid,
-        recipientAgoraUid: recipientUid,
-        status: CallStatus.PENDING,
-      });
-
-      const savedCall = await this.callRepo.save(call);
-      this.logger.log(`Call initiated: ${savedCall.id}`);
-
-      return savedCall;
-    } catch (error) {
-      this.logger.error(`Failed to initiate call: ${error.message}`);
-      throw error;
+    if (activeOrPendingCall) {
+      throw new ConflictException('A call already exists in this conversation');
     }
+
+    const call = this.callRepo.create({
+      directConversationId: params.directConversationId,
+      callerId: params.callerId,
+      recipientId: params.recipientId,
+      callType: params.callType,
+      agoraChannelName: `call_${params.directConversationId}_${Date.now()}`,
+      callerAgoraUid: this.generateUid(),
+      recipientAgoraUid: this.generateUid(),
+      status: CallStatus.PENDING,
+    });
+
+    const savedCall = await this.callRepo.save(call);
+    this.logger.log(`Call initiated: ${savedCall.id}`);
+
+    return savedCall;
   }
 
-  async answerCall(callId: string, recipientId: string) {
-    try {
-      const call = await this.callRepo.findOne({ where: { id: callId } });
+  async initiateCallForRest(params: {
+    directConversationId: string;
+    callerId: string;
+    recipientId: string;
+    callType: CallType;
+  }) {
+    const call = await this.initiateCall(params);
 
-      if (!call) {
-        throw new NotFoundException('Call not found');
-      }
+    const agoraToken = this.generateAgoraToken({
+      call,
+      userId: params.callerId,
+    });
 
-      if (call.recipientId !== recipientId) {
-        throw new BadRequestException('Not authorized to answer this call');
-      }
+    await this.sendIncomingCallPush(call);
 
-      if (call.status !== CallStatus.PENDING) {
-        throw new BadRequestException(
-          `Cannot answer a call with status: ${call.status}`,
-        );
-      }
-
-      call.status = CallStatus.ACTIVE;
-      call.answeredAt = new Date();
-
-      const savedCall = await this.callRepo.save(call);
-      this.logger.log(`Call answered: ${callId}`);
-
-      return savedCall;
-    } catch (error) {
-      this.logger.error(`Failed to answer call: ${error.message}`);
-      throw error;
-    }
+    return {
+      call,
+      agoraToken,
+    };
   }
 
-  async rejectCall(callId: string, recipientId: string) {
-    try {
-      const call = await this.callRepo.findOne({ where: { id: callId } });
+  async answerCall(callId: string, recipientId: string): Promise<Call> {
+    const call = await this.callRepo.findOne({ where: { id: callId } });
 
-      if (!call) {
-        throw new NotFoundException('Call not found');
-      }
-
-      if (call.recipientId !== recipientId) {
-        throw new BadRequestException('Not authorized to reject this call');
-      }
-
-      if (call.status !== CallStatus.PENDING) {
-        throw new BadRequestException('Cannot reject a call that is not pending');
-      }
-
-      call.status = CallStatus.REJECTED;
-      call.endedAt = new Date();
-
-      const savedCall = await this.callRepo.save(call);
-      this.logger.log(`Call rejected: ${callId}`);
-
-      return savedCall;
-    } catch (error) {
-      this.logger.error(`Failed to reject call: ${error.message}`);
-      throw error;
+    if (!call) {
+      throw new NotFoundException('Call not found');
     }
-  }
 
-  async endCall(callId: string, userId: string) {
-    try {
-      const call = await this.callRepo.findOne({ where: { id: callId } });
+    if (call.recipientId !== recipientId) {
+      throw new BadRequestException('Not authorized to answer this call');
+    }
 
-      if (!call) {
-        throw new NotFoundException('Call not found');
-      }
-
-      if (call.callerId !== userId && call.recipientId !== userId) {
-        throw new BadRequestException('Not authorized to end this call');
-      }
-
-      if (call.status === CallStatus.ENDED) {
-        return call; // Already ended
-      }
-
-      call.status = CallStatus.ENDED;
-      call.endedAt = new Date();
-
-      // Calculate duration only if call was answered
-      if (call.answeredAt) {
-        const durationMs =
-          call.endedAt.getTime() - call.answeredAt.getTime();
-        call.durationSeconds = Math.floor(durationMs / 1000);
-      }
-
-      const savedCall = await this.callRepo.save(call);
-      this.logger.log(
-        `Call ended: ${callId}, Duration: ${savedCall.durationSeconds}s`,
+    if (call.status !== CallStatus.PENDING) {
+      throw new BadRequestException(
+        `Cannot answer a call with status: ${call.status}`,
       );
-
-      return savedCall;
-    } catch (error) {
-      this.logger.error(`Failed to end call: ${error.message}`);
-      throw error;
     }
+
+    call.status = CallStatus.ACTIVE;
+    call.answeredAt = new Date();
+
+    const savedCall = await this.callRepo.save(call);
+    this.logger.log(`Call answered: ${callId}`);
+
+    return savedCall;
+  }
+
+  async answerCallForRest(callId: string, recipientId: string) {
+    const call = await this.answerCall(callId, recipientId);
+
+    const agoraToken = this.generateAgoraToken({
+      call,
+      userId: recipientId,
+    });
+
+    await this.sendCallStatusPush(call.callerId, {
+      type: 'call_accepted',
+      callId: call.id,
+      directConversationId: call.directConversationId,
+    });
+
+    return {
+      call,
+      agoraToken,
+    };
+  }
+
+  async rejectCall(callId: string, recipientId: string): Promise<Call> {
+    const call = await this.callRepo.findOne({ where: { id: callId } });
+
+    if (!call) {
+      throw new NotFoundException('Call not found');
+    }
+
+    if (call.recipientId !== recipientId) {
+      throw new BadRequestException('Not authorized to reject this call');
+    }
+
+    if (call.status !== CallStatus.PENDING) {
+      throw new BadRequestException('Cannot reject a call that is not pending');
+    }
+
+    call.status = CallStatus.REJECTED;
+    call.endedAt = new Date();
+
+    const savedCall = await this.callRepo.save(call);
+    this.logger.log(`Call rejected: ${callId}`);
+
+    return savedCall;
+  }
+
+  async rejectCallForRest(callId: string, recipientId: string): Promise<Call> {
+    const call = await this.rejectCall(callId, recipientId);
+
+    await this.sendCallStatusPush(call.callerId, {
+      type: 'call_rejected',
+      callId: call.id,
+      directConversationId: call.directConversationId,
+    });
+
+    return call;
+  }
+
+  async endCall(callId: string, userId: string): Promise<Call> {
+    const call = await this.callRepo.findOne({ where: { id: callId } });
+
+    if (!call) {
+      throw new NotFoundException('Call not found');
+    }
+
+    if (call.callerId !== userId && call.recipientId !== userId) {
+      throw new BadRequestException('Not authorized to end this call');
+    }
+
+    if (call.status === CallStatus.ENDED) {
+      return call;
+    }
+
+    call.status = CallStatus.ENDED;
+    call.endedAt = new Date();
+
+    if (call.answeredAt) {
+      const durationMs = call.endedAt.getTime() - call.answeredAt.getTime();
+      call.durationSeconds = Math.floor(durationMs / 1000);
+    }
+
+    const savedCall = await this.callRepo.save(call);
+    this.logger.log(`Call ended: ${callId}`);
+
+    return savedCall;
+  }
+
+  async endCallForRest(callId: string, userId: string): Promise<Call> {
+    const call = await this.endCall(callId, userId);
+
+    const otherUserId =
+      userId === call.callerId ? call.recipientId : call.callerId;
+
+    await this.sendCallStatusPush(otherUserId, {
+      type: 'call_ended',
+      callId: call.id,
+      directConversationId: call.directConversationId,
+      durationSeconds: call.durationSeconds,
+    });
+
+    return call;
   }
 
   generateAgoraToken(params: { call: Call; userId: string }) {
     const { call, userId } = params;
 
     let uid: number;
+
     if (userId === call.callerId) {
       uid = call.callerAgoraUid;
     } else if (userId === call.recipientId) {
@@ -201,33 +259,28 @@ export class CallService {
 
     return this.agoraTokenService.buildRtcToken({
       channelName: call.agoraChannelName,
-      uid: uid,
+      uid,
       role: AgoraLiveRole.PUBLISHER,
     });
   }
 
-  async getCallHistory(directConversationId: string, limit: number = 50) {
-    try {
-      return await this.callRepo.find({
-        where: { directConversationId },
-        order: { initiatedAt: 'DESC' },
-        take: limit,
-        select: [
-          'id',
-          'callerId',
-          'recipientId',
-          'callType',
-          'status',
-          'initiatedAt',
-          'answeredAt',
-          'endedAt',
-          'durationSeconds',
-        ],
-      });
-    } catch (error) {
-      this.logger.error(`Failed to get call history: ${error.message}`);
-      throw error;
-    }
+  async getCallHistory(directConversationId: string, limit = 50) {
+    return this.callRepo.find({
+      where: { directConversationId },
+      order: { initiatedAt: 'DESC' },
+      take: limit,
+      select: [
+        'id',
+        'callerId',
+        'recipientId',
+        'callType',
+        'status',
+        'initiatedAt',
+        'answeredAt',
+        'endedAt',
+        'durationSeconds',
+      ],
+    });
   }
 
   async getActiveCall(directConversationId: string) {
@@ -240,28 +293,95 @@ export class CallService {
   }
 
   async markMissedCalls(recipientId: string) {
+    const missedCalls = await this.callRepo.find({
+      where: {
+        recipientId,
+        status: CallStatus.PENDING,
+      },
+    });
+
+    for (const call of missedCalls) {
+      const now = new Date();
+
+      if (now.getTime() - call.initiatedAt.getTime() > 2 * 60 * 1000) {
+        call.status = CallStatus.MISSED;
+        call.endedAt = now;
+        await this.callRepo.save(call);
+      }
+    }
+
+    return missedCalls.length;
+  }
+
+  private async sendIncomingCallPush(call: Call): Promise<void> {
     try {
-      const missedCalls = await this.callRepo.find({
-        where: {
-          recipientId,
-          status: CallStatus.PENDING,
-        },
+      const tokens = await this.getUserFcmTokens(call.recipientId);
+
+      const caller = await this.userRepo.findOne({
+        where: { id: call.callerId },
+        select: ['id', 'fullName', 'profilePhotoFileId'],
       });
 
-      for (const call of missedCalls) {
-        const now = new Date();
-        // Mark as missed if initiated more than 2 minutes ago
-        if (now.getTime() - call.initiatedAt.getTime() > 2 * 60 * 1000) {
-          call.status = CallStatus.MISSED;
-          call.endedAt = now;
-          await this.callRepo.save(call);
-        }
-      }
+      await this.firebasePushService.sendIncomingCallPush({
+        tokens,
+        callId: call.id,
+        directConversationId: call.directConversationId,
+        callerId: call.callerId,
+        callerName: caller?.fullName ?? 'Incoming call',
+        callerAvatarUrl: '',
+        callType: call.callType === CallType.AUDIO ? 'audio' : 'video',
+        agoraChannelName: call.agoraChannelName,
+      });
+    } catch (error: unknown) {
+      const message = this.getErrorMessage(error);
+      this.logger.error(`Failed to send incoming call push: ${message}`);
+    }
+  }
 
-      return missedCalls.length;
-    } catch (error) {
-      this.logger.error(`Failed to mark missed calls: ${error.message}`);
-      throw error;
+  private async sendCallStatusPush(
+    userId: string,
+    payload: {
+      type: 'call_accepted' | 'call_rejected' | 'call_ended' | 'missed_call';
+      callId: string;
+      directConversationId: string;
+      durationSeconds?: number;
+    },
+  ): Promise<void> {
+    try {
+      const tokens = await this.getUserFcmTokens(userId);
+
+      await this.firebasePushService.sendCallStatusPush({
+        tokens,
+        ...payload,
+      });
+    } catch (error: unknown) {
+      const message = this.getErrorMessage(error);
+      this.logger.error(`Failed to send call status push: ${message}`);
+    }
+  }
+
+  private async getUserFcmTokens(userId: string): Promise<string[]> {
+    const devices =
+      await this.userDeviceService.getActiveDevicesByUserId(userId);
+
+    return devices
+      .map((device) => device.fcmToken)
+      .filter((token): token is string => Boolean(token?.trim()));
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    if (typeof error === 'string') {
+      return error;
+    }
+
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'Unknown error';
     }
   }
 
