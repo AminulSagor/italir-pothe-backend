@@ -7,9 +7,11 @@ import {
   CreateCvTemplateDto,
   CvTemplateListQueryDto,
   PaginationQueryDto,
+  SaveCvDefaultLayoutDto,
   UpdateCvTemplateDto,
 } from '../dto/cv-template.dto';
 import { CvDocument, CvDocumentStatus } from '../entities/cv-document.entity';
+import { CvTemplateDefaultLayout } from '../entities/cv-template-default-layout.entity';
 import {
   CvTemplate,
   CvTemplatePageSize,
@@ -32,6 +34,9 @@ export class CvBuilderService {
 
     @InjectRepository(CvDocument)
     private readonly cvDocumentRepository: Repository<CvDocument>,
+
+    @InjectRepository(CvTemplateDefaultLayout)
+    private readonly cvTemplateDefaultLayoutRepository: Repository<CvTemplateDefaultLayout>,
   ) {}
 
   async createTemplate(dto: CreateCvTemplateDto, adminId: string) {
@@ -107,6 +112,46 @@ export class CvBuilderService {
     return this.getTemplatesList(query, true);
   }
 
+  async getDefaultLayout(styleType: CvTemplateStyleType) {
+    const defaultLayout = await this.cvTemplateDefaultLayoutRepository.findOne({
+      where: { styleType },
+    });
+
+    return {
+      layout: defaultLayout ? this.mapDefaultLayoutResponse(defaultLayout) : null,
+    };
+  }
+
+  async saveDefaultLayout(
+    styleType: CvTemplateStyleType,
+    dto: SaveCvDefaultLayoutDto,
+    adminId: string,
+  ) {
+    const existingLayout = await this.cvTemplateDefaultLayoutRepository.findOne({
+      where: { styleType },
+    });
+
+    const defaultLayout = existingLayout ??
+      this.cvTemplateDefaultLayoutRepository.create({
+        styleType,
+        updatedByAdminId: adminId,
+      });
+
+    defaultLayout.pageSize = dto.pageSize ?? defaultLayout.pageSize ?? CvTemplatePageSize.A4;
+    defaultLayout.fontFamily = dto.fontFamily?.trim() || defaultLayout.fontFamily || 'Inter';
+    defaultLayout.primaryColor = dto.primaryColor ?? defaultLayout.primaryColor ?? '#183847';
+    defaultLayout.accentColor = dto.accentColor ?? defaultLayout.accentColor ?? '#F3F4F6';
+    defaultLayout.schema = this.normalizeSchema(dto.schema);
+    defaultLayout.updatedByAdminId = adminId;
+
+    const savedLayout = await this.cvTemplateDefaultLayoutRepository.save(defaultLayout);
+
+    return {
+      message: 'CV default layout saved successfully.',
+      layout: this.mapDefaultLayoutResponse(savedLayout),
+    };
+  }
+
   async getTemplateById(id: string, activeOnly = false) {
     const template = await this.cvTemplateRepository.findOne({
       where: activeOnly
@@ -139,6 +184,7 @@ export class CvBuilderService {
       templateId: dto.templateId,
       title: dto.title.trim(),
       themeColor: dto.themeColor ?? template.primaryColor,
+      accentColor: dto.accentColor ?? template.accentColor,
       formData: this.normalizeDocumentFormData(template, dto.formData),
       templateSnapshot: this.mapTemplateResponse(template),
       status: CvDocumentStatus.READY,
@@ -230,6 +276,21 @@ export class CvBuilderService {
     };
   }
 
+  private mapDefaultLayoutResponse(defaultLayout: CvTemplateDefaultLayout) {
+    return {
+      id: defaultLayout.id,
+      styleType: defaultLayout.styleType,
+      pageSize: defaultLayout.pageSize,
+      fontFamily: defaultLayout.fontFamily,
+      primaryColor: defaultLayout.primaryColor,
+      accentColor: defaultLayout.accentColor,
+      schema: defaultLayout.schema,
+      updatedByAdminId: defaultLayout.updatedByAdminId,
+      createdAt: defaultLayout.createdAt,
+      updatedAt: defaultLayout.updatedAt,
+    };
+  }
+
   private mapDocumentResponse(document: CvDocument, template?: CvTemplate | null) {
     const templateResponse = this.resolveDocumentTemplateResponse(
       document,
@@ -245,6 +306,7 @@ export class CvBuilderService {
         null,
       title: document.title,
       themeColor: document.themeColor,
+      accentColor: document.accentColor,
       formData: document.formData,
       status: document.status,
       template: templateResponse,
@@ -327,6 +389,30 @@ export class CvBuilderService {
     }
 
     if (Array.isArray(value)) {
+      if (fieldType.toLowerCase() === 'dynamicitems' || fieldType.toLowerCase() === 'dynamic_items') {
+        const normalizedItems = value
+          .map((item) => this.asRecord(item))
+          .filter((item): item is Record<string, unknown> => Boolean(item))
+          .map((item) => {
+            const normalizedItem: Record<string, unknown> = {};
+            for (const [key, itemValue] of Object.entries(item)) {
+              const normalizedValue =
+                typeof itemValue === 'string' ? itemValue.trim() : itemValue;
+              if (
+                normalizedValue !== null &&
+                normalizedValue !== undefined &&
+                normalizedValue !== ''
+              ) {
+                normalizedItem[key] = normalizedValue;
+              }
+            }
+            return normalizedItem;
+          })
+          .filter((item) => Object.keys(item).length > 0);
+
+        return normalizedItems.length > 0 ? normalizedItems : undefined;
+      }
+
       const normalizedItems = value
         .map((item) => (typeof item === 'string' ? item.trim() : item))
         .filter((item) => item !== null && item !== undefined && item !== '');

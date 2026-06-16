@@ -4,9 +4,11 @@ import {
   Delete,
   Get,
   Param,
+  ParseEnumPipe,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UnauthorizedException,
@@ -21,8 +23,10 @@ import { UserRole } from 'src/users/entities/user.entity';
 import {
   CreateCvTemplateDto,
   CvTemplateListQueryDto,
+  SaveCvDefaultLayoutDto,
   UpdateCvTemplateDto,
 } from '../dto/cv-template.dto';
+import { CvTemplateStyleType } from '../entities/cv-template.entity';
 import { CvBuilderService } from '../services/cv-builder.service';
 
 @Controller('admin/cv-templates')
@@ -42,6 +46,29 @@ export class AdminCvTemplatesController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.cvBuilderService.createTemplate(
+      dto,
+      this.getCurrentAdminId(request),
+    );
+  }
+
+
+  @Get('default-layouts/:styleType')
+  async getDefaultLayout(
+    @Param('styleType', new ParseEnumPipe(CvTemplateStyleType))
+    styleType: CvTemplateStyleType,
+  ) {
+    return this.cvBuilderService.getDefaultLayout(styleType);
+  }
+
+  @Put('default-layouts/:styleType')
+  async saveDefaultLayout(
+    @Param('styleType', new ParseEnumPipe(CvTemplateStyleType))
+    styleType: CvTemplateStyleType,
+    @Body() dto: SaveCvDefaultLayoutDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.cvBuilderService.saveDefaultLayout(
+      styleType,
       dto,
       this.getCurrentAdminId(request),
     );

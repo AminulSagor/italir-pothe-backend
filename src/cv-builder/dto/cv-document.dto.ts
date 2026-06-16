@@ -27,6 +27,11 @@ export class CreateCvDocumentDto {
   @Transform(trimString)
   themeColor?: string;
 
+  @IsOptional()
+  @IsHexColor()
+  @Transform(trimString)
+  accentColor?: string;
+
   @IsObject()
   formData: Record<string, unknown>;
 }

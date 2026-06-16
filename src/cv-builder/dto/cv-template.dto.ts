@@ -177,3 +177,29 @@ export class UpdateCvTemplateDto {
   @IsObject()
   schema?: Record<string, unknown>;
 }
+
+export class SaveCvDefaultLayoutDto {
+  @IsOptional()
+  @IsIn(Object.values(CvTemplatePageSize))
+  pageSize?: CvTemplatePageSize;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  @Transform(trimString)
+  fontFamily?: string;
+
+  @IsOptional()
+  @IsHexColor()
+  @Transform(trimString)
+  primaryColor?: string;
+
+  @IsOptional()
+  @IsHexColor()
+  @Transform(trimString)
+  accentColor?: string;
+
+  @IsNotEmpty()
+  @IsObject()
+  schema: Record<string, unknown>;
+}

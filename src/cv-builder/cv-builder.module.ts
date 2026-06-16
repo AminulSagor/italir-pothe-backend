@@ -6,10 +6,11 @@ import { AdminCvTemplatesController } from './controllers/admin-cv-templates.con
 import { CvBuilderController } from './controllers/cv-builder.controller';
 import { CvDocument } from './entities/cv-document.entity';
 import { CvTemplate } from './entities/cv-template.entity';
+import { CvTemplateDefaultLayout } from './entities/cv-template-default-layout.entity';
 import { CvBuilderService } from './services/cv-builder.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CvTemplate, CvDocument, User])],
+  imports: [TypeOrmModule.forFeature([CvTemplate, CvDocument, CvTemplateDefaultLayout, User])],
   controllers: [AdminCvTemplatesController, CvBuilderController],
   providers: [CvBuilderService],
   exports: [CvBuilderService],

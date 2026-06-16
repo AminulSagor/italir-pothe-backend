@@ -36,6 +36,9 @@ export class CvDocument {
   @Column({ type: 'varchar', length: 20, default: '#006B3F' })
   themeColor: string;
 
+  @Column({ type: 'varchar', length: 20, default: '#E6F6F0' })
+  accentColor: string;
+
   @Column({ type: 'jsonb', default: () => `'{}'::jsonb` })
   formData: Record<string, unknown>;
 
