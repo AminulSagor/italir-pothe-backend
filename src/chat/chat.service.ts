@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Message } from './entities/message.entity';
+import { MessageType } from './enums/chat.enums';
 import { MessageAttachment } from './entities/message-attachment.entity';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
@@ -67,7 +68,7 @@ export class ChatService {
 			clientMessageId: data.clientMessageId ?? null,
 			sequenceNo,
 			content: data.content ?? null,
-			messageType: data.messageType,
+			messageType: data.messageType ?? MessageType.TEXT,
 		});
 
 		const saved = await this.messageRepo.save(message);

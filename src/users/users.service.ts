@@ -52,6 +52,67 @@ export class UsersService {
     return this.userRepository.findOne({ where: { email } });
   }
 
+  async searchUsersByName(
+    q: string,
+    page = 1,
+    perPage = 20,
+    excludeUserId?: string,
+  ) {
+    const search = q.trim().toLowerCase();
+
+    if (!search) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        perPage,
+        totalPages: 0,
+      };
+    }
+
+    const qb = this.userRepository.createQueryBuilder('user')
+      .where('LOWER(user.fullName) LIKE :q', { q: `%${search}%` });
+
+    if (excludeUserId) {
+      qb.andWhere('user.id != :exclude', { exclude: excludeUserId });
+    }
+
+    const total = await qb.getCount();
+
+    const take = Math.max(1, Math.min(perPage, 100));
+    const skip = (Math.max(1, page) - 1) * take;
+
+    const users = await qb
+      .orderBy('user.fullName', 'ASC')
+      .skip(skip)
+      .take(take)
+      .getMany();
+
+    const items = await Promise.all(
+      users.map(async (user) => {
+        const presence = await this.presenceService.getUserPresence(user.id);
+        return {
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified,
+          isOnline: presence.isOnline,
+          lastSeenAt: presence.lastSeenAt,
+        };
+      }),
+    );
+
+    return {
+      items,
+      total,
+      page: Math.max(1, page),
+      perPage: take,
+      totalPages: Math.ceil(total / take) || 0,
+    };
+  }
+
   async findAllUsersWithPresence() {
     const users = await this.userRepository.find();
     
