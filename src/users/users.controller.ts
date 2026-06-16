@@ -68,6 +68,32 @@ export class UsersController {
     return user ? { found: true, user: this.sanitize(user) } : { found: false };
   }
 
+  @Get('search/name')
+  async searchByName(
+    @Req() request: AuthenticatedRequest,
+    @Query('q') q: string,
+    @Query('page') page = '1',
+    @Query('perPage') perPage = '20',
+  ) {
+    if (!q || !q.trim()) {
+      throw new BadRequestException('Query parameter `q` is required');
+    }
+
+    const pageNum = Number(page) || 1;
+    const perPageNum = Math.min(100, Math.max(1, Number(perPage) || 20));
+
+    const currentUserId = this.getCurrentUserId(request);
+
+    const result = await this.usersService.searchUsersByName(
+      q,
+      pageNum,
+      perPageNum,
+      currentUserId,
+    );
+
+    return result;
+  }
+
   @Patch('me/name')
   async updateMyName(
     @Req() request: AuthenticatedRequest,
