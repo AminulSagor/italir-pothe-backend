@@ -42,6 +42,74 @@ export class AdminSyllabusService {
   }
 
   async findCourseSyllabus(courseId: string) {
+    await this.ensureActiveCourseExists(courseId);
+
+    const chapters = await this.courseChapterRepository.find({
+      where: { courseId },
+      order: {
+        sortOrder: 'ASC',
+        createdAt: 'ASC',
+      },
+    });
+
+    const chaptersWithLessonCount = await Promise.all(
+      chapters.map(async (chapter) => {
+        const totalLessons = await this.lessonRepository.count({
+          where: {
+            courseId,
+            chapterId: chapter.id,
+            status: Not(LessonStatus.ARCHIVED),
+          },
+        });
+
+        return {
+          courseId: chapter.courseId,
+          id: chapter.id,
+          title: chapter.title,
+          sortOrder: chapter.sortOrder,
+          isPublished: chapter.isPublished,
+          totalLessons,
+        };
+      }),
+    );
+
+    return {
+      chapters: chaptersWithLessonCount,
+    };
+  }
+
+  async findChapterLessons(chapterId: string) {
+    const chapter = await this.getChapterById(chapterId);
+
+    await this.ensureActiveCourseExists(chapter.courseId);
+
+    const lessons = await this.lessonRepository.find({
+      where: {
+        chapterId: chapter.id,
+        status: Not(LessonStatus.ARCHIVED),
+      },
+      order: {
+        sortOrder: 'ASC',
+        createdAt: 'ASC',
+      },
+    });
+
+    return {
+      id: chapter.id,
+      title: chapter.title,
+      sortOrder: chapter.sortOrder,
+      isPublished: chapter.isPublished,
+      lessons: lessons.map((lesson) => ({
+        id: lesson.id,
+        title: lesson.title,
+        isFree: lesson.isFree,
+        sortOrder: lesson.sortOrder,
+        status: lesson.status,
+      })),
+    };
+  }
+
+  async getCourseSummary(courseId: string) {
     const course = await this.ensureActiveCourseExists(courseId);
 
     const chapters = await this.courseChapterRepository.find({
@@ -67,7 +135,6 @@ export class AdminSyllabusService {
     }));
 
     return {
-      course,
       summary: {
         totalChapters: activeChapters.length,
         totalLessons: activeChapters.reduce(
@@ -75,7 +142,6 @@ export class AdminSyllabusService {
           0,
         ),
       },
-      chapters: activeChapters,
     };
   }
 

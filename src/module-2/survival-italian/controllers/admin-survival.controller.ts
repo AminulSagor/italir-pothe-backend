@@ -61,16 +61,6 @@ export class AdminSurvivalController {
     return this.adminSurvivalService.update(id, dto);
   }
 
-  @Patch('situations/:id/publish')
-  async publish(@Param('id') id: string) {
-    return this.adminSurvivalService.publish(id);
-  }
-
-  @Patch('situations/:id/unpublish')
-  async unpublish(@Param('id') id: string) {
-    return this.adminSurvivalService.unpublish(id);
-  }
-
   @Delete('situations/:id')
   async delete(@Param('id') id: string) {
     return this.adminSurvivalService.delete(id);

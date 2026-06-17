@@ -13,6 +13,19 @@ import {
 
 import { CareerTrackStatus } from '../entities/career-track.entity';
 
+export enum SkillBuilderSentenceSortBy {
+  SORT_ORDER = 'sortOrder',
+  ITALIAN_SENTENCE = 'italianSentence',
+  BENGALI_TRANSLATION = 'bengaliTranslation',
+  CREATED_AT = 'createdAt',
+  UPDATED_AT = 'updatedAt',
+}
+
+export enum SortOrder {
+  ASC = 'ASC',
+  DESC = 'DESC',
+}
+
 export class CreateCareerTrackDto {
   @IsString()
   @MaxLength(160)
@@ -37,13 +50,11 @@ export class CreateCareerTrackDto {
   @IsHexColor()
   cardColor?: string;
 
-  @IsOptional()
   @IsUUID()
-  introVideoFileId?: string;
+  introVideoFileId: string;
 
-  @IsOptional()
   @IsUUID()
-  theoryResourceFileId?: string;
+  theoryResourceFileId: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -237,6 +248,14 @@ export class SentenceQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsEnum(SkillBuilderSentenceSortBy)
+  sortBy?: SkillBuilderSentenceSortBy;
+
+  @IsOptional()
+  @IsEnum(SortOrder)
+  sortOrder?: SortOrder;
 
   @IsOptional()
   @Type(() => Number)

@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  IsDateString,
   IsEnum,
   IsHexColor,
   IsInt,
@@ -17,18 +16,28 @@ import {
   SurvivalSituationStatus,
 } from '../entities/survival-situation.entity';
 
+export enum SurvivalSituationSortBy {
+  SORT_ORDER = 'sortOrder',
+  TITLE = 'title',
+  STATUS = 'status',
+  CREATED_AT = 'createdAt',
+  UPDATED_AT = 'updatedAt',
+}
+
+export enum SortOrder {
+  ASC = 'ASC',
+  DESC = 'DESC',
+}
+
 export class CreateSurvivalSituationDto {
   @IsString()
-  @MaxLength(160)
   title: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(160)
   subtitleBn?: string;
 
   @IsString()
-  @MaxLength(80)
   iconKey: string;
 
   @IsHexColor()
@@ -38,9 +47,8 @@ export class CreateSurvivalSituationDto {
   @IsEnum(SurvivalCardVariant)
   cardVariant?: SurvivalCardVariant;
 
-  @IsOptional()
   @IsUUID()
-  resourceFileId?: string;
+  resourceFileId: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -92,6 +100,14 @@ export class AdminSurvivalSituationQueryDto {
   @IsOptional()
   @IsEnum(SurvivalSituationStatus)
   status?: SurvivalSituationStatus;
+
+  @IsOptional()
+  @IsEnum(SurvivalSituationSortBy)
+  sortBy?: SurvivalSituationSortBy;
+
+  @IsOptional()
+  @IsEnum(SortOrder)
+  sortOrder?: SortOrder;
 
   @IsOptional()
   @Type(() => Number)

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 
@@ -13,7 +14,11 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { UserRole } from 'src/users/entities/user.entity';
-import { CreateCourseDto, UpdateCourseDto } from '../dto/course.dto';
+import {
+  AdminCourseQueryDto,
+  CreateCourseDto,
+  UpdateCourseDto,
+} from '../dto/course.dto';
 import { AdminCoursesService } from '../services/admin-courses.service';
 
 @Controller('admin/courses')
@@ -28,18 +33,23 @@ export class AdminCoursesController {
   }
 
   @Get()
-  async findAllCourses() {
-    return this.adminCoursesService.findAllCourses();
-  }
-
-  @Get(':courseId')
-  async findCourseById(@Param('courseId') courseId: string) {
-    return this.adminCoursesService.findCourseById(courseId);
+  async findAllCourses(@Query() query: AdminCourseQueryDto) {
+    return this.adminCoursesService.findAllCourses(query);
   }
 
   @Get(':courseId/setup-progress')
   async getCourseSetupProgress(@Param('courseId') courseId: string) {
     return this.adminCoursesService.getCourseSetupProgress(courseId);
+  }
+
+  @Get(':courseId/permanent-delete-check')
+  async getPermanentDeleteCheck(@Param('courseId') courseId: string) {
+    return this.adminCoursesService.getPermanentDeleteCheck(courseId);
+  }
+
+  @Get(':courseId')
+  async findCourseById(@Param('courseId') courseId: string) {
+    return this.adminCoursesService.findCourseById(courseId);
   }
 
   @Patch(':courseId')
@@ -58,6 +68,16 @@ export class AdminCoursesController {
   @Patch(':courseId/draft')
   async moveCourseToDraft(@Param('courseId') courseId: string) {
     return this.adminCoursesService.moveCourseToDraft(courseId);
+  }
+
+  @Patch(':courseId/restore')
+  async restoreArchivedCourse(@Param('courseId') courseId: string) {
+    return this.adminCoursesService.restoreArchivedCourse(courseId);
+  }
+
+  @Delete(':courseId/permanent')
+  async permanentlyDeleteCourse(@Param('courseId') courseId: string) {
+    return this.adminCoursesService.permanentlyDeleteCourse(courseId);
   }
 
   @Delete(':courseId')

@@ -86,16 +86,6 @@ export class AdminSkillBuilderController {
     return this.adminSkillBuilderService.deleteIntroVideo(trackId);
   }
 
-  @Patch('career-tracks/:trackId/publish')
-  async publishCareerTrack(@Param('trackId') trackId: string) {
-    return this.adminSkillBuilderService.publishCareerTrack(trackId);
-  }
-
-  @Patch('career-tracks/:trackId/unpublish')
-  async unpublishCareerTrack(@Param('trackId') trackId: string) {
-    return this.adminSkillBuilderService.unpublishCareerTrack(trackId);
-  }
-
   @Post('career-tracks/:trackId/sync')
   async syncCareerTrack(@Param('trackId') trackId: string) {
     return this.adminSkillBuilderService.syncCareerTrack(trackId);

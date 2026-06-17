@@ -10,6 +10,8 @@ import { FilesService } from 'src/files/services/files.service';
 import {
   AdminSurvivalSituationQueryDto,
   CreateSurvivalSituationDto,
+  SortOrder,
+  SurvivalSituationSortBy,
   UpdateSurvivalSituationDto,
 } from '../dto/admin-survival.dto';
 import {
@@ -32,21 +34,19 @@ export class AdminSurvivalService {
   ) {}
 
   async create(dto: CreateSurvivalSituationDto, adminId: string) {
-    if (dto.resourceFileId) {
-      await this.assertPdfFile(dto.resourceFileId);
-    }
+    await this.assertPdfFile(dto.resourceFileId);
 
     const situation = this.situationRepository.create({
       title: dto.title.trim(),
-      subtitleBn: dto.subtitleBn?.trim() || null,
+      subtitleBn: dto.subtitleBn ? dto.subtitleBn.trim() : null,
       iconKey: dto.iconKey.trim(),
       cardColor: dto.cardColor.trim(),
       cardVariant: dto.cardVariant ?? SurvivalCardVariant.NORMAL,
-      resourceFileId: dto.resourceFileId ?? null,
-      status: SurvivalSituationStatus.DRAFT,
+      resourceFileId: dto.resourceFileId,
+      status: SurvivalSituationStatus.PUBLISHED,
       sortOrder: dto.sortOrder ?? 0,
       createdByAdminId: adminId,
-      publishedAt: null,
+      publishedAt: new Date(),
     });
 
     return this.situationRepository.save(situation);
@@ -56,10 +56,14 @@ export class AdminSurvivalService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
 
+    const sortBy = query.sortBy ?? SurvivalSituationSortBy.SORT_ORDER;
+    const sortOrder = query.sortOrder ?? SortOrder.ASC;
+
     const queryBuilder = this.situationRepository
       .createQueryBuilder('situation')
-      .orderBy('situation.sortOrder', 'ASC')
-      .addOrderBy('situation.createdAt', 'DESC')
+      .where('situation.status != :archived', {
+        archived: SurvivalSituationStatus.ARCHIVED,
+      })
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -82,6 +86,16 @@ export class AdminSurvivalService {
       );
     }
 
+    queryBuilder.orderBy(`situation.${sortBy}`, sortOrder);
+
+    if (sortBy !== SurvivalSituationSortBy.SORT_ORDER) {
+      queryBuilder.addOrderBy('situation.sortOrder', 'ASC');
+    }
+
+    if (sortBy !== SurvivalSituationSortBy.CREATED_AT) {
+      queryBuilder.addOrderBy('situation.createdAt', 'DESC');
+    }
+
     const [items, total] = await queryBuilder.getManyAndCount();
 
     return {
@@ -91,6 +105,8 @@ export class AdminSurvivalService {
         limit,
         total,
         totalPages: Math.ceil(total / limit),
+        sortBy,
+        sortOrder,
       },
     };
   }
@@ -180,43 +196,8 @@ export class AdminSurvivalService {
       situation.sortOrder = dto.sortOrder;
     }
 
-    return this.situationRepository.save(situation);
-  }
-
-  async publish(id: string) {
-    const situation = await this.findSituationOrFail(id);
-
-    if (!situation.title.trim()) {
-      throw new BadRequestException(
-        'Situation name is required before publish',
-      );
-    }
-
-    if (!situation.subtitleBn?.trim()) {
-      throw new BadRequestException(
-        'Bengali subtitle is required before publish',
-      );
-    }
-
-    if (!situation.resourceFileId) {
-      throw new BadRequestException(
-        'Instructional PDF is required before publish',
-      );
-    }
-
-    await this.assertPdfFile(situation.resourceFileId);
-
     situation.status = SurvivalSituationStatus.PUBLISHED;
     situation.publishedAt = new Date();
-
-    return this.situationRepository.save(situation);
-  }
-
-  async unpublish(id: string) {
-    const situation = await this.findSituationOrFail(id);
-
-    situation.status = SurvivalSituationStatus.DRAFT;
-    situation.publishedAt = null;
 
     return this.situationRepository.save(situation);
   }

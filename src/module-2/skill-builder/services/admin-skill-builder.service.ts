@@ -14,6 +14,8 @@ import {
   CreateSkillBuilderSentenceDto,
   ModuleQueryDto,
   SentenceQueryDto,
+  SkillBuilderSentenceSortBy,
+  SortOrder,
   UpdateCareerTrackDto,
   UpdateCareerTrackResourcesDto,
   UpdateSkillBuilderModuleDto,
@@ -52,13 +54,8 @@ export class AdminSkillBuilderService {
   ) {}
 
   async createCareerTrack(dto: CreateCareerTrackDto, adminId: string) {
-    if (dto.introVideoFileId) {
-      await this.assertVideoFile(dto.introVideoFileId);
-    }
-
-    if (dto.theoryResourceFileId) {
-      await this.assertPdfFile(dto.theoryResourceFileId);
-    }
+    await this.assertVideoFile(dto.introVideoFileId);
+    await this.assertPdfFile(dto.theoryResourceFileId);
 
     const track = this.careerTrackRepository.create({
       title: dto.title.trim(),
@@ -66,12 +63,12 @@ export class AdminSkillBuilderService {
       description: dto.description?.trim() || null,
       iconKey: dto.iconKey?.trim() || 'briefcase',
       cardColor: dto.cardColor?.trim() || '#FFEDE3',
-      introVideoFileId: dto.introVideoFileId ?? null,
-      theoryResourceFileId: dto.theoryResourceFileId ?? null,
-      status: CareerTrackStatus.DRAFT,
+      introVideoFileId: dto.introVideoFileId,
+      theoryResourceFileId: dto.theoryResourceFileId,
+      status: CareerTrackStatus.PUBLISHED,
       sortOrder: dto.sortOrder ?? 0,
       createdByAdminId: adminId,
-      publishedAt: null,
+      publishedAt: new Date(),
       lastSyncedAt: null,
     });
 
@@ -262,55 +259,6 @@ export class AdminSkillBuilderService {
     return this.careerTrackRepository.save(track);
   }
 
-  async publishCareerTrack(trackId: string) {
-    const track = await this.findActiveTrackOrFail(trackId);
-
-    if (!track.title.trim()) {
-      throw new BadRequestException(
-        'Career track title is required before publish',
-      );
-    }
-
-    if (!track.introVideoFileId) {
-      throw new BadRequestException(
-        'Master introduction video is required before publish',
-      );
-    }
-
-    if (!track.theoryResourceFileId) {
-      throw new BadRequestException(
-        'Theory book resource is required before publish',
-      );
-    }
-
-    const moduleCount = await this.moduleRepository.count({
-      where: {
-        careerTrackId: track.id,
-        status: SkillBuilderModuleStatus.ACTIVE,
-      },
-    });
-
-    if (moduleCount === 0) {
-      throw new BadRequestException(
-        'At least one module is required before publish',
-      );
-    }
-
-    track.status = CareerTrackStatus.PUBLISHED;
-    track.publishedAt = new Date();
-
-    return this.careerTrackRepository.save(track);
-  }
-
-  async unpublishCareerTrack(trackId: string) {
-    const track = await this.findActiveTrackOrFail(trackId);
-
-    track.status = CareerTrackStatus.DRAFT;
-    track.publishedAt = null;
-
-    return this.careerTrackRepository.save(track);
-  }
-
   async syncCareerTrack(trackId: string) {
     const track = await this.findActiveTrackOrFail(trackId);
 
@@ -492,14 +440,15 @@ export class AdminSkillBuilderService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
 
+    const sortBy = query.sortBy ?? SkillBuilderSentenceSortBy.SORT_ORDER;
+    const sortOrder = query.sortOrder ?? SortOrder.ASC;
+
     const queryBuilder = this.sentenceRepository
       .createQueryBuilder('sentence')
       .where('sentence.moduleId = :moduleId', { moduleId })
       .andWhere('sentence.status = :status', {
         status: SkillBuilderSentenceStatus.ACTIVE,
       })
-      .orderBy('sentence.sortOrder', 'ASC')
-      .addOrderBy('sentence.createdAt', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -515,6 +464,16 @@ export class AdminSkillBuilderService {
       );
     }
 
+    queryBuilder.orderBy(`sentence.${sortBy}`, sortOrder);
+
+    if (sortBy !== SkillBuilderSentenceSortBy.SORT_ORDER) {
+      queryBuilder.addOrderBy('sentence.sortOrder', 'ASC');
+    }
+
+    if (sortBy !== SkillBuilderSentenceSortBy.CREATED_AT) {
+      queryBuilder.addOrderBy('sentence.createdAt', 'ASC');
+    }
+
     const [items, total] = await queryBuilder.getManyAndCount();
 
     return {
@@ -524,6 +483,8 @@ export class AdminSkillBuilderService {
         limit,
         total,
         totalPages: Math.ceil(total / limit),
+        sortBy,
+        sortOrder,
       },
     };
   }
