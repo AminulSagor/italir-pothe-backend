@@ -151,6 +151,27 @@ export class UsersService {
     };
   }
 
+  async getUserProfileById(targetUserId: string) {
+    const user = await this.findUserById(targetUserId);
+
+    const presence = await this.presenceService.getUserPresence(user.id);
+
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      isVerified: user.isVerified,
+      isEmailVerified: user.isEmailVerified,
+      isPhoneVerified: user.isPhoneVerified,
+      profilePhotoFileId: user.profilePhotoFileId,
+      isOnline: presence.isOnline,
+      lastSeenAt: presence.lastSeenAt,
+      createdAt: user.createdAt,
+    };
+  }
+
   async updateMyName(userId: string, dto: UpdateProfileNameDto) {
     const user = await this.findUserById(userId);
 

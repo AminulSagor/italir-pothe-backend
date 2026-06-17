@@ -188,6 +188,44 @@ export class FilesService {
     return file;
   }
 
+  async createFileFromBuffer(
+    buffer: Buffer,
+    originalName: string,
+    mimeType: string,
+    currentUser: FileRequestUser,
+    filePurpose: FilePurpose = FilePurpose.REPORT_EVIDENCE,
+  ) {
+    const sizeBytes = buffer.length;
+
+    this.validateFile(mimeType, sizeBytes, filePurpose);
+
+    const storageKey = this.s3Service.createStorageKey(filePurpose, originalName);
+
+    await this.s3Service.uploadBuffer({ storageKey, buffer, mimeType });
+
+    const isAdmin = currentUser.role === UserRole.ADMIN;
+
+    const file = this.fileRepository.create({
+      ownerUserId: isAdmin ? null : currentUser.id,
+      createdByAdminId: isAdmin ? currentUser.id : null,
+      storageKey,
+      originalName: originalName.trim(),
+      mimeType: mimeType.trim(),
+      sizeBytes,
+      filePurpose,
+      visibility: FileVisibility.PRIVATE,
+      uploadStatus: FileUploadStatus.UPLOADED,
+      uploadedAt: new Date(),
+    });
+
+    const savedFile = await this.fileRepository.save(file);
+
+    return {
+      file: savedFile,
+      publicUrl: this.s3Service.createPublicUrl(storageKey),
+    };
+  }
+
   private validateFile(
     mimeType: string,
     sizeBytes: number,
@@ -260,6 +298,7 @@ export class FilesService {
       FilePurpose.QUIZ_IMAGE,
       FilePurpose.SURVIVAL_IMAGE,
       FilePurpose.PROFILE_AVATAR,
+      FilePurpose.REPORT_EVIDENCE,
       FilePurpose.WEBINAR_THUMBNAIL,
     ];
 
