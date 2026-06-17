@@ -6,8 +6,8 @@ import { UsersController } from './users.controller';
 import { Otp } from './entities/otp.entity';
 import { PresenceModule } from '../presence/presence.module';
 import { FilesModule } from 'src/files/files.module';
-import { SmsService } from 'src/notifications/sms.service';
-import { EmailService } from 'src/notifications/email.service';
+import { SmsService } from 'src/common/services/sms.service';
+import { EmailService } from 'src/common/services/email.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([User, Otp]), PresenceModule, FilesModule],

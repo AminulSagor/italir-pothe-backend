@@ -17,6 +17,15 @@ import { QuizzesModule } from './module-2/quizzes/quizzes.module';
 import { FinalExamModule } from './module-2/final-exam/final-exam.module';
 import { CertificatesModule } from './module-2/certificates/certificates.module';
 import { WebinarModule } from './webinar/webinar.module';
+import { ScoringModule } from './module-2/scoring/scoring.module';
+import { DailyChallengesModule } from './module-2/daily-challenges/daily-challenges.module';
+import { FirebaseModule } from './firebase/firebase.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { ProgressModule } from './module-2/progress/progress.module';
+import { SurvivalItalianModule } from './module-2/survival-italian/survival-italian.module';
+import { SkillBuilderModule } from './module-2/skill-builder/skill-builder.module';
+import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs.module';
 
 @Module({
   imports: [
@@ -24,6 +33,8 @@ import { WebinarModule } from './webinar/webinar.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -54,6 +65,14 @@ import { WebinarModule } from './webinar/webinar.module';
     FinalExamModule,
     CertificatesModule,
     WebinarModule,
+    ScoringModule,
+    DailyChallengesModule,
+    FirebaseModule,
+    NotificationsModule,
+    ProgressModule,
+    SurvivalItalianModule,
+    SkillBuilderModule,
+    ImportantVerbsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

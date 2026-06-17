@@ -68,3 +68,21 @@ export class UpdateLessonVocabularyDto {
   @Min(0)
   sortOrder?: number;
 }
+
+export class LessonVocabularyQueryDto {
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
+}

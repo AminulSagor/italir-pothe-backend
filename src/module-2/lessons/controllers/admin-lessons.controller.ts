@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 
@@ -16,6 +17,7 @@ import { UserRole } from 'src/users/entities/user.entity';
 import { CreateLessonDto, UpdateLessonDto } from '../dto/lesson.dto';
 import {
   CreateLessonVocabularyDto,
+  LessonVocabularyQueryDto,
   UpdateLessonVocabularyDto,
 } from '../dto/lesson-vocabulary.dto';
 import { AdminLessonsService } from '../services/admin-lessons.service';
@@ -47,16 +49,6 @@ export class AdminLessonsController {
     return this.adminLessonsService.updateLesson(lessonId, dto);
   }
 
-  @Patch('lessons/:lessonId/publish')
-  async publishLesson(@Param('lessonId') lessonId: string) {
-    return this.adminLessonsService.publishLesson(lessonId);
-  }
-
-  @Patch('lessons/:lessonId/draft')
-  async moveLessonToDraft(@Param('lessonId') lessonId: string) {
-    return this.adminLessonsService.moveLessonToDraft(lessonId);
-  }
-
   @Delete('lessons/:lessonId')
   async removeLesson(@Param('lessonId') lessonId: string) {
     return this.adminLessonsService.removeLesson(lessonId);
@@ -71,8 +63,11 @@ export class AdminLessonsController {
   }
 
   @Get('lessons/:lessonId/vocabulary')
-  async findVocabularyByLesson(@Param('lessonId') lessonId: string) {
-    return this.adminLessonsService.findVocabularyByLesson(lessonId);
+  async findVocabularyByLesson(
+    @Param('lessonId') lessonId: string,
+    @Query() query: LessonVocabularyQueryDto,
+  ) {
+    return this.adminLessonsService.findVocabularyByLesson(lessonId, query);
   }
 
   @Patch('lesson-vocabulary/:vocabularyId')

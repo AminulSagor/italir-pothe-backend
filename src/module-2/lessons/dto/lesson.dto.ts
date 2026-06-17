@@ -1,6 +1,5 @@
 import {
   IsBoolean,
-  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -8,8 +7,6 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-
-import { LessonStatus } from '../entities/lesson.entity';
 
 export class CreateLessonDto {
   @IsString()
@@ -49,10 +46,6 @@ export class CreateLessonDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
-
-  @IsOptional()
-  @IsEnum(LessonStatus)
-  status?: LessonStatus;
 }
 
 export class UpdateLessonDto {
@@ -94,8 +87,4 @@ export class UpdateLessonDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
-
-  @IsOptional()
-  @IsEnum(LessonStatus)
-  status?: LessonStatus;
 }

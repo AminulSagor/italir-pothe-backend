@@ -28,6 +28,9 @@ import {
   ExamTemplateStatus,
 } from '../types/final-exam.type';
 import { QuizQuestionFormat } from 'src/module-2/quizzes/types/quiz-question-format.type';
+import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
+import { ProgressService } from 'src/module-2/progress/services/progress.service';
+import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 
 interface UserSafeOption {
   id: string;
@@ -77,6 +80,9 @@ export class ExamsService {
 
     @InjectRepository(ExamAnswerItem)
     private readonly examAnswerItemRepository: Repository<ExamAnswerItem>,
+
+    private readonly dailyChallengesService: DailyChallengesService,
+    private readonly progressService: ProgressService,
   ) {}
 
   async getExamGateway(courseId: string, userId: string) {
@@ -328,6 +334,24 @@ export class ExamsService {
     attempt.totalDurationSeconds = dto.totalDurationSeconds ?? 0;
 
     const savedAttempt = await this.examAttemptRepository.save(attempt);
+
+    await this.dailyChallengesService.recordInternalActivity({
+      userId,
+      activityType: LearningActivityType.FINAL_EXAM_SUBMITTED,
+      sourceId: `final-exam-attempt:${savedAttempt.id}:submitted`,
+      value: 1,
+      clientActivityDate: dto.clientActivityDate,
+    });
+
+    if (savedAttempt.totalDurationSeconds > 0) {
+      await this.dailyChallengesService.recordInternalActivity({
+        userId,
+        activityType: LearningActivityType.ACTIVE_LEARNING_MINUTES,
+        sourceId: `final-exam-attempt:${savedAttempt.id}:active-minutes`,
+        value: Math.max(1, Math.floor(savedAttempt.totalDurationSeconds / 60)),
+        clientActivityDate: dto.clientActivityDate,
+      });
+    }
 
     return {
       message: hasManualReview
@@ -587,8 +611,8 @@ export class ExamsService {
     return exam;
   }
 
-  private async getCourseCompletionPercent(_courseId: string, _userId: string) {
-    return 100;
+  private async getCourseCompletionPercent(courseId: string, userId: string) {
+    return this.progressService.getCourseCompletionPercent(userId, courseId);
   }
 
   private generateReferenceCode(courseTitle: string) {
