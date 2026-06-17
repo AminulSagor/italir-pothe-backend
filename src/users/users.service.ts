@@ -70,7 +70,8 @@ export class UsersService {
       };
     }
 
-    const qb = this.userRepository.createQueryBuilder('user')
+    const qb = this.userRepository
+      .createQueryBuilder('user')
       .where('LOWER(user.fullName) LIKE :q', { q: `%${search}%` });
 
     if (excludeUserId) {
@@ -115,7 +116,7 @@ export class UsersService {
 
   async findAllUsersWithPresence() {
     const users = await this.userRepository.find();
-    
+
     return Promise.all(
       users.map(async (user) => {
         const presence = await this.presenceService.getUserPresence(user.id);
