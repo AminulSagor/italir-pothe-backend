@@ -4,13 +4,15 @@ import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { Otp } from './entities/otp.entity';
+import { PresenceModule } from '../presence/presence.module';
 import { FilesModule } from 'src/files/files.module';
 import { SmsService } from 'src/common/services/sms.service';
 import { EmailService } from 'src/common/services/email.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Otp]), FilesModule],
+  imports: [TypeOrmModule.forFeature([User, Otp]), PresenceModule, FilesModule],
   providers: [UsersService, SmsService, EmailService],
   controllers: [UsersController],
+  exports: [UsersService],
 })
 export class UsersModule {}

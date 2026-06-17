@@ -25,6 +25,9 @@ import {
 } from './dto/user-profile.dto';
 import { Otp, OtpPurpose } from './entities/otp.entity';
 import { User, UserRole } from './entities/user.entity';
+import { UserPresence } from '../chat/entities/user-presence.entity';
+import { PresenceStatus } from '../chat/enums/chat.enums';
+import { PresenceService } from '../presence/presence.service';
 import { FilesService } from 'src/files/services/files.service';
 import { FilePurpose } from 'src/files/entities/file.entity';
 
@@ -35,16 +38,100 @@ export class UsersService {
 
   constructor(
     @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
-
+    private userRepository: Repository<User>,
     @InjectRepository(Otp)
-    private readonly otpRepository: Repository<Otp>,
-
-    private readonly smsService: SmsService,
-    private readonly emailService: EmailService,
-    private readonly filesService: FilesService,
-    private readonly configService: ConfigService,
+    private otpRepository: Repository<Otp>,
+    private presenceService: PresenceService,
+    private smsService: SmsService,
+    private emailService: EmailService,
+    private filesService: FilesService,
+    private configService: ConfigService,
   ) {}
+
+  async findByEmail(email: string) {
+    return this.userRepository.findOne({ where: { email } });
+  }
+
+  async searchUsersByName(
+    q: string,
+    page = 1,
+    perPage = 20,
+    excludeUserId?: string,
+  ) {
+    const search = q.trim().toLowerCase();
+
+    if (!search) {
+      return {
+        items: [],
+        total: 0,
+        page,
+        perPage,
+        totalPages: 0,
+      };
+    }
+
+    const qb = this.userRepository.createQueryBuilder('user')
+      .where('LOWER(user.fullName) LIKE :q', { q: `%${search}%` });
+
+    if (excludeUserId) {
+      qb.andWhere('user.id != :exclude', { exclude: excludeUserId });
+    }
+
+    const total = await qb.getCount();
+
+    const take = Math.max(1, Math.min(perPage, 100));
+    const skip = (Math.max(1, page) - 1) * take;
+
+    const users = await qb
+      .orderBy('user.fullName', 'ASC')
+      .skip(skip)
+      .take(take)
+      .getMany();
+
+    const items = await Promise.all(
+      users.map(async (user) => {
+        const presence = await this.presenceService.getUserPresence(user.id);
+        return {
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified,
+          isOnline: presence.isOnline,
+          lastSeenAt: presence.lastSeenAt,
+        };
+      }),
+    );
+
+    return {
+      items,
+      total,
+      page: Math.max(1, page),
+      perPage: take,
+      totalPages: Math.ceil(total / take) || 0,
+    };
+  }
+
+  async findAllUsersWithPresence() {
+    const users = await this.userRepository.find();
+    
+    return Promise.all(
+      users.map(async (user) => {
+        const presence = await this.presenceService.getUserPresence(user.id);
+        return {
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          isVerified: user.isVerified,
+          isOnline: presence.isOnline,
+          lastSeenAt: presence.lastSeenAt,
+        };
+      }),
+    );
+  }
 
   async getMyProfile(userId: string) {
     const user = await this.findUserById(userId);
