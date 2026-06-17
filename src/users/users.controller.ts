@@ -7,13 +7,18 @@ import {
   Patch,
   Post,
   Req,
-  UnauthorizedException,
   UseGuards,
+  BadRequestException,
+  UnauthorizedException,
+  Query,
+  ParseUUIDPipe,
 } from '@nestjs/common';
-
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { UsersService } from './users.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole, User } from './entities/user.entity';
+import { PresenceService } from '../presence/presence.service';
 import {
   ChangePasswordDto,
   RequestEmailChangeOtpDto,
@@ -24,18 +29,78 @@ import {
   VerifyEmailChangeOtpDto,
   VerifyPhoneChangeOtpDto,
 } from './dto/user-profile.dto';
-import { User, UserRole } from './entities/user.entity';
-import { UsersService } from './users.service';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly presenceService: PresenceService,
+  ) {}
+
+  private sanitize(user: any) {
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      isVerified: user.isVerified,
+    };
+  }
 
   @Get('me')
   async getMyProfile(@Req() request: AuthenticatedRequest) {
     return this.usersService.getMyProfile(this.getCurrentUserId(request));
+  }
+
+  @Get(':id')
+  async getUserProfileById(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.usersService.getUserProfileById(id);
+  }
+
+  @Get('all')
+  async getAllUsers() {
+    return this.usersService.findAllUsersWithPresence();
+  }
+
+  @Get('search')
+  async searchUser(@Query('email') email: string) {
+    if (!email) {
+      throw new BadRequestException('Email is required');
+    }
+    const user = await this.usersService.findByEmail(email.toLowerCase());
+    return user ? { found: true, user: this.sanitize(user) } : { found: false };
+  }
+
+  @Get('search/name')
+  async searchByName(
+    @Req() request: AuthenticatedRequest,
+    @Query('q') q: string,
+    @Query('page') page = '1',
+    @Query('perPage') perPage = '20',
+  ) {
+    if (!q || !q.trim()) {
+      throw new BadRequestException('Query parameter `q` is required');
+    }
+
+    const pageNum = Number(page) || 1;
+    const perPageNum = Math.min(100, Math.max(1, Number(perPage) || 20));
+
+    const currentUserId = this.getCurrentUserId(request);
+
+    const result = await this.usersService.searchUsersByName(
+      q,
+      pageNum,
+      perPageNum,
+      currentUserId,
+    );
+
+    return result;
   }
 
   @Patch('me/name')

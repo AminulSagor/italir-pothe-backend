@@ -8,6 +8,10 @@ async function bootstrap() {
   
   const corsOrigin = process.env.CORS_ORIGIN;
 
+  const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',')
+    : ['http://localhost:8000'];
+
   app.enableCors({
     origin:
       !corsOrigin || corsOrigin === '*'
