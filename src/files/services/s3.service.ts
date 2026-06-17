@@ -87,6 +87,25 @@ export class S3Service {
     });
   }
 
+  async uploadBuffer(params: {
+    storageKey: string;
+    buffer: Buffer;
+    mimeType: string;
+  }): Promise<void> {
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: params.storageKey,
+        Body: params.buffer,
+        ContentType: params.mimeType,
+      });
+
+      await this.s3Client.send(command);
+    } catch (err) {
+      throw new InternalServerErrorException('Failed to upload object to S3');
+    }
+  }
+
 createPublicUrl(storageKey: string): string {
     if (this.publicBaseUrl) {
       return `${this.publicBaseUrl.replace(/\/$/, '')}/${storageKey}`;

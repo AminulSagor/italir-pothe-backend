@@ -11,6 +11,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   Query,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -52,6 +53,14 @@ export class UsersController {
   @Get('me')
   async getMyProfile(@Req() request: AuthenticatedRequest) {
     return this.usersService.getMyProfile(this.getCurrentUserId(request));
+  }
+
+  @Get(':id')
+  async getUserProfileById(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.usersService.getUserProfileById(id);
   }
 
   @Get('all')

@@ -22,6 +22,7 @@ export enum FilePurpose {
   CAF_HERO_VIDEO = 'caf_hero_video',
   CAF_CHECKLIST_PDF = 'caf_checklist_pdf',
   PROFILE_AVATAR = 'profile_avatar',
+  REPORT_EVIDENCE = 'report_evidence',
   WEBINAR_THUMBNAIL = 'webinar_thumbnail',
 }
 
