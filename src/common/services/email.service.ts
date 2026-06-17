@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { OtpPurpose } from '../users/entities/otp.entity';
+import { OtpPurpose } from '../../users/entities/otp.entity';
 
 @Injectable()
 export class EmailService {

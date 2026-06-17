@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -36,6 +37,16 @@ import {
   QuizSessionResultResponse,
 } from '../types/quiz-runtime.type';
 import { QuizGradingService } from './quiz-grading.service';
+import {
+  ScoringService,
+  XpRewardSummary,
+} from 'src/module-2/scoring/services/scoring.service';
+import {
+  StreakService,
+  UserStreakSummary,
+} from 'src/module-2/scoring/services/streak.service';
+import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
+import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 
 interface QuizRequestUser {
   id: string;
@@ -65,7 +76,12 @@ export class QuizSessionsService {
     private readonly answerItemRepository: Repository<QuizAttemptAnswerItem>,
 
     private readonly quizGradingService: QuizGradingService,
+    private readonly scoringService: ScoringService,
+    private readonly streakService: StreakService,
+    private readonly dailyChallengesService: DailyChallengesService,
   ) {}
+
+  private readonly logger = new Logger(QuizSessionsService.name);
 
   async startLessonQuiz(
     lessonId: string,
@@ -188,6 +204,7 @@ export class QuizSessionsService {
   ): Promise<QuizSessionResultResponse> {
     const session = await this.getSessionForUser(sessionId, user.id, [
       'answers',
+      'lesson',
     ]);
 
     if (session.status !== QuizSessionStatus.IN_PROGRESS) {
@@ -202,21 +219,257 @@ export class QuizSessionsService {
       );
     }
 
-    const result = this.calculateResult(
-      session,
-      questions,
-      dto.totalTimeSeconds,
+    const totalTimeSeconds =
+      dto.totalTimeSeconds ?? this.calculateElapsedSeconds(session) ?? 0;
+
+    const result = this.calculateResult(session, questions, totalTimeSeconds);
+    const bonusXp =
+      result.scoring.comboBonus +
+      result.scoring.masteryBonus +
+      result.scoring.fastFinishBonus;
+
+    const reward = await this.scoringService.recordQuizCompletionXp({
+      userId: user.id,
+      sessionId: session.id,
+      lessonId: session.lessonId,
+      baseXp: result.scoring.baseXp,
+      bonusXp,
+      scoringMetadata: {
+        totalQuestions: result.totalQuestions,
+        correctAnswers: result.correctAnswers,
+        wrongAnswers: result.wrongAnswers,
+        scorePercentage: result.scorePercentage,
+        totalTimeSeconds,
+        scoring: result.scoring,
+      },
+    });
+
+    const streak = await this.streakService.updateDailyStreak(
+      user.id,
+      dto.clientActivityDate,
     );
 
     session.status = QuizSessionStatus.SUBMITTED;
     session.correctAnswers = result.correctAnswers;
     session.score = result.scorePercentage;
-    session.earnedXp = result.earnedXp;
+    session.earnedXp = reward.totalXpEarned;
+    session.timeTakenSeconds = totalTimeSeconds;
     session.submittedAt = new Date();
 
     await this.sessionRepository.save(session);
 
-    return result;
+    await this.recordQuizDailyChallengeActivities({
+      userId: user.id,
+      session,
+      questions,
+      totalTimeSeconds,
+      result,
+      reward,
+      clientActivityDate: dto.clientActivityDate,
+    });
+
+    return this.buildRewardedResult({
+      session,
+      result,
+      reward,
+      streak,
+    });
+  }
+
+  private async recordQuizDailyChallengeActivities(params: {
+    userId: string;
+    session: QuizSession;
+    questions: QuizQuestion[];
+    totalTimeSeconds: number;
+    result: QuizSessionResultResponse;
+    reward: XpRewardSummary;
+    clientActivityDate?: string;
+  }) {
+    const formatStats = this.buildQuestionFormatStats(
+      params.questions,
+      params.session.answers ?? [],
+    );
+
+    const sourcePrefix = `quiz-session:${params.session.id}`;
+
+    await Promise.all([
+      this.dailyChallengesService.recordInternalActivity({
+        userId: params.userId,
+        activityType: LearningActivityType.QUIZ_COMPLETED,
+        sourceId: `${sourcePrefix}:completed`,
+        value: 1,
+        clientActivityDate: params.clientActivityDate,
+      }),
+
+      this.recordIf(
+        params.result.scorePercentage >= 80,
+        params.userId,
+        LearningActivityType.QUIZ_SCORE_80,
+        `${sourcePrefix}:score-80`,
+        Math.round(params.result.scorePercentage),
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        params.result.scoring.fastFinishAchieved,
+        params.userId,
+        LearningActivityType.QUIZ_FAST_FINISH_BONUS,
+        `${sourcePrefix}:fast-finish`,
+        1,
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        params.result.scoring.longestStreak >= 5,
+        params.userId,
+        LearningActivityType.QUIZ_ANSWER_COMBO,
+        `${sourcePrefix}:combo`,
+        params.result.scoring.longestStreak,
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        formatStats.fillInTheBlanksCorrect > 0,
+        params.userId,
+        LearningActivityType.QUIZ_FILL_BLANKS_CORRECT,
+        `${sourcePrefix}:fill-blanks`,
+        formatStats.fillInTheBlanksCorrect,
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        formatStats.matchPairsPerfect,
+        params.userId,
+        LearningActivityType.QUIZ_MATCH_PAIRS_PERFECT,
+        `${sourcePrefix}:match-pairs-perfect`,
+        1,
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        formatStats.audioTranscriptionCorrect > 0,
+        params.userId,
+        LearningActivityType.QUIZ_AUDIO_TRANSCRIPTION_CORRECT,
+        `${sourcePrefix}:audio-transcription`,
+        formatStats.audioTranscriptionCorrect,
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        formatStats.trueFalseCorrect > 0,
+        params.userId,
+        LearningActivityType.QUIZ_TRUE_FALSE_AUDIO_CORRECT,
+        `${sourcePrefix}:true-false`,
+        formatStats.trueFalseCorrect,
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        formatStats.audioTrackCount > 0,
+        params.userId,
+        LearningActivityType.AUDIO_TRACK_LISTENED,
+        `${sourcePrefix}:audio-tracks`,
+        formatStats.audioTrackCount,
+        params.clientActivityDate,
+      ),
+
+      this.recordIf(
+        params.reward.totalXpEarned > 0,
+        params.userId,
+        LearningActivityType.XP_EARNED,
+        `${sourcePrefix}:xp`,
+        params.reward.totalXpEarned,
+        params.clientActivityDate,
+      ),
+    ]);
+  }
+
+  private async recordIf(
+    condition: boolean,
+    userId: string,
+    activityType: LearningActivityType,
+    sourceId: string,
+    value: number,
+    clientActivityDate?: string,
+  ) {
+    if (!condition) {
+      return;
+    }
+
+    await this.dailyChallengesService.recordInternalActivity({
+      userId,
+      activityType,
+      sourceId,
+      value,
+      clientActivityDate,
+    });
+  }
+
+  private buildQuestionFormatStats(
+    questions: QuizQuestion[],
+    answers: QuizAttemptAnswer[],
+  ) {
+    const answerMap = new Map(
+      answers.map((answer) => [answer.questionId, answer]),
+    );
+
+    let fillInTheBlanksCorrect = 0;
+    let audioTranscriptionCorrect = 0;
+    let trueFalseCorrect = 0;
+    let audioTrackCount = 0;
+
+    let matchPairTotal = 0;
+    let matchPairCorrect = 0;
+
+    for (const question of questions) {
+      const answer = answerMap.get(question.id);
+      const isCorrect = Boolean(answer?.isCorrect);
+
+      const hasAudio =
+        Boolean(question.mediaFileId) || Boolean(question.generatedAudioText);
+
+      if (hasAudio) {
+        audioTrackCount += 1;
+      }
+
+      if (
+        question.questionType === QuizQuestionFormat.FILL_IN_THE_BLANKS &&
+        isCorrect
+      ) {
+        fillInTheBlanksCorrect += 1;
+      }
+
+      if (
+        question.questionType === QuizQuestionFormat.LISTEN_AND_ASSEMBLE &&
+        isCorrect
+      ) {
+        audioTranscriptionCorrect += 1;
+      }
+
+      if (
+        question.questionType === QuizQuestionFormat.TRUE_FALSE &&
+        isCorrect
+      ) {
+        trueFalseCorrect += 1;
+      }
+
+      if (question.questionType === QuizQuestionFormat.MATCH_THE_PAIR) {
+        matchPairTotal += 1;
+
+        if (isCorrect) {
+          matchPairCorrect += 1;
+        }
+      }
+    }
+
+    return {
+      fillInTheBlanksCorrect,
+      audioTranscriptionCorrect,
+      trueFalseCorrect,
+      audioTrackCount,
+      matchPairsPerfect:
+        matchPairTotal > 0 && matchPairTotal === matchPairCorrect,
+    };
   }
 
   async getSessionResult(
@@ -225,6 +478,7 @@ export class QuizSessionsService {
   ): Promise<QuizSessionResultResponse> {
     const session = await this.getSessionForUser(sessionId, user.id, [
       'answers',
+      'lesson',
     ]);
 
     if (session.status !== QuizSessionStatus.SUBMITTED) {
@@ -232,9 +486,304 @@ export class QuizSessionsService {
     }
 
     const questions = await this.findActiveQuestions(session.quizId);
-    const elapsedSeconds = this.calculateElapsedSeconds(session);
+    const totalTimeSeconds =
+      session.timeTakenSeconds || this.calculateElapsedSeconds(session) || 0;
 
-    return this.calculateResult(session, questions, elapsedSeconds);
+    const result = this.calculateResult(session, questions, totalTimeSeconds);
+    const reward =
+      (await this.scoringService.findQuizCompletionXp(session.id)) ??
+      this.buildFallbackReward(result);
+
+    const streak = await this.streakService.getUserStreakSummary(user.id);
+
+    return this.buildRewardedResult({
+      session,
+      result,
+      reward,
+      streak,
+    });
+  }
+
+  async getSessionReview(sessionId: string, user: QuizRequestUser) {
+    const session = await this.getSessionForUser(sessionId, user.id, [
+      'answers',
+      'answers.items',
+      'lesson',
+    ]);
+
+    if (session.status !== QuizSessionStatus.SUBMITTED) {
+      throw new BadRequestException('Quiz session is not submitted yet');
+    }
+
+    const questions = await this.findActiveQuestions(session.quizId);
+    const answerMap = new Map<string, QuizAttemptAnswer>();
+
+    for (const answer of session.answers ?? []) {
+      answerMap.set(answer.questionId, answer);
+    }
+
+    return {
+      sessionId: session.id,
+      quizId: session.quizId,
+      lessonId: session.lessonId,
+      lessonTitle: session.lesson?.title ?? null,
+      totalQuestions: questions.length,
+      correctAnswers: session.correctAnswers,
+      wrongAnswers: questions.length - session.correctAnswers,
+      scorePercentage: Number(session.score ?? 0),
+      items: questions.map((question) =>
+        this.buildReviewItem(question, answerMap.get(question.id) ?? null),
+      ),
+    };
+  }
+
+  async getSessionShareCard(sessionId: string, user: QuizRequestUser) {
+    const result = await this.getSessionResult(sessionId, user);
+
+    return {
+      sessionId: result.sessionId,
+      title: 'Milestone Reached',
+      brandName: 'Italir Pothe',
+      headline: result.completedTitle,
+      message: result.completedMessage,
+      badges: [
+        `+${result.totalXpEarned ?? result.earnedXp} XP`,
+        `${result.streak?.currentDays ?? 0} Day Streak`,
+        `${Math.round(result.accuracyPercent ?? result.scorePercentage)}% Accuracy`,
+      ],
+      shareText: `${result.completedTitle}! I completed ${result.lessonTitle ?? 'a lesson'} on Italir Pothe with ${Math.round(
+        result.accuracyPercent ?? result.scorePercentage,
+      )}% accuracy and earned +${result.totalXpEarned ?? result.earnedXp} XP.`,
+    };
+  }
+
+  private buildRewardedResult(params: {
+    session: QuizSession;
+    result: QuizSessionResultResponse;
+    reward: XpRewardSummary;
+    streak: UserStreakSummary;
+  }): QuizSessionResultResponse {
+    const lessonTitle = params.session.lesson?.title ?? 'Lesson';
+
+    return {
+      ...params.result,
+      lessonTitle,
+      completedTitle: 'Bravissimo!',
+      completedMessage: `You completed ${lessonTitle}!`,
+      timeTakenSeconds: params.session.timeTakenSeconds,
+      accuracyPercent: params.result.scorePercentage,
+      earnedXp: params.reward.totalXpEarned,
+      baseXp: params.reward.baseXp,
+      bonusXp: params.reward.bonusXp,
+      boostMultiplier: params.reward.boostMultiplier,
+      boostXp: params.reward.boostXp,
+      totalXpEarned: params.reward.totalXpEarned,
+      xpBoost: params.reward.xpBoost,
+      streak: params.streak,
+      league: {
+        previousRank: null,
+        currentRank: null,
+        movedUp: false,
+      },
+    };
+  }
+
+  private buildFallbackReward(
+    result: QuizSessionResultResponse,
+  ): XpRewardSummary {
+    const bonusXp =
+      result.scoring.comboBonus +
+      result.scoring.masteryBonus +
+      result.scoring.fastFinishBonus;
+
+    return {
+      baseXp: result.scoring.baseXp,
+      bonusXp,
+      boostMultiplier: 1,
+      boostXp: 0,
+      totalXpEarned: result.scoring.totalXp,
+      xpBoost: {
+        isActive: false,
+        multiplier: 1,
+        remainingSeconds: null,
+        expiresAt: null,
+      },
+    };
+  }
+
+  private buildReviewItem(
+    question: QuizQuestion,
+    answer: QuizAttemptAnswer | null,
+  ) {
+    const sortedAnswerItems = [...(answer?.items ?? [])].sort(
+      (first, second) => {
+        return (first.sequenceOrder ?? 0) - (second.sequenceOrder ?? 0);
+      },
+    );
+
+    return {
+      questionId: question.id,
+      questionType: question.questionType,
+      title: question.title,
+      promptText: question.promptText,
+      helperText: question.helperText,
+      translationText: question.translationText,
+      mediaFileId: question.mediaFileId,
+      generatedAudioText: question.generatedAudioText,
+      points: question.points,
+      sortOrder: question.sortOrder,
+      isCorrect: answer?.isCorrect ?? false,
+      userAnswer: this.buildReviewUserAnswer(
+        question,
+        answer,
+        sortedAnswerItems,
+      ),
+      correctAnswer: this.buildReviewCorrectAnswer(question),
+      options: (question.options ?? []).map((option) => ({
+        id: option.id,
+        optionText: option.optionText,
+        isCorrect: option.isCorrect,
+        isSelected: answer?.selectedOptionId === option.id,
+      })),
+      sequenceItems: (question.sequenceItems ?? []).map((item) => ({
+        id: item.id,
+        wordText: item.wordText,
+        isRequired: item.isRequired,
+        sortOrder: item.sortOrder,
+        isSelected: sortedAnswerItems.some(
+          (answerItem) =>
+            this.normalizeAnswerText(answerItem.answerText ?? '') ===
+            this.normalizeAnswerText(item.wordText),
+        ),
+      })),
+      matchingPairs: (question.pairs ?? []).map((pair) => ({
+        id: pair.id,
+        leftText: pair.leftText,
+        rightText: pair.rightText,
+        leftLabel: pair.leftLabel,
+        rightLabel: pair.rightLabel,
+        selectedRightText:
+          sortedAnswerItems.find((item) => item.pairId === pair.id)
+            ?.matchedText ?? null,
+      })),
+      acceptedAnswers: (question.acceptedAnswers ?? []).map(
+        (acceptedAnswer) => ({
+          id: acceptedAnswer.id,
+          answerText: acceptedAnswer.answerText,
+          isPrimary: acceptedAnswer.isPrimary,
+        }),
+      ),
+    };
+  }
+
+  private buildReviewUserAnswer(
+    question: QuizQuestion,
+    answer: QuizAttemptAnswer | null,
+    sortedAnswerItems: QuizAttemptAnswerItem[],
+  ): Record<string, unknown> | null {
+    if (!answer) {
+      return null;
+    }
+
+    switch (question.questionType) {
+      case QuizQuestionFormat.LISTENING_MCQ:
+      case QuizQuestionFormat.WORD_TRANSLATION:
+      case QuizQuestionFormat.TRUE_FALSE:
+      case QuizQuestionFormat.FILL_IN_THE_BLANKS:
+      case QuizQuestionFormat.IDENTIFY_IMAGE: {
+        const selectedOption = (question.options ?? []).find(
+          (option) => option.id === answer.selectedOptionId,
+        );
+
+        return {
+          selectedOptionId: answer.selectedOptionId,
+          selectedOptionText: selectedOption?.optionText ?? null,
+        };
+      }
+
+      case QuizQuestionFormat.SENTENCE_TRANSLATION:
+      case QuizQuestionFormat.LISTEN_AND_ASSEMBLE:
+        return {
+          sequenceAnswerTexts: sortedAnswerItems
+            .map((item) => item.answerText)
+            .filter((item): item is string => Boolean(item)),
+        };
+
+      case QuizQuestionFormat.MATCH_THE_PAIR:
+        return {
+          matchingAnswers: sortedAnswerItems.map((item) => ({
+            pairId: item.pairId,
+            matchedText: item.matchedText,
+          })),
+        };
+
+      case QuizQuestionFormat.WRITING_WORD_TRANSLATION:
+        return {
+          writtenAnswer: answer.writtenAnswer,
+        };
+
+      default:
+        return null;
+    }
+  }
+
+  private buildReviewCorrectAnswer(
+    question: QuizQuestion,
+  ): Record<string, unknown> | null {
+    switch (question.questionType) {
+      case QuizQuestionFormat.LISTENING_MCQ:
+      case QuizQuestionFormat.WORD_TRANSLATION:
+      case QuizQuestionFormat.TRUE_FALSE:
+      case QuizQuestionFormat.FILL_IN_THE_BLANKS:
+      case QuizQuestionFormat.IDENTIFY_IMAGE: {
+        const correctOption = (question.options ?? []).find(
+          (option) => option.isCorrect,
+        );
+
+        return {
+          optionId: correctOption?.id ?? null,
+          optionText: correctOption?.optionText ?? null,
+        };
+      }
+
+      case QuizQuestionFormat.SENTENCE_TRANSLATION:
+      case QuizQuestionFormat.LISTEN_AND_ASSEMBLE: {
+        const correctSequence = (question.sequenceItems ?? [])
+          .filter((item) => item.isRequired)
+          .sort((first, second) => first.sortOrder - second.sortOrder)
+          .map((item) => item.wordText);
+
+        return {
+          sequenceAnswerTexts: correctSequence,
+          sequenceText: correctSequence.join(' '),
+        };
+      }
+
+      case QuizQuestionFormat.MATCH_THE_PAIR:
+        return {
+          pairs: (question.pairs ?? []).map((pair) => ({
+            pairId: pair.id,
+            leftText: pair.leftText,
+            rightText: pair.rightText,
+          })),
+        };
+
+      case QuizQuestionFormat.WRITING_WORD_TRANSLATION: {
+        const primaryAnswer =
+          (question.acceptedAnswers ?? []).find((answer) => answer.isPrimary) ??
+          question.acceptedAnswers?.[0];
+
+        return {
+          answerText: primaryAnswer?.answerText ?? null,
+          acceptedAnswers: (question.acceptedAnswers ?? []).map(
+            (answer) => answer.answerText,
+          ),
+        };
+      }
+
+      default:
+        return null;
+    }
   }
 
   private async getSessionForUser(
@@ -243,15 +792,18 @@ export class QuizSessionsService {
     relations: string[] = [],
   ): Promise<QuizSession> {
     const session = await this.sessionRepository.findOne({
-      where: {
-        id: sessionId,
-        userId,
-      },
+      where: { id: sessionId },
       relations,
     });
 
     if (!session) {
-      throw new UnauthorizedException('Quiz session not found');
+      throw new NotFoundException('Quiz session not found');
+    }
+
+    if (session.userId !== userId) {
+      throw new UnauthorizedException(
+        'Quiz session does not belong to this user',
+      );
     }
 
     return session;
@@ -317,9 +869,11 @@ export class QuizSessionsService {
     session: QuizSession,
     questions: QuizQuestion[],
   ): QuizSessionResponse {
-    const answerMap = new Map(
-      (session.answers ?? []).map((answer) => [answer.questionId, answer]),
-    );
+    const answerMap = new Map<string, QuizAttemptAnswer>();
+
+    for (const answer of session.answers ?? []) {
+      answerMap.set(answer.questionId, answer);
+    }
 
     return {
       id: session.id,

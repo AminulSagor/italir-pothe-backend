@@ -7,8 +7,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { User } from '../users/entities/user.entity';
 import { JwtStrategy } from './jwt.strategy';
-import { SmsService } from '../notifications/sms.service';
-import { EmailService } from '../notifications/email.service';
+import { SmsService } from '../common/services/sms.service';
+import { EmailService } from '../common/services/email.service';
 import { Otp } from 'src/users/entities/otp.entity';
 
 @Module({

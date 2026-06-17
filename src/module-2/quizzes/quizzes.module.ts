@@ -16,6 +16,8 @@ import { QuizAttemptAnswerItem } from './entities/quiz-attempt-answer-item.entit
 import { QuizSessionsController } from './controllers/quiz-sessions.controller';
 import { QuizSessionsService } from './services/quiz-sessions.service';
 import { QuizGradingService } from './services/quiz-grading.service';
+import { ScoringModule } from '../scoring/scoring.module';
+import { DailyChallengesModule } from '../daily-challenges/daily-challenges.module';
 
 @Module({
   imports: [
@@ -31,6 +33,8 @@ import { QuizGradingService } from './services/quiz-grading.service';
       QuizAttemptAnswer,
       QuizAttemptAnswerItem,
     ]),
+    ScoringModule,
+    DailyChallengesModule,
   ],
   controllers: [AdminQuizzesController, QuizSessionsController],
   providers: [AdminQuizzesService, QuizSessionsService, QuizGradingService],

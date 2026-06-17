@@ -57,6 +57,9 @@ export class QuizSession {
   @Column({ type: 'integer', default: 0 })
   earnedXp: number;
 
+  @Column({ type: 'integer', default: 0 })
+  timeTakenSeconds: number;
+
   @Column({ type: 'timestamptz', nullable: true })
   startedAt: Date | null;
 

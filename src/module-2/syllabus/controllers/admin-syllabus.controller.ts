@@ -39,6 +39,16 @@ export class AdminSyllabusController {
     return this.adminSyllabusService.findCourseSyllabus(courseId);
   }
 
+  @Get('course-chapters/:chapterId/lessons')
+  async findChapterLessons(@Param('chapterId') chapterId: string) {
+    return this.adminSyllabusService.findChapterLessons(chapterId);
+  }
+
+  @Get('courses/:courseId/summary')
+  async getCourseSummary(@Param('courseId') courseId: string) {
+    return this.adminSyllabusService.getCourseSummary(courseId);
+  }
+
   @Patch('course-chapters/:chapterId')
   async updateChapter(
     @Param('chapterId') chapterId: string,

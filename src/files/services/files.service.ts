@@ -129,6 +129,7 @@ export class FilesService {
 
   async createSignedReadUrl(fileId: string) {
     const file = await this.findActiveFileById(fileId);
+
     const signedReadUrl = await this.s3Service.createSignedReadUrl({
       storageKey: file.storageKey,
       mimeType: file.mimeType,
@@ -137,11 +138,18 @@ export class FilesService {
     });
 
     return {
-      fileId: file.id,
-      storageKey: file.storageKey,
-      publicUrl: this.s3Service.createPublicUrl(file.storageKey),
       signedReadUrl,
       expiresInSeconds: this.s3Service.getReadUrlExpiresInSeconds(),
+      file: {
+        id: file.id,
+        originalName: file.originalName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        filePurpose: file.filePurpose,
+        visibility: file.visibility,
+        uploadStatus: file.uploadStatus,
+        publicUrl: this.s3Service.createPublicUrl(file.storageKey),
+      },
     };
   }
 
@@ -299,17 +307,21 @@ export class FilesService {
       FilePurpose.QUIZ_AUDIO,
       FilePurpose.EXAM_SPEAKING_AUDIO,
       FilePurpose.SURVIVAL_AUDIO,
+      FilePurpose.SKILL_BUILDER_AUDIO,
     ];
 
     const videoPurposes = [
       FilePurpose.LESSON_VIDEO,
       FilePurpose.CAF_HERO_VIDEO,
+      FilePurpose.SKILL_BUILDER_VIDEO,
     ];
 
     const pdfPurposes = [
       FilePurpose.LESSON_PDF,
       FilePurpose.CERTIFICATE_PDF,
       FilePurpose.CAF_CHECKLIST_PDF,
+      FilePurpose.SURVIVAL_PDF,
+      FilePurpose.SKILL_BUILDER_PDF,
     ];
 
     if (imagePurposes.includes(filePurpose) && !mimeType.startsWith('image/')) {

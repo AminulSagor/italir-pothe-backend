@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsInt,
   IsOptional,
@@ -80,4 +81,8 @@ export class SubmitExamAttemptDto {
   @IsInt()
   @Min(0)
   totalDurationSeconds?: number;
+
+  @IsOptional()
+  @IsDateString()
+  clientActivityDate?: string;
 }
