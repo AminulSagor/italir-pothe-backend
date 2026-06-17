@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, Repository } from 'typeorm';
 
 import { CreateCvDocumentDto } from '../dto/cv-document.dto';
 import {
@@ -101,6 +101,18 @@ export class CvBuilderService {
     return {
       message: 'CV template deleted successfully.',
       templateId: id,
+    };
+  }
+
+  async updateTemplateStatus(id: string, status: CvTemplateStatus) {
+    const template = await this.findTemplateEntityById(id);
+    template.status = status;
+
+    const savedTemplate = await this.cvTemplateRepository.save(template);
+
+    return {
+      message: 'CV template status updated successfully.',
+      template: this.mapTemplateResponse(savedTemplate),
     };
   }
 
@@ -226,12 +238,17 @@ export class CvBuilderService {
     activeOnly: boolean,
   ) {
     const pagination = this.normalizePagination(query);
-    const where: FindOptionsWhere<CvTemplate> = {};
+    const baseWhere: FindOptionsWhere<CvTemplate> = {};
 
-    if (activeOnly) where.status = CvTemplateStatus.ACTIVE;
+    if (activeOnly) baseWhere.status = CvTemplateStatus.ACTIVE;
     if (query.styleType && query.styleType !== 'all') {
-      where.styleType = query.styleType as CvTemplateStyleType;
+      baseWhere.styleType = query.styleType as CvTemplateStyleType;
     }
+
+    const search = query.search?.trim();
+    const where: FindOptionsWhere<CvTemplate> = search
+      ? { ...baseWhere, title: ILike(`%${search}%`) }
+      : baseWhere;
 
     const [templates, totalItems] = await this.cvTemplateRepository.findAndCount({
       where,

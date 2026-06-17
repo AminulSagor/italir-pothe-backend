@@ -61,6 +61,18 @@ export class CvTemplateListQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(['all', ...Object.values(CvTemplateStyleType)])
   styleType?: 'all' | CvTemplateStyleType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Transform(trimString)
+  search?: string;
+}
+
+export class UpdateCvTemplateStatusDto {
+  @IsNotEmpty()
+  @IsIn([CvTemplateStatus.DRAFT, CvTemplateStatus.ACTIVE])
+  status: CvTemplateStatus;
 }
 
 export class CreateCvTemplateDto {

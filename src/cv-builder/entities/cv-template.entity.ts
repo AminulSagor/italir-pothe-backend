@@ -10,7 +10,6 @@ import {
 export enum CvTemplateStatus {
   DRAFT = 'draft',
   ACTIVE = 'active',
-  ARCHIVED = 'archived',
 }
 
 export enum CvTemplateStyleType {

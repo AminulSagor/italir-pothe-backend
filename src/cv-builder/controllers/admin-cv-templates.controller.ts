@@ -25,6 +25,7 @@ import {
   CvTemplateListQueryDto,
   SaveCvDefaultLayoutDto,
   UpdateCvTemplateDto,
+  UpdateCvTemplateStatusDto,
 } from '../dto/cv-template.dto';
 import { CvTemplateStyleType } from '../entities/cv-template.entity';
 import { CvBuilderService } from '../services/cv-builder.service';
@@ -85,6 +86,14 @@ export class AdminCvTemplatesController {
     @Body() dto: UpdateCvTemplateDto,
   ) {
     return this.cvBuilderService.updateTemplate(id, dto);
+  }
+
+  @Patch(':id/status')
+  async updateTemplateStatus(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateCvTemplateStatusDto,
+  ) {
+    return this.cvBuilderService.updateTemplateStatus(id, dto.status);
   }
 
   @Delete(':id')

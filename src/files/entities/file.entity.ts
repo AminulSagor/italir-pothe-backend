@@ -23,6 +23,7 @@ export enum FilePurpose {
   PROFILE_AVATAR = 'profile_avatar',
   WEBINAR_THUMBNAIL = 'webinar_thumbnail',
   CV_PHOTO = 'cv_photo',
+  CV_TEMPLATE_THUMBNAIL = 'cv_template_thumbnail',
 }
 
 export enum FileVisibility {
