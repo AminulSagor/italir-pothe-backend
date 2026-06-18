@@ -300,6 +300,8 @@ export class FilesService {
       FilePurpose.PROFILE_AVATAR,
       FilePurpose.REPORT_EVIDENCE,
       FilePurpose.WEBINAR_THUMBNAIL,
+      FilePurpose.CV_PHOTO,
+      FilePurpose.CV_TEMPLATE_THUMBNAIL,
     ];
 
     const audioPurposes = [

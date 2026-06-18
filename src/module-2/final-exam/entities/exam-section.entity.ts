@@ -16,9 +16,9 @@ import {
   ExamSectionStatus,
   ExamSectionType,
 } from '../types/final-exam.type';
-import { ExamTemplate } from './exam-template.entity';
-import { ExamSectionRule } from './exam-section-rule.entity';
 import { ExamQuestion } from './exam-question.entity';
+import { ExamSectionRule } from './exam-section-rule.entity';
+import { ExamTemplate } from './exam-template.entity';
 
 @Entity('exam_sections')
 export class ExamSection {
@@ -44,7 +44,10 @@ export class ExamSection {
   @Column({ type: 'integer', default: 0 })
   questionCount: number;
 
-  @Column({ type: 'integer', default: 70 })
+  @Column({ type: 'integer', default: 0 })
+  targetQuestionCount: number;
+
+  @Column({ type: 'integer', default: 0 })
   passingPercent: number;
 
   @Column({ type: 'integer', nullable: true })

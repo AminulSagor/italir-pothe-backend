@@ -14,12 +14,17 @@ import { QuizQuestionFormat } from 'src/module-2/quizzes/types/quiz-question-for
 import {
   ExamAudioSourceType,
   ExamQuestionStatus,
+  FinalExamManualQuestionFormat,
 } from '../types/final-exam.type';
+import { ExamAcceptedAnswer } from './exam-accepted-answer.entity';
 import { ExamMatchingPair } from './exam-matching-pair.entity';
 import { ExamQuestionOption } from './exam-question-option.entity';
 import { ExamSection } from './exam-section.entity';
 import { ExamSequenceItem } from './exam-sequence-item.entity';
-import { ExamAcceptedAnswer } from './exam-accepted-answer.entity';
+
+export type FinalExamQuestionFormat =
+  | QuizQuestionFormat
+  | FinalExamManualQuestionFormat;
 
 @Entity('exam_questions')
 export class ExamQuestion {
@@ -31,7 +36,7 @@ export class ExamQuestion {
   sectionId: string;
 
   @Column({ type: 'varchar', length: 50 })
-  questionFormat: QuizQuestionFormat;
+  questionFormat: FinalExamQuestionFormat;
 
   @Column({ type: 'varchar', length: 180, nullable: true })
   title: string | null;
@@ -50,6 +55,9 @@ export class ExamQuestion {
 
   @Column({ type: 'uuid', nullable: true })
   imageFileId: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  generatedAudioText: string | null;
 
   @Column({ type: 'boolean', nullable: true })
   correctBoolean: boolean | null;

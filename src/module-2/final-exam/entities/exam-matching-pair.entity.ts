@@ -26,6 +26,12 @@ export class ExamMatchingPair {
   @Column({ type: 'varchar', length: 255 })
   rightText: string;
 
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  leftLabel: string | null;
+
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  rightLabel: string | null;
+
   @Column({ type: 'integer', default: 0 })
   sortOrder: number;
 
