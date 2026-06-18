@@ -126,6 +126,42 @@ export class QuizSessionsService {
     return this.findSessionById(savedSession.id, user);
   }
 
+
+  async getLessonQuizAvailability(lessonId: string) {
+    const quiz = await this.quizRepository.findOne({
+      where: {
+        lessonId,
+        status: QuizStatus.PUBLISHED,
+      },
+      order: {
+        sortOrder: 'ASC',
+        createdAt: 'DESC',
+      },
+    });
+
+    if (!quiz) {
+      return {
+        lessonId,
+        hasQuiz: false,
+        quizId: null,
+        title: null,
+        description: null,
+        totalQuestions: 0,
+      };
+    }
+
+    const questions = await this.findActiveQuestions(quiz.id);
+
+    return {
+      lessonId,
+      hasQuiz: questions.length > 0,
+      quizId: quiz.id,
+      title: quiz.title,
+      description: quiz.description,
+      totalQuestions: questions.length,
+    };
+  }
+
   async findSessionById(
     sessionId: string,
     user: QuizRequestUser,

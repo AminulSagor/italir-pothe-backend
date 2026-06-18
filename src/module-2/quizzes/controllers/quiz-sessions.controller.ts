@@ -22,6 +22,12 @@ import { QuizSessionsService } from '../services/quiz-sessions.service';
 export class QuizSessionsController {
   constructor(private readonly quizSessionsService: QuizSessionsService) {}
 
+
+  @Get('lessons/:lessonId/availability')
+  async getLessonQuizAvailability(@Param('lessonId') lessonId: string) {
+    return this.quizSessionsService.getLessonQuizAvailability(lessonId);
+  }
+
   @Post('lessons/:lessonId/start')
   async startLessonQuiz(
     @Param('lessonId') lessonId: string,
