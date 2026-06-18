@@ -1,0 +1,92 @@
+{
+  "info": {
+    "_postman_id": "d6d6f2d6-9f0f-4b3b-9a7b-1a2b3c4d5e6f",
+    "name": "Moderation Admin - Report Center",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Postman collection for the Moderation / Report Center admin endpoints"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "adminToken", "value": "", "type": "string" },
+    { "key": "page", "value": "1", "type": "string" },
+    { "key": "limit", "value": "10", "type": "string" },
+    { "key": "status", "value": "", "type": "string" },
+    { "key": "reason", "value": "", "type": "string" },
+    { "key": "caseNumber", "value": "REP-123456", "type": "string" },
+    { "key": "reportId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Get Dashboard Metrics",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/moderation/dashboard/metrics",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "moderation", "dashboard", "metrics"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List Reports (paginated)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/moderation/reports?page={{page}}&limit={{limit}}&status={{status}}&reason={{reason}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "moderation", "reports"],
+          "query": [
+            { "key": "page", "value": "{{page}}" },
+            { "key": "limit", "value": "{{limit}}" },
+            { "key": "status", "value": "{{status}}" },
+            { "key": "reason", "value": "{{reason}}" }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Report by Case Number",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/moderation/reports/{{caseNumber}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "moderation", "reports", "{{caseNumber}}"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Action on Report (ban/warn/dismiss)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{adminToken}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"action_type\": \"permanent_ban\",\n  \"action_reason\": \"Example: user posted spam links in public channels.\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/moderation/reports/{{reportId}}/action",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "moderation", "reports", "{{reportId}}", "action"]
+        }
+      },
+      "response": []
+    }
+  ]
+}
