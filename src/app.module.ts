@@ -17,6 +17,7 @@ import { QuizzesModule } from './module-2/quizzes/quizzes.module';
 import { FinalExamModule } from './module-2/final-exam/final-exam.module';
 import { CertificatesModule } from './module-2/certificates/certificates.module';
 import { WebinarModule } from './webinar/webinar.module';
+import { ModerationModule } from './moderation/moderation.module';
 import { CvBuilderModule } from './cv-builder/cv-builder.module';
 import { UserReportsModule } from './user-reports/user-reports.module';
 import { ScoringModule } from './module-2/scoring/scoring.module';
@@ -67,6 +68,7 @@ import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs
     FinalExamModule,
     CertificatesModule,
     WebinarModule,
+    ModerationModule,
     CvBuilderModule,
     UserReportsModule,
     ScoringModule,
