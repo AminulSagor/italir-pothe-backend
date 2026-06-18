@@ -102,7 +102,7 @@ export class UserReportsService {
       // derive public URL via files service helper
       try {
         const read = await this.filesService.createSignedReadUrl(confirmedFile.id);
-        evidenceUrl = read.publicUrl;
+        evidenceUrl = read.file?.publicUrl ?? null;
       } catch (err) {
         evidenceUrl = null;
       }
