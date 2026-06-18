@@ -1,35 +1,67 @@
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
-  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 import { QuizQuestionFormat } from 'src/module-2/quizzes/types/quiz-question-format.type';
 import {
   ExamAudioSourceType,
   ExamQuestionStatus,
-  ExamReviewMode,
-  ExamRetakePolicy,
-  ExamSectionStatus,
-  ExamSectionType,
   ExamTemplateStatus,
 } from '../types/final-exam.type';
+import { PartialType } from '@nestjs/mapped-types';
 
-export class CreateExamTemplateDto {
+const toBoolean = ({ value }: { value: unknown }) => {
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return value;
+};
+
+export class ExamListQueryDto {
+  @IsOptional()
+  @IsEnum(ExamTemplateStatus)
+  status?: ExamTemplateStatus;
+
   @IsOptional()
   @IsUUID()
   courseId?: string;
 
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  linkedOnly?: boolean;
+
+  @IsOptional()
   @IsString()
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
+export class CreateExamTemplateDto {
+  @IsString()
+  @MaxLength(180)
   title: string;
 
   @IsOptional()
@@ -37,17 +69,20 @@ export class CreateExamTemplateDto {
   description?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(100)
   overallPassingPercent?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   totalDurationMinutes?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
@@ -68,10 +103,11 @@ export class CreateExamTemplateDto {
   @IsOptional()
   @IsString()
   resultNoticeBn?: string;
+}
 
-  @IsOptional()
-  @IsEnum(ExamTemplateStatus)
-  status?: ExamTemplateStatus;
+export class LinkFinalExamWithCourseDto {
+  @IsUUID()
+  courseId: string;
 }
 
 export class UpdateExamTemplateDto {
@@ -81,6 +117,7 @@ export class UpdateExamTemplateDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(180)
   title?: string;
 
   @IsOptional()
@@ -88,17 +125,20 @@ export class UpdateExamTemplateDto {
   description?: string | null;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(100)
   overallPassingPercent?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   totalDurationMinutes?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)
@@ -119,136 +159,11 @@ export class UpdateExamTemplateDto {
   @IsOptional()
   @IsString()
   resultNoticeBn?: string | null;
-
-  @IsOptional()
-  @IsEnum(ExamTemplateStatus)
-  status?: ExamTemplateStatus;
 }
 
-export class UpsertExamSectionRuleDto {
-  @IsOptional()
-  @IsBoolean()
-  playbackLocked?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  accentBarEnabled?: boolean;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  minWords?: number | null;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  maxWords?: number | null;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  maxDurationSeconds?: number | null;
-
-  @IsOptional()
-  @IsEnum(ExamRetakePolicy)
-  rerecordPolicy?: ExamRetakePolicy;
-}
-
-export class CreateExamSectionDto {
-  @IsEnum(ExamSectionType)
-  sectionType: ExamSectionType;
-
+export class FinalExamQuestionOptionDto {
   @IsString()
-  title: string;
-
-  @IsOptional()
-  @IsString()
-  subtitle?: string;
-
-  @IsEnum(ExamReviewMode)
-  reviewMode: ExamReviewMode;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  questionCount?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  passingPercent?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  timeLimitSeconds?: number | null;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  sortOrder?: number;
-
-  @IsOptional()
-  @IsEnum(ExamSectionStatus)
-  status?: ExamSectionStatus;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => UpsertExamSectionRuleDto)
-  rule?: UpsertExamSectionRuleDto;
-}
-
-export class UpdateExamSectionDto {
-  @IsOptional()
-  @IsEnum(ExamSectionType)
-  sectionType?: ExamSectionType;
-
-  @IsOptional()
-  @IsString()
-  title?: string;
-
-  @IsOptional()
-  @IsString()
-  subtitle?: string | null;
-
-  @IsOptional()
-  @IsEnum(ExamReviewMode)
-  reviewMode?: ExamReviewMode;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  questionCount?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  passingPercent?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  timeLimitSeconds?: number | null;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  sortOrder?: number;
-
-  @IsOptional()
-  @IsEnum(ExamSectionStatus)
-  status?: ExamSectionStatus;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => UpsertExamSectionRuleDto)
-  rule?: UpsertExamSectionRuleDto;
-}
-
-export class ExamQuestionOptionDto {
-  @IsString()
+  @MaxLength(255)
   optionText: string;
 
   @IsOptional()
@@ -256,88 +171,105 @@ export class ExamQuestionOptionDto {
   isCorrect?: boolean;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   sortOrder?: number;
 }
 
-export class ExamMatchingPairDto {
+export class FinalExamMatchingPairDto {
   @IsString()
+  @MaxLength(180)
   leftText: string;
 
   @IsString()
+  @MaxLength(180)
   rightText: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  leftLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  rightLabel?: string;
+
+  @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   sortOrder?: number;
 }
 
-export class ExamSequenceItemDto {
+export class FinalExamSequenceItemDto {
   @IsString()
-  itemText: string;
+  @MaxLength(120)
+  wordText: string;
 
   @IsOptional()
   @IsBoolean()
-  isDecoy?: boolean;
+  isRequired?: boolean;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
-  correctOrder?: number;
+  sortOrder?: number;
 }
 
-export class ExamAcceptedAnswerDto {
+export class FinalExamAcceptedAnswerDto {
   @IsString()
+  @MaxLength(180)
   answerText: string;
 
   @IsOptional()
   @IsBoolean()
-  ignoreCase?: boolean;
+  isPrimary?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  ignorePunctuation?: boolean;
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
 }
 
-export class CreateExamQuestionDto {
+export class CreateCoreQuizQuestionDto {
   @IsEnum(QuizQuestionFormat)
-  questionFormat: QuizQuestionFormat;
+  questionType: QuizQuestionFormat;
 
   @IsOptional()
   @IsString()
+  @MaxLength(180)
   title?: string;
 
   @IsOptional()
   @IsString()
-  subtitle?: string;
+  promptText?: string;
 
   @IsOptional()
   @IsString()
-  prompt?: string;
+  helperText?: string;
 
   @IsOptional()
   @IsString()
-  promptBn?: string;
+  translationText?: string;
 
   @IsOptional()
   @IsUUID()
-  audioFileId?: string;
+  mediaFileId?: string;
 
   @IsOptional()
-  @IsUUID()
-  imageFileId?: string;
+  @IsString()
+  generatedAudioText?: string;
 
   @IsOptional()
   @IsBoolean()
   correctBoolean?: boolean;
 
   @IsOptional()
-  @IsEnum(ExamAudioSourceType)
-  audioSourceType?: ExamAudioSourceType;
-
-  @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   sortOrder?: number;
@@ -349,66 +281,64 @@ export class CreateExamQuestionDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamQuestionOptionDto)
-  options?: ExamQuestionOptionDto[];
+  @Type(() => FinalExamQuestionOptionDto)
+  options?: FinalExamQuestionOptionDto[];
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamMatchingPairDto)
-  pairs?: ExamMatchingPairDto[];
+  @Type(() => FinalExamMatchingPairDto)
+  pairs?: FinalExamMatchingPairDto[];
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamSequenceItemDto)
-  sequenceItems?: ExamSequenceItemDto[];
+  @Type(() => FinalExamSequenceItemDto)
+  sequenceItems?: FinalExamSequenceItemDto[];
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamAcceptedAnswerDto)
-  acceptedAnswers?: ExamAcceptedAnswerDto[];
+  @Type(() => FinalExamAcceptedAnswerDto)
+  acceptedAnswers?: FinalExamAcceptedAnswerDto[];
 }
 
-export class UpdateExamQuestionDto {
+export class UpdateCoreQuizQuestionDto {
   @IsOptional()
   @IsEnum(QuizQuestionFormat)
-  questionFormat?: QuizQuestionFormat;
+  questionType?: QuizQuestionFormat;
 
   @IsOptional()
   @IsString()
+  @MaxLength(180)
   title?: string | null;
 
   @IsOptional()
   @IsString()
-  subtitle?: string | null;
+  promptText?: string | null;
 
   @IsOptional()
   @IsString()
-  prompt?: string | null;
+  helperText?: string | null;
 
   @IsOptional()
   @IsString()
-  promptBn?: string | null;
+  translationText?: string | null;
 
   @IsOptional()
   @IsUUID()
-  audioFileId?: string | null;
+  mediaFileId?: string | null;
 
   @IsOptional()
-  @IsUUID()
-  imageFileId?: string | null;
+  @IsString()
+  generatedAudioText?: string | null;
 
   @IsOptional()
   @IsBoolean()
   correctBoolean?: boolean | null;
 
   @IsOptional()
-  @IsEnum(ExamAudioSourceType)
-  audioSourceType?: ExamAudioSourceType;
-
-  @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(0)
   sortOrder?: number;
@@ -420,48 +350,116 @@ export class UpdateExamQuestionDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamQuestionOptionDto)
-  options?: ExamQuestionOptionDto[];
+  @Type(() => FinalExamQuestionOptionDto)
+  options?: FinalExamQuestionOptionDto[];
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamMatchingPairDto)
-  pairs?: ExamMatchingPairDto[];
+  @Type(() => FinalExamMatchingPairDto)
+  pairs?: FinalExamMatchingPairDto[];
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamSequenceItemDto)
-  sequenceItems?: ExamSequenceItemDto[];
+  @Type(() => FinalExamSequenceItemDto)
+  sequenceItems?: FinalExamSequenceItemDto[];
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ExamAcceptedAnswerDto)
-  acceptedAnswers?: ExamAcceptedAnswerDto[];
+  @Type(() => FinalExamAcceptedAnswerDto)
+  acceptedAnswers?: FinalExamAcceptedAnswerDto[];
 }
 
-export class ExamListQueryDto {
+export class CreateListeningMiniMcqQuestionDto {
+  @IsString()
+  @MaxLength(180)
+  questionTitle: string;
+
   @IsOptional()
-  @IsEnum(ExamTemplateStatus)
-  status?: ExamTemplateStatus;
+  @IsEnum(ExamAudioSourceType)
+  audioSourceType?: ExamAudioSourceType;
 
   @IsOptional()
   @IsUUID()
-  courseId?: string;
-}
-
-export class UpdateManualScoreDto {
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(10)
-  writingScore?: number;
+  audioFileId?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsString()
+  generatedAudioText?: string;
+
+  @IsString()
+  questionPrompt: string;
+
+  @IsOptional()
+  @IsBoolean()
+  lockPlayback?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
   @Min(0)
-  @Max(10)
-  speakingScore?: number;
+  sortOrder?: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FinalExamQuestionOptionDto)
+  options: FinalExamQuestionOptionDto[];
 }
+
+export class UpsertWritingTaskDto {
+  @IsString()
+  @MaxLength(180)
+  title: string;
+
+  @IsString()
+  @MaxLength(180)
+  titleBn: string;
+
+  @IsString()
+  instruction: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  minWords?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  maxWords?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  italianAccentBarEnabled?: boolean;
+}
+
+export class UpsertSpeakingTaskDto {
+  @IsString()
+  @MaxLength(180)
+  title: string;
+
+  @IsString()
+  @MaxLength(180)
+  titleBn: string;
+
+  @IsString()
+  instruction: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  maxDurationSeconds?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  unlimitedRerecords?: boolean;
+}
+
+export class UpdateListeningMiniMcqQuestionDto extends PartialType(
+  CreateListeningMiniMcqQuestionDto,
+) {}

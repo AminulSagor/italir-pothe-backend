@@ -29,6 +29,12 @@ export class ExamAcceptedAnswer {
   @Column({ type: 'boolean', default: true })
   ignorePunctuation: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isPrimary: boolean;
+
+  @Column({ type: 'integer', default: 0 })
+  sortOrder: number;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

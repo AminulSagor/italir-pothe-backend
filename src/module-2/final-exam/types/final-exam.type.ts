@@ -1,3 +1,5 @@
+import { QuizQuestionFormat } from 'src/module-2/quizzes/types/quiz-question-format.type';
+
 export enum ExamTemplateStatus {
   DRAFT = 'draft',
   PUBLISHED = 'published',
@@ -63,3 +65,12 @@ export enum ExamAudioSourceType {
   MANUAL_UPLOAD = 'manual_upload',
   AI_VOICE = 'ai_voice',
 }
+
+export enum FinalExamManualQuestionFormat {
+  WRITING_TASK = 'writing_task',
+  SPEAKING_TASK = 'speaking_task',
+}
+
+export type FinalExamQuestionFormat =
+  | QuizQuestionFormat
+  | FinalExamManualQuestionFormat;
