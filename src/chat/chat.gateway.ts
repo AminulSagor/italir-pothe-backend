@@ -397,6 +397,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('presence:heartbeat')
+  async handlePresenceHeartbeat(client: Socket) {
+    const user: User = client.data.user;
+    if (!user) return { error: 'Unauthorized' };
+
+    try {
+      const res = await this.presenceService.heartbeat(user.id);
+      return res;
+    } catch (err) {
+      this.logger.warn(`presence heartbeat failed for ${user.id}`, err?.message ?? err);
+      return { error: 'Failed to refresh presence' };
+    }
+  }
+
   @SubscribeMessage('call:active')
   async handleGetActiveCall(client: Socket, payload: { directConversationId: string }) {
     const user: User = client.data.user;
