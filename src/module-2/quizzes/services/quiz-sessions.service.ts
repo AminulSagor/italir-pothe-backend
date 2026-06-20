@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 
 import {
   CheckQuizAnswerDto,
@@ -102,7 +102,7 @@ export class QuizSessionsService {
       throw new NotFoundException('Published quiz not found for this lesson');
     }
 
-    const questions = await this.findActiveQuestions(quiz.id);
+    const questions = await this.findPublishedQuizQuestions(quiz);
 
     if (questions.length === 0) {
       throw new BadRequestException('This quiz has no active questions');
@@ -150,7 +150,7 @@ export class QuizSessionsService {
       };
     }
 
-    const questions = await this.findActiveQuestions(quiz.id);
+    const questions = await this.findPublishedQuizQuestions(quiz);
 
     return {
       lessonId,
@@ -843,6 +843,49 @@ export class QuizSessionsService {
     }
 
     return session;
+  }
+
+  private async findPublishedQuizQuestions(
+    quiz: Quiz,
+  ): Promise<QuizQuestion[]> {
+    const activeQuestions = await this.findActiveQuestions(quiz.id);
+    if (activeQuestions.length > 0) {
+      return activeQuestions;
+    }
+
+    // Compatibility repair for quizzes published before publishing also
+    // activated their draft questions. Only repair when no active questions
+    // exist, so newly added draft questions are not exposed automatically.
+    const legacyQuestions = await this.questionRepository.find({
+      where: {
+        quizId: quiz.id,
+        status: Not(QuizQuestionStatus.ARCHIVED),
+      },
+      relations: ['options', 'pairs', 'sequenceItems', 'acceptedAnswers'],
+      order: {
+        sortOrder: 'ASC',
+        createdAt: 'ASC',
+      },
+    });
+
+    if (legacyQuestions.length === 0) {
+      return [];
+    }
+
+    await this.questionRepository.update(
+      {
+        quizId: quiz.id,
+        status: QuizQuestionStatus.DRAFT,
+      },
+      {
+        status: QuizQuestionStatus.ACTIVE,
+      },
+    );
+
+    return legacyQuestions.map((question) => {
+      question.status = QuizQuestionStatus.ACTIVE;
+      return this.sortQuestionRelations(question);
+    });
   }
 
   private async findActiveQuestions(quizId: string): Promise<QuizQuestion[]> {

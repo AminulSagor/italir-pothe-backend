@@ -18,10 +18,8 @@ import {
 import { QuizSessionsService } from '../services/quiz-sessions.service';
 
 @Controller('quiz-sessions')
-@UseGuards(JwtAuthGuard)
 export class QuizSessionsController {
   constructor(private readonly quizSessionsService: QuizSessionsService) {}
-
 
   @Get('lessons/:lessonId/availability')
   async getLessonQuizAvailability(@Param('lessonId') lessonId: string) {
@@ -29,6 +27,7 @@ export class QuizSessionsController {
   }
 
   @Post('lessons/:lessonId/start')
+  @UseGuards(JwtAuthGuard)
   async startLessonQuiz(
     @Param('lessonId') lessonId: string,
     @Req() request: AuthenticatedRequest,
@@ -40,6 +39,7 @@ export class QuizSessionsController {
   }
 
   @Get(':sessionId')
+  @UseGuards(JwtAuthGuard)
   async findSessionById(
     @Param('sessionId') sessionId: string,
     @Req() request: AuthenticatedRequest,
@@ -51,6 +51,7 @@ export class QuizSessionsController {
   }
 
   @Post(':sessionId/answers/check')
+  @UseGuards(JwtAuthGuard)
   async checkAnswer(
     @Param('sessionId') sessionId: string,
     @Body() dto: CheckQuizAnswerDto,
@@ -64,6 +65,7 @@ export class QuizSessionsController {
   }
 
   @Post(':sessionId/complete')
+  @UseGuards(JwtAuthGuard)
   async completeSession(
     @Param('sessionId') sessionId: string,
     @Body() dto: CompleteQuizSessionDto,
@@ -77,6 +79,7 @@ export class QuizSessionsController {
   }
 
   @Get(':sessionId/result')
+  @UseGuards(JwtAuthGuard)
   async getSessionResult(
     @Param('sessionId') sessionId: string,
     @Req() request: AuthenticatedRequest,
@@ -88,6 +91,7 @@ export class QuizSessionsController {
   }
 
   @Get(':sessionId/review')
+  @UseGuards(JwtAuthGuard)
   async getSessionReview(
     @Param('sessionId') sessionId: string,
     @Req() request: AuthenticatedRequest,
@@ -99,6 +103,7 @@ export class QuizSessionsController {
   }
 
   @Get(':sessionId/share-card')
+  @UseGuards(JwtAuthGuard)
   async getSessionShareCard(
     @Param('sessionId') sessionId: string,
     @Req() request: AuthenticatedRequest,

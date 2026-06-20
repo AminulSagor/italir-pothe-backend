@@ -160,18 +160,33 @@ export class AdminQuizzesService {
   async publishQuiz(quizId: string) {
     const quiz = await this.findQuizById(quizId);
 
-    const activeQuestions = quiz.questions.filter(
+    const publishableQuestions = quiz.questions.filter(
       (question) => question.status !== QuizQuestionStatus.ARCHIVED,
     );
 
-    if (activeQuestions.length === 0) {
+    if (publishableQuestions.length === 0) {
       throw new BadRequestException('Quiz must have at least one question');
     }
 
-    quiz.status = QuizStatus.PUBLISHED;
-    quiz.totalQuestions = activeQuestions.length;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(QuizQuestion).update(
+        {
+          quizId: quiz.id,
+          status: Not(QuizQuestionStatus.ARCHIVED),
+        },
+        {
+          status: QuizQuestionStatus.ACTIVE,
+        },
+      );
 
-    await this.quizRepository.save(quiz);
+      await manager.getRepository(Quiz).update(
+        { id: quiz.id },
+        {
+          status: QuizStatus.PUBLISHED,
+          totalQuestions: publishableQuestions.length,
+        },
+      );
+    });
 
     return this.findQuizById(quiz.id);
   }
