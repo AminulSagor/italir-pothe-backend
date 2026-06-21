@@ -1,0 +1,16 @@
+services:
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    container_name: italir-pothe-libretranslate
+    restart: "no"
+    ports:
+      - "5000:5000"
+    environment:
+      LT_LOAD_ONLY: en,bn
+      LT_DISABLE_WEB_UI: "true"
+      LT_UPDATE_MODELS: "true"
+    volumes:
+      - libretranslate-models:/home/libretranslate/.local
+
+volumes:
+  libretranslate-models:

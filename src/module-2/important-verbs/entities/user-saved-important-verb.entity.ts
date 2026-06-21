@@ -1,19 +1,19 @@
 import {
-  Column,
   CreateDateColumn,
   Entity,
   Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
+  Column,
+  Unique,
 } from "typeorm";
 
 import { ImportantVerb } from "./important-verb.entity";
 
-@Entity("user_important_verb_progress")
-@Index(["userId", "verbId"], { unique: true })
-export class UserImportantVerbProgress {
+@Entity("user_saved_important_verbs")
+@Unique(["userId", "verbId"])
+export class UserSavedImportantVerb {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
@@ -29,15 +29,6 @@ export class UserImportantVerbProgress {
   @JoinColumn({ name: "verbId" })
   verb: ImportantVerb;
 
-  @Column({ type: "integer", default: 1 })
-  reviewCount: number;
-
-  @Column({ type: "timestamptz" })
-  lastReviewedAt: Date;
-
   @CreateDateColumn({ type: "timestamptz" })
   createdAt: Date;
-
-  @UpdateDateColumn({ type: "timestamptz" })
-  updatedAt: Date;
 }
