@@ -16,7 +16,10 @@ import {
 import { ExamAnswerItem } from '../entities/exam-answer-item.entity';
 import { ExamAnswer } from '../entities/exam-answer.entity';
 import { ExamAttempt } from '../entities/exam-attempt.entity';
-import { ExamQuestion } from '../entities/exam-question.entity';
+import {
+  ExamQuestion,
+  FinalExamQuestionFormat,
+} from '../entities/exam-question.entity';
 import { ExamSection } from '../entities/exam-section.entity';
 import { ExamTemplate } from '../entities/exam-template.entity';
 import {
@@ -41,7 +44,7 @@ interface UserSafeOption {
 interface UserSafeQuestion {
   id: string;
   sectionId: string;
-  questionFormat: QuizQuestionFormat;
+  questionFormat: FinalExamQuestionFormat;
   title: string | null;
   subtitle: string | null;
   prompt: string | null;
