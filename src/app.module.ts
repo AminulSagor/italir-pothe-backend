@@ -29,6 +29,7 @@ import { ProgressModule } from './module-2/progress/progress.module';
 import { SurvivalItalianModule } from './module-2/survival-italian/survival-italian.module';
 import { SkillBuilderModule } from './module-2/skill-builder/skill-builder.module';
 import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs.module';
+import { CourseCommerceModule } from './module-2/course-commerce/course-commerce.module';
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs
     SurvivalItalianModule,
     SkillBuilderModule,
     ImportantVerbsModule,
+    CourseCommerceModule,
   ],
   controllers: [AppController],
   providers: [AppService],
