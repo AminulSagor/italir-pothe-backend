@@ -14,6 +14,7 @@ import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-r
 import {
   CheckQuizAnswerDto,
   CompleteQuizSessionDto,
+  StartQuizSessionDto,
 } from '../dto/quiz-session.dto';
 import { QuizSessionsService } from '../services/quiz-sessions.service';
 
@@ -30,10 +31,12 @@ export class QuizSessionsController {
   @UseGuards(JwtAuthGuard)
   async startLessonQuiz(
     @Param('lessonId') lessonId: string,
+    @Body() dto: StartQuizSessionDto,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.quizSessionsService.startLessonQuiz(
       lessonId,
+      dto,
       this.getCurrentUser(request),
     );
   }

@@ -462,20 +462,10 @@ export class DailyChallengesService {
 
     switch (dto.activityType) {
       case LearningActivityType.VOCABULARY_WORD_LEARNED:
-        updates.push(
-          {
-            taskKey: DailyChallengeTaskKey.LEARN_NEW_WORDS,
-            value,
-          },
-          {
-            taskKey: DailyChallengeTaskKey.REVIEW_VOCAB_WORDS,
-            value,
-          },
-          {
-            taskKey: DailyChallengeTaskKey.FLASHCARD_SWIPES,
-            value,
-          },
-        );
+        updates.push({
+          taskKey: DailyChallengeTaskKey.LEARN_NEW_WORDS,
+          value,
+        });
 
         if (metadata.isVerb === true) {
           updates.push({

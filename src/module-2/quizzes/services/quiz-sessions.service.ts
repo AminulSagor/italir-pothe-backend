@@ -11,6 +11,7 @@ import { Not, Repository } from 'typeorm';
 import {
   CheckQuizAnswerDto,
   CompleteQuizSessionDto,
+  StartQuizSessionDto,
 } from '../dto/quiz-session.dto';
 import { QuizAcceptedAnswer } from '../entities/quiz-accepted-answer.entity';
 import { QuizAttemptAnswerItem } from '../entities/quiz-attempt-answer-item.entity';
@@ -85,6 +86,7 @@ export class QuizSessionsService {
 
   async startLessonQuiz(
     lessonId: string,
+    dto: StartQuizSessionDto,
     user: QuizRequestUser,
   ): Promise<QuizSessionResponse> {
     const quiz = await this.quizRepository.findOne({
@@ -117,7 +119,8 @@ export class QuizSessionsService {
       correctAnswers: 0,
       score: 0,
       earnedXp: 0,
-      startedAt: new Date(),
+      startedAt:
+        this.parseClientActivityDate(dto.clientActivityDate) ?? new Date(),
       submittedAt: null,
     });
 
@@ -255,8 +258,12 @@ export class QuizSessionsService {
       );
     }
 
+    const completedAt =
+      this.parseClientActivityDate(dto.clientActivityDate) ?? new Date();
     const totalTimeSeconds =
-      dto.totalTimeSeconds ?? this.calculateElapsedSeconds(session) ?? 0;
+      this.calculateElapsedSeconds(session, completedAt) ??
+      dto.totalTimeSeconds ??
+      0;
 
     const result = this.calculateResult(session, questions, totalTimeSeconds);
     const bonusXp =
@@ -290,7 +297,7 @@ export class QuizSessionsService {
     session.score = result.scorePercentage;
     session.earnedXp = reward.totalXpEarned;
     session.timeTakenSeconds = totalTimeSeconds;
-    session.submittedAt = new Date();
+    session.submittedAt = completedAt;
 
     await this.sessionRepository.save(session);
 
@@ -998,6 +1005,7 @@ export class QuizSessionsService {
         (item) => ({
           id: item.id,
           wordText: item.wordText,
+          isRequired: item.isRequired,
         }),
       ),
       matchingItems: this.buildRuntimeMatchingItems(question.pairs ?? []),
@@ -1018,6 +1026,7 @@ export class QuizSessionsService {
         leftLabel: pair.leftLabel,
       })),
       rightItems: this.shuffleItems(pairs).map((pair) => ({
+        pairId: pair.id,
         rightText: pair.rightText,
         rightLabel: pair.rightLabel,
       })),
@@ -1272,17 +1281,25 @@ export class QuizSessionsService {
     });
   }
 
-  private calculateElapsedSeconds(session: QuizSession): number | undefined {
-    if (!session.startedAt || !session.submittedAt) {
+  private calculateElapsedSeconds(
+    session: QuizSession,
+    completedAt: Date | null = session.submittedAt,
+  ): number | undefined {
+    if (!session.startedAt || !completedAt) {
       return undefined;
     }
 
     return Math.max(
       0,
-      Math.floor(
-        (session.submittedAt.getTime() - session.startedAt.getTime()) / 1000,
-      ),
+      Math.floor((completedAt.getTime() - session.startedAt.getTime()) / 1000),
     );
+  }
+
+  private parseClientActivityDate(value?: string): Date | null {
+    if (!value) return null;
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
   private buildCorrectAnswerText(answer: string | null | undefined): string {
