@@ -235,6 +235,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       for (const receiverId of receivers) {
         this.sendToUser(receiverId, 'receive_message', saved);
         this.sendToUser(receiverId, 'new_message', saved);
+        try {
+          // increment unreadCount for receiver
+          await this.participantRepo.increment({ conversationId: payload.conversationId, userId: receiverId }, 'unreadCount', 1);
+          const p = await this.participantRepo.findOne({ where: { conversationId: payload.conversationId, userId: receiverId } });
+          const isHighlighted = Boolean((p?.lastReadSequenceNo ?? 0) < saved.sequenceNo && saved.senderId !== receiverId);
+          const unreadPayload = { conversationId: payload.conversationId, unreadCount: p?.unreadCount ?? 0, isHighlighted };
+          this.sendToUser(receiverId, 'conversation:unread', unreadPayload);
+        } catch (err) {
+          this.logger.warn('Failed to update unread count for receiver', err?.message ?? err);
+        }
       }
     }
 
