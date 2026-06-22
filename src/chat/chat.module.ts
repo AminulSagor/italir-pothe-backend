@@ -6,11 +6,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { CallController } from './controllers/call.controller';
-import { DeviceController } from './controllers/device.controller';
 
 import { ChatGateway } from './chat.gateway';
 import { CallService } from './services/call.service';
-import { UserDeviceService } from './services/user-device.service';
 import { FirebasePushService } from '../notifications/firebase-push.service';
 import { MessageDeliveryProcessor } from './message-delivery.processor';
 
@@ -21,7 +19,6 @@ import { Message } from './entities/message.entity';
 import { MessageAttachment } from './entities/message-attachment.entity';
 import { MessageDeliveryJob } from './entities/message-delivery-job.entity';
 import { MessageReceipt } from './entities/message-receipt.entity';
-import { UserDevice } from './entities/user-device.entity';
 import { UserPresence } from './entities/user-presence.entity';
 import { Call } from './entities/call.entity';
 import { User } from '../users/entities/user.entity';
@@ -29,6 +26,9 @@ import { User } from '../users/entities/user.entity';
 import { PresenceModule } from '../presence/presence.module';
 import { UserBlocksModule } from '../user-blocks/user-blocks.module';
 import { WebinarModule } from '../webinar/webinar.module';
+import { DeviceController } from 'src/devices/controllers/user-device.controller';
+import { UserDevice } from 'src/devices/entities/user-device.entity';
+import { UserDeviceService } from 'src/devices/services/user-device.service';
 
 @Module({
   imports: [

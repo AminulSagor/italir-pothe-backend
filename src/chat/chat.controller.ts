@@ -1,22 +1,27 @@
 import {
-  Controller,
-  Post,
   Body,
-  UseGuards,
-  Req,
+  Controller,
   Get,
   Param,
+  Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ChatService } from './chat.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import {
+  In,
+  MoreThan,
+  Repository,
+} from 'typeorm';
+
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ChatGateway } from './chat.gateway';
+import { ChatService } from './chat.service';
+import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Conversation } from './entities/conversation.entity';
 import { DirectConversation } from './entities/direct-conversation.entity';
-import { ConversationParticipant } from './entities/conversation-participant.entity';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, MoreThan } from 'typeorm';
 import { Message } from './entities/message.entity';
-import { ChatGateway } from './chat.gateway';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -24,14 +29,22 @@ export class ChatController {
   constructor(
     private readonly chatService: ChatService,
     private readonly chatGateway: ChatGateway,
+
     @InjectRepository(Conversation)
-    private readonly conversationRepo: Repository<Conversation>,
+    private readonly conversationRepo:
+      Repository<Conversation>,
+
     @InjectRepository(DirectConversation)
-    private readonly directRepo: Repository<DirectConversation>,
+    private readonly directRepo:
+      Repository<DirectConversation>,
+
     @InjectRepository(ConversationParticipant)
-    private readonly participantRepo: Repository<ConversationParticipant>,
+    private readonly participantRepo:
+      Repository<ConversationParticipant>,
+
     @InjectRepository(Message)
-    private readonly messageRepo: Repository<Message>,
+    private readonly messageRepo:
+      Repository<Message>,
   ) {}
 
   @Get('sync')
@@ -40,188 +53,491 @@ export class ChatController {
     @Query('since') since?: string,
   ) {
     const me = req.user;
-    const parts = await this.participantRepo.find({ where: { userId: me.id } });
-    const conversationIds = parts.map((p) => p.conversationId);
-    if (!conversationIds.length) return [];
 
-    const date = since ? new Date(since) : new Date(0);
+    const parts =
+      await this.participantRepo.find({
+        where: {
+          userId: me.id,
+        },
+      });
 
-    const msgs = await this.messageRepo.find({
+    const conversationIds = parts.map(
+      (participant) =>
+        participant.conversationId,
+    );
+
+    if (conversationIds.length === 0) {
+      return [];
+    }
+
+    const date = since
+      ? new Date(since)
+      : new Date(0);
+
+    return this.messageRepo.find({
       where: {
-        conversationId: In(conversationIds),
+        conversationId: In(
+          conversationIds,
+        ),
         createdAt: MoreThan(date),
       },
-      order: { createdAt: 'ASC' },
+      order: {
+        createdAt: 'ASC',
+      },
     });
-    return msgs;
   }
 
   @Post('direct')
-  async createDirect(@Req() req: any, @Body() body: { otherUserId: string }) {
+  async createDirect(
+    @Req() req: any,
+    @Body()
+    body: {
+      otherUserId: string;
+    },
+  ) {
     const me = req.user;
-    const other = body.otherUserId;
-    if (me.id === other) return { error: 'cannot create direct with self' };
+    const otherUserId =
+      body.otherUserId;
 
-    // enforce smaller uuid first
-    const [userOneId, userTwoId] = me.id < other ? [me.id, other] : [other, me.id];
+    if (me.id === otherUserId) {
+      return {
+        error:
+          'cannot create direct with self',
+      };
+    }
 
-    let direct = await this.directRepo.findOne({
-      where: { userOneId, userTwoId },
-      relations: ['conversation'],
-    });
+    /*
+     * Store UUIDs in a consistent order so the
+     * same direct conversation is not duplicated.
+     */
+    const [userOneId, userTwoId] =
+      me.id < otherUserId
+        ? [me.id, otherUserId]
+        : [otherUserId, me.id];
 
-    if (direct) return { conversationId: direct.conversationId };
+    let direct =
+      await this.directRepo.findOne({
+        where: {
+          userOneId,
+          userTwoId,
+        },
+        relations: ['conversation'],
+      });
 
-    const conv = this.conversationRepo.create({ type: 'direct' as any });
-    const savedConv = await this.conversationRepo.save(conv);
+    if (direct) {
+      return {
+        conversationId:
+          direct.conversationId,
+      };
+    }
+
+    const conversation =
+      this.conversationRepo.create({
+        type: 'direct' as any,
+      });
+
+    const savedConversation =
+      await this.conversationRepo.save(
+        conversation,
+      );
 
     direct = this.directRepo.create({
-      conversationId: savedConv.id,
+      conversationId:
+        savedConversation.id,
       userOneId,
       userTwoId,
     });
+
     await this.directRepo.save(direct);
 
-    // add participants
-    const p1 = this.participantRepo.create({ conversationId: savedConv.id, userId: userOneId });
-    const p2 = this.participantRepo.create({ conversationId: savedConv.id, userId: userTwoId });
-    await this.participantRepo.save([p1, p2]);
+    const firstParticipant =
+      this.participantRepo.create({
+        conversationId:
+          savedConversation.id,
+        userId: userOneId,
+      });
 
-    return { conversationId: savedConv.id };
+    const secondParticipant =
+      this.participantRepo.create({
+        conversationId:
+          savedConversation.id,
+        userId: userTwoId,
+      });
+
+    await this.participantRepo.save([
+      firstParticipant,
+      secondParticipant,
+    ]);
+
+    return {
+      conversationId:
+        savedConversation.id,
+    };
   }
 
   @Get('conversations')
-  async listConversations(@Req() req: any) {
+  async listConversations(
+    @Req() req: any,
+  ) {
     const me = req.user;
-    const parts = await this.participantRepo.find({ where: { userId: me.id } });
-    const conversationIds = parts.map((p) => p.conversationId);
-    if (!conversationIds.length) return [];
 
-    const convs = await this.conversationRepo.find({
-      where: { id: In(conversationIds) },
-      relations: ['lastMessage', 'lastMessage.sender'],
-    });
+    const myParticipants =
+      await this.participantRepo.find({
+        where: {
+          userId: me.id,
+        },
+      });
 
-    const allParts = await this.participantRepo.find({
-      where: { conversationId: In(conversationIds) },
-      relations: ['user'],
-    });
-
-    const enriched = convs.map((conv) => {
-      const members = allParts
-        .filter((p) => p.conversationId === conv.id)
-        .map((p) => ({
-          id: p.id,
-          conversationId: p.conversationId,
-          userId: p.userId,
-          user: p.user
-            ? {
-                id: p.user.id,
-                fullName: p.user.fullName,
-                name: p.user.name,
-                avatarUrl: p.user.avatarUrl,
-                profilePhotoFileId: p.user.profilePhotoFileId,
-              }
-            : null,
-          lastReadMessageId: p.lastReadMessageId,
-          lastReadSequenceNo: p.lastReadSequenceNo,
-          lastReadAt: p.lastReadAt,
-          lastDeliveredMessageId: p.lastDeliveredMessageId,
-          lastDeliveredSequenceNo: p.lastDeliveredSequenceNo,
-          lastDeliveredAt: p.lastDeliveredAt,
-          unreadCount: p.unreadCount,
-          isMuted: p.isMuted,
-          archivedAt: p.archivedAt,
-          joinedAt: p.joinedAt,
-          createdAt: p.createdAt,
-          updatedAt: p.updatedAt,
-        }));
-      const meParticipant = members.find((p) => p.userId === me.id);
-      const unreadCount = meParticipant?.unreadCount ?? 0;
-      const lastReadSequenceNo = meParticipant?.lastReadSequenceNo ?? 0;
-      const lastReadAt = meParticipant?.lastReadAt ?? null;
-
-      const lastMessage = conv.lastMessage
-        ? {
-            id: conv.lastMessage.id,
-            content: conv.lastMessage.content,
-            sequenceNo: conv.lastMessage.sequenceNo,
-            messageType: conv.lastMessage.messageType,
-            senderId: conv.lastMessage.senderId,
-            sender: conv.lastMessage.sender
-              ? {
-                  id: conv.lastMessage.sender.id,
-                  name: conv.lastMessage.sender.name,
-                }
-              : null,
-            createdAt: conv.lastMessage.createdAt,
-          }
-        : null;
-
-      const lastMessageReadByOthers =
-        lastMessage && lastMessage.senderId === me.id
-          ? members
-              .filter((p) => p.userId !== me.id)
-              .every((p) => p.lastReadSequenceNo >= lastMessage.sequenceNo)
-          : false;
-
-      const lastMessageDeliveredToMe =
-        lastMessage && lastMessage.senderId !== me.id
-          ? (meParticipant?.lastDeliveredSequenceNo ?? 0) >= lastMessage.sequenceNo
-          : true;
-
-      const isHighlighted = Boolean(
-        lastMessage && (meParticipant?.lastReadSequenceNo ?? 0) < lastMessage.sequenceNo && lastMessage.senderId !== me.id,
+    const conversationIds =
+      myParticipants.map(
+        (participant) =>
+          participant.conversationId,
       );
 
-      return {
-        id: conv.id,
-        type: conv.type,
-        lastMessageAt: conv.lastMessageAt,
-        createdAt: conv.createdAt,
-        updatedAt: conv.updatedAt,
-        members,
-        unreadCount,
-        hasUnread: unreadCount > 0,
-        lastReadSequenceNo,
-        lastReadAt,
-        lastMessage,
-        lastMessageStatus: {
-          isMyMessage: lastMessage?.senderId === me.id,
-          isReadByOthers: lastMessageReadByOthers,
-          isDeliveredToMe: lastMessageDeliveredToMe,
-        },
-        isHighlighted,
-      };
-    });
+    if (conversationIds.length === 0) {
+      return [];
+    }
 
-    return enriched.sort((a, b) => {
-      const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : new Date(a.createdAt).getTime();
-      const bTime = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : new Date(b.createdAt).getTime();
-      return bTime - aTime;
-    });
+    const conversations =
+      await this.conversationRepo.find({
+        where: {
+          id: In(conversationIds),
+        },
+        relations: [
+          'lastMessage',
+          'lastMessage.sender',
+        ],
+      });
+
+    const allParticipants =
+      await this.participantRepo.find({
+        where: {
+          conversationId: In(
+            conversationIds,
+          ),
+        },
+        relations: ['user'],
+      });
+
+    const enriched = conversations.map(
+      (conversation) => {
+        const members = allParticipants
+          .filter(
+            (participant) =>
+              participant.conversationId ===
+              conversation.id,
+          )
+          .map((participant) => ({
+            id: participant.id,
+            conversationId:
+              participant.conversationId,
+            userId:
+              participant.userId,
+
+            user: participant.user
+              ? {
+                  id:
+                    participant.user.id,
+                  fullName:
+                    participant.user
+                      .fullName,
+                  avatarUrl:
+                    participant.user
+                      .profilePhotoFileId,
+                  profilePhotoFileId:
+                    participant.user
+                      .profilePhotoFileId,
+                }
+              : null,
+
+            lastReadMessageId:
+              participant.lastReadMessageId,
+            lastReadSequenceNo:
+              participant.lastReadSequenceNo,
+            lastReadAt:
+              participant.lastReadAt,
+
+            lastDeliveredMessageId:
+              participant
+                .lastDeliveredMessageId,
+            lastDeliveredSequenceNo:
+              participant
+                .lastDeliveredSequenceNo,
+            lastDeliveredAt:
+              participant
+                .lastDeliveredAt,
+
+            unreadCount:
+              participant.unreadCount,
+            isMuted:
+              participant.isMuted,
+            archivedAt:
+              participant.archivedAt,
+            joinedAt:
+              participant.joinedAt,
+            createdAt:
+              participant.createdAt,
+            updatedAt:
+              participant.updatedAt,
+          }));
+
+        const meParticipant =
+          members.find(
+            (participant) =>
+              participant.userId ===
+              me.id,
+          );
+
+        const otherMember =
+          members.find(
+            (participant) =>
+              participant.userId !==
+              me.id,
+          );
+
+        const unreadCount =
+          meParticipant?.unreadCount ??
+          0;
+
+        const lastReadSequenceNo =
+          meParticipant
+            ?.lastReadSequenceNo ?? 0;
+
+        const lastReadAt =
+          meParticipant?.lastReadAt ??
+          null;
+
+        const lastMessage =
+          conversation.lastMessage
+            ? {
+                id:
+                  conversation
+                    .lastMessage.id,
+
+                content:
+                  conversation
+                    .lastMessage.content,
+
+                sequenceNo:
+                  conversation
+                    .lastMessage
+                    .sequenceNo,
+
+                messageType:
+                  conversation
+                    .lastMessage
+                    .messageType,
+
+                senderId:
+                  conversation
+                    .lastMessage
+                    .senderId,
+
+                sender:
+                  conversation
+                    .lastMessage.sender
+                    ? {
+                        id:
+                          conversation
+                            .lastMessage
+                            .sender.id,
+
+                        fullName:
+                          conversation
+                            .lastMessage
+                            .sender
+                            .fullName,
+                      }
+                    : null,
+
+                createdAt:
+                  conversation
+                    .lastMessage
+                    .createdAt,
+              }
+            : null;
+
+        const lastMessageReadByOthers =
+          lastMessage &&
+          lastMessage.senderId ===
+            me.id
+            ? members
+                .filter(
+                  (participant) =>
+                    participant.userId !==
+                    me.id,
+                )
+                .every(
+                  (participant) =>
+                    (participant
+                      .lastReadSequenceNo ??
+                      0) >=
+                    lastMessage.sequenceNo,
+                )
+            : false;
+
+        const lastMessageDeliveredToMe =
+          lastMessage &&
+          lastMessage.senderId !==
+            me.id
+            ? (meParticipant
+                ?.lastDeliveredSequenceNo ??
+                0) >=
+              lastMessage.sequenceNo
+            : true;
+
+        const isHighlighted =
+          Boolean(
+            lastMessage &&
+              (meParticipant
+                ?.lastReadSequenceNo ??
+                0) <
+                lastMessage.sequenceNo &&
+              lastMessage.senderId !==
+                me.id,
+          );
+
+        return {
+          id: conversation.id,
+          type: conversation.type,
+
+          lastMessageAt:
+            conversation.lastMessageAt,
+
+          createdAt:
+            conversation.createdAt,
+
+          updatedAt:
+            conversation.updatedAt,
+
+          participantId:
+            otherMember?.userId ??
+            null,
+
+          participant:
+            otherMember?.user
+              ? {
+                  id:
+                    otherMember.user.id,
+
+                  fullName:
+                    otherMember.user
+                      .fullName,
+
+                  avatarUrl:
+                    otherMember.user
+                      .avatarUrl,
+
+                  isOnline: false,
+                }
+              : null,
+
+          members,
+
+          unreadCount,
+          hasUnread:
+            unreadCount > 0,
+
+          lastReadSequenceNo,
+          lastReadAt,
+          lastMessage,
+
+          lastMessageStatus: {
+            isMyMessage:
+              lastMessage?.senderId ===
+              me.id,
+
+            isReadByOthers:
+              lastMessageReadByOthers,
+
+            isDeliveredToMe:
+              lastMessageDeliveredToMe,
+          },
+
+          isHighlighted,
+        };
+      },
+    );
+
+    return enriched.sort(
+      (first, second) => {
+        const firstTime =
+          first.lastMessageAt
+            ? new Date(
+                first.lastMessageAt,
+              ).getTime()
+            : new Date(
+                first.createdAt,
+              ).getTime();
+
+        const secondTime =
+          second.lastMessageAt
+            ? new Date(
+                second.lastMessageAt,
+              ).getTime()
+            : new Date(
+                second.createdAt,
+              ).getTime();
+
+        return secondTime - firstTime;
+      },
+    );
   }
 
   @Get('peers')
   async listPeers(@Req() req: any) {
     const me = req.user;
-    const parts = await this.participantRepo.find({ where: { userId: me.id } });
-    const conversationIds = parts.map((p) => p.conversationId);
-    if (!conversationIds.length) return [];
 
-    const allParts = await this.participantRepo.find({
-      where: { conversationId: In(conversationIds) },
-      relations: ['user'],
-    });
+    const participants =
+      await this.participantRepo.find({
+        where: {
+          userId: me.id,
+        },
+      });
 
-    const map = new Map<string, any>();
-    for (const p of allParts) {
-      if (p.userId === me.id) continue;
-      if (!p.user) continue;
-      map.set(p.userId, p.user);
+    const conversationIds =
+      participants.map(
+        (participant) =>
+          participant.conversationId,
+      );
+
+    if (conversationIds.length === 0) {
+      return [];
     }
 
-    return Array.from(map.values());
+    const allParticipants =
+      await this.participantRepo.find({
+        where: {
+          conversationId: In(
+            conversationIds,
+          ),
+        },
+        relations: ['user'],
+      });
+
+    const usersById =
+      new Map<string, any>();
+
+    for (
+      const participant of
+        allParticipants
+    ) {
+      if (
+        participant.userId === me.id ||
+        !participant.user
+      ) {
+        continue;
+      }
+
+      usersById.set(
+        participant.userId,
+        participant.user,
+      );
+    }
+
+    return Array.from(
+      usersById.values(),
+    );
   }
 
   @Get('conversations/:id/messages')
@@ -231,72 +547,205 @@ export class ChatController {
     @Query('limit') limit = '50',
   ) {
     const me = req.user;
-    const parts = await this.participantRepo.findOne({ where: { conversationId: id, userId: me.id } });
-    if (!parts) return { error: 'not a participant' };
 
-    const msgs = await this.messageRepo.find({ where: { conversationId: id }, order: { sequenceNo: 'ASC' }, take: Number(limit) });
-    return msgs;
+    const participant =
+      await this.participantRepo.findOne({
+        where: {
+          conversationId: id,
+          userId: me.id,
+        },
+      });
+
+    if (!participant) {
+      return {
+        error: 'not a participant',
+      };
+    }
+
+    return this.messageRepo.find({
+      where: {
+        conversationId: id,
+      },
+      order: {
+        sequenceNo: 'ASC',
+      },
+      take: Number(limit),
+    });
   }
 
   @Post('conversations/:id/read')
   async markConversationRead(
     @Req() req: any,
     @Param('id') id: string,
-    @Body() body: { lastReadMessageId?: string; readAt?: string } = {},
+    @Body()
+    body: {
+      lastReadMessageId?: string;
+      readAt?: string;
+    } = {},
   ) {
     const me = req.user;
 
-    const participant = await this.participantRepo.findOne({ where: { conversationId: id, userId: me.id } });
-    if (!participant) return { error: 'not a participant' };
+    const participant =
+      await this.participantRepo.findOne({
+        where: {
+          conversationId: id,
+          userId: me.id,
+        },
+      });
 
-    // Determine target sequence
+    if (!participant) {
+      return {
+        error: 'not a participant',
+      };
+    }
+
     let targetSequence = 0;
-    let targetMessageId = body.lastReadMessageId ?? null;
+
+    let targetMessageId =
+      body.lastReadMessageId ?? null;
+
     if (body.lastReadMessageId) {
-      const msg = await this.messageRepo.findOne({ where: { id: body.lastReadMessageId } });
-      if (!msg || msg.conversationId !== id) return { error: 'invalid message' };
-      targetSequence = msg.sequenceNo;
+      const message =
+        await this.messageRepo.findOne({
+          where: {
+            id:
+              body.lastReadMessageId,
+          },
+        });
+
+      if (
+        !message ||
+        message.conversationId !== id
+      ) {
+        return {
+          error: 'invalid message',
+        };
+      }
+
+      targetSequence =
+        message.sequenceNo;
     } else {
-      const conv = await this.conversationRepo.findOne({ where: { id }, relations: ['lastMessage'] });
-      if (conv?.lastMessage) {
-        targetSequence = conv.lastMessage.sequenceNo;
-        targetMessageId = conv.lastMessageId;
+      const conversation =
+        await this.conversationRepo.findOne({
+          where: {
+            id,
+          },
+          relations: ['lastMessage'],
+        });
+
+      if (conversation?.lastMessage) {
+        targetSequence =
+          conversation.lastMessage
+            .sequenceNo;
+
+        targetMessageId =
+          conversation.lastMessageId;
       }
     }
 
-    const incomingReadAt = body.readAt ? new Date(body.readAt) : new Date();
+    const incomingReadAt = body.readAt
+      ? new Date(body.readAt)
+      : new Date();
 
-    // Idempotent: only update if incoming is newer
-    if ((participant.lastReadSequenceNo ?? 0) >= targetSequence) {
-      // compute current unread/isHighlighted
-      const conv = await this.conversationRepo.findOne({ where: { id }, relations: ['lastMessage'] });
-      const unreadCount = participant.unreadCount ?? 0;
-      const isHighlighted = Boolean(conv?.lastMessage && (participant.lastReadSequenceNo ?? 0) < conv.lastMessage.sequenceNo && conv.lastMessage.senderId !== me.id);
-      return { unreadCount, isHighlighted };
+    /*
+     * The request is idempotent. Do not move the
+     * participant's read position backwards.
+     */
+    if (
+      (participant.lastReadSequenceNo ??
+        0) >= targetSequence
+    ) {
+      const conversation =
+        await this.conversationRepo.findOne({
+          where: {
+            id,
+          },
+          relations: ['lastMessage'],
+        });
+
+      const unreadCount =
+        participant.unreadCount ?? 0;
+
+      const isHighlighted =
+        Boolean(
+          conversation?.lastMessage &&
+            (participant
+              .lastReadSequenceNo ??
+              0) <
+              conversation.lastMessage
+                .sequenceNo &&
+            conversation.lastMessage
+              .senderId !== me.id,
+        );
+
+      return {
+        unreadCount,
+        isHighlighted,
+      };
     }
 
-    participant.lastReadMessageId = targetMessageId;
-    participant.lastReadSequenceNo = targetSequence;
-    participant.lastReadAt = incomingReadAt;
+    participant.lastReadMessageId =
+      targetMessageId;
+
+    participant.lastReadSequenceNo =
+      targetSequence;
+
+    participant.lastReadAt =
+      incomingReadAt;
+
     participant.unreadCount = 0;
 
-    await this.participantRepo.save(participant);
+    await this.participantRepo.save(
+      participant,
+    );
 
-    // notify via websocket to conversation room and users
     try {
-      const payload = { conversationId: id, userId: me.id, lastReadMessageId: participant.lastReadMessageId, lastReadAt: participant.lastReadAt };
-      // conversation room
-      (this.chatGateway.server as any).to(`conversation:${id}`).emit('conversation:read', payload);
+      const payload = {
+        conversationId: id,
+        userId: me.id,
+        lastReadMessageId:
+          participant.lastReadMessageId,
+        lastReadAt:
+          participant.lastReadAt,
+      };
 
-      // notify participants' user rooms so inbox updates
-      const parts = await this.participantRepo.find({ where: { conversationId: id }, select: ['userId'] });
-      for (const p of parts) {
-        this.chatGateway.sendToUser(p.userId, 'conversation:read', payload);
+      (
+        this.chatGateway.server as any
+      )
+        .to(`conversation:${id}`)
+        .emit(
+          'conversation:read',
+          payload,
+        );
+
+      const conversationParticipants =
+        await this.participantRepo.find({
+          where: {
+            conversationId: id,
+          },
+          select: ['userId'],
+        });
+
+      for (
+        const conversationParticipant of
+          conversationParticipants
+      ) {
+        this.chatGateway.sendToUser(
+          conversationParticipant.userId,
+          'conversation:read',
+          payload,
+        );
       }
-    } catch (err) {
-      // ignore websocket errors
+    } catch {
+      /*
+       * The REST request should still succeed when
+       * a WebSocket notification cannot be emitted.
+       */
     }
 
-    return { unreadCount: 0, isHighlighted: false };
+    return {
+      unreadCount: 0,
+      isHighlighted: false,
+    };
   }
 }

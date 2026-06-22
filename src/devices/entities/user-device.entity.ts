@@ -6,15 +6,17 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
   Unique,
+  UpdateDateColumn,
 } from 'typeorm';
+
 import { User } from '../../users/entities/user.entity';
-import { DeviceAppState, DevicePlatform } from '../enums/chat.enums';
+import { DeviceAppState, DevicePlatform } from '../enums/device.enums';
 
 @Entity('user_devices')
 @Index('IDX_user_devices_userId', ['userId'])
 @Index('IDX_user_devices_deviceId', ['deviceId'])
+@Index('IDX_user_devices_fcmToken', ['fcmToken'])
 @Unique('UQ_user_devices_user_device', ['userId', 'deviceId'])
 export class UserDevice {
   @PrimaryGeneratedColumn('uuid')
@@ -23,11 +25,16 @@ export class UserDevice {
   @Column({ type: 'uuid' })
   userId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'userId' })
   user: User;
 
-  @Column({ type: 'varchar', length: 120 })
+  @Column({
+    type: 'varchar',
+    length: 120,
+  })
   deviceId: string;
 
   @Column({
@@ -43,22 +50,59 @@ export class UserDevice {
   })
   appState: DeviceAppState;
 
-  @Column({ type: 'varchar', length: 512, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
   fcmToken: string | null;
 
-  // For iOS CallKit/VoIP later
-  @Column({ type: 'varchar', length: 512, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
   voipToken: string | null;
 
-  @Column({ type: 'boolean', default: true })
+  @Column({
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  appVersion: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 80,
+    nullable: true,
+  })
+  timezone: string | null;
+
+  @Column({
+    type: 'boolean',
+    default: true,
+  })
   isActive: boolean;
 
-  @Column({ type: 'timestamptz', nullable: true })
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
   lastActiveAt: Date | null;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  deactivatedAt: Date | null;
+
+  @CreateDateColumn({
+    type: 'timestamptz',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn({ type: 'timestamptz' })
+  @UpdateDateColumn({
+    type: 'timestamptz',
+  })
   updatedAt: Date;
 }
