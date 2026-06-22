@@ -17,6 +17,8 @@ import { QuizzesModule } from './module-2/quizzes/quizzes.module';
 import { FinalExamModule } from './module-2/final-exam/final-exam.module';
 import { CertificatesModule } from './module-2/certificates/certificates.module';
 import { WebinarModule } from './webinar/webinar.module';
+import { ModerationModule } from './moderation/moderation.module';
+import { CvBuilderModule } from './cv-builder/cv-builder.module';
 import { UserReportsModule } from './user-reports/user-reports.module';
 import { ScoringModule } from './module-2/scoring/scoring.module';
 import { DailyChallengesModule } from './module-2/daily-challenges/daily-challenges.module';
@@ -28,6 +30,7 @@ import { SurvivalItalianModule } from './module-2/survival-italian/survival-ital
 import { SkillBuilderModule } from './module-2/skill-builder/skill-builder.module';
 import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs.module';
 import { DevicesModule } from './devices/devices.module';
+import { CourseCommerceModule } from './module-2/course-commerce/course-commerce.module';
 
 @Module({
   imports: [
@@ -67,6 +70,8 @@ import { DevicesModule } from './devices/devices.module';
     FinalExamModule,
     CertificatesModule,
     WebinarModule,
+    ModerationModule,
+    CvBuilderModule,
     UserReportsModule,
     ScoringModule,
     DailyChallengesModule,
@@ -77,6 +82,7 @@ import { DevicesModule } from './devices/devices.module';
     SkillBuilderModule,
     ImportantVerbsModule,
     DevicesModule,
+    CourseCommerceModule,
   ],
   controllers: [AppController],
   providers: [AppService],

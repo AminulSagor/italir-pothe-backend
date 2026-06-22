@@ -37,7 +37,7 @@ export class ExamTemplate {
   })
   status: ExamTemplateStatus;
 
-  @Column({ type: 'integer', default: 70 })
+  @Column({ type: 'integer', default: 0 })
   overallPassingPercent: number;
 
   @Column({ type: 'integer', default: 60 })

@@ -3,33 +3,41 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
-} from 'typeorm';
+} from "typeorm";
 
-@Entity('user_important_verb_progress')
-@Index(['userId', 'verbId'], { unique: true })
+import { ImportantVerb } from "./important-verb.entity";
+
+@Entity("user_important_verb_progress")
+@Index(["userId", "verbId"], { unique: true })
 export class UserImportantVerbProgress {
-  @PrimaryGeneratedColumn('uuid')
+  @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Index()
-  @Column({ type: 'uuid' })
+  @Column({ type: "uuid" })
   userId: string;
 
   @Index()
-  @Column({ type: 'uuid' })
+  @Column({ type: "uuid" })
   verbId: string;
 
-  @Column({ type: 'integer', default: 1 })
+  @ManyToOne(() => ImportantVerb, { onDelete: "CASCADE" })
+  @JoinColumn({ name: "verbId" })
+  verb: ImportantVerb;
+
+  @Column({ type: "integer", default: 1 })
   reviewCount: number;
 
-  @Column({ type: 'timestamptz' })
+  @Column({ type: "timestamptz" })
   lastReviewedAt: Date;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @CreateDateColumn({ type: "timestamptz" })
   createdAt: Date;
 
-  @UpdateDateColumn({ type: 'timestamptz' })
+  @UpdateDateColumn({ type: "timestamptz" })
   updatedAt: Date;
 }
