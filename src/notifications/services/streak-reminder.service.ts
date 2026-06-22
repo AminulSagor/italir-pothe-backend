@@ -3,8 +3,9 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
 
-import { DeviceTokensService } from 'src/firebase/services/device-tokens.service';
+import { UserDeviceService } from 'src/devices/services/user-device.service';
 import { UserStreak } from 'src/module-2/scoring/entities/user-streak.entity';
+
 import {
   NotificationPriority,
   NotificationType,
@@ -68,33 +69,37 @@ export class StreakReminderService {
     @InjectRepository(UserStreakReminder)
     private readonly userStreakReminderRepository: Repository<UserStreakReminder>,
 
-    private readonly deviceTokensService: DeviceTokensService,
+    private readonly userDeviceService: UserDeviceService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_MINUTES)
-  async sendStreakReminderNotifications() {
-    const activeTokens = await this.deviceTokensService.findAllActiveTokens();
+  async sendStreakReminderNotifications(): Promise<void> {
+    const activeDevices =
+      await this.userDeviceService.findAllActiveFcmDevices();
 
-    if (activeTokens.length === 0) {
+    if (activeDevices.length === 0) {
       return;
     }
 
-    const latestTokenByUser = new Map<
+    const latestDeviceByUser = new Map<
       string,
-      { userId: string; timezone: string | null }
+      {
+        userId: string;
+        timezone: string | null;
+      }
     >();
 
-    for (const token of activeTokens) {
-      if (!latestTokenByUser.has(token.userId)) {
-        latestTokenByUser.set(token.userId, {
-          userId: token.userId,
-          timezone: token.timezone,
+    for (const device of activeDevices) {
+      if (!latestDeviceByUser.has(device.userId)) {
+        latestDeviceByUser.set(device.userId, {
+          userId: device.userId,
+          timezone: device.timezone,
         });
       }
     }
 
-    const userIds = Array.from(latestTokenByUser.keys());
+    const userIds = Array.from(latestDeviceByUser.keys());
 
     if (userIds.length === 0) {
       return;
@@ -109,16 +114,17 @@ export class StreakReminderService {
     const streakByUserId = new Map(streaks.map((item) => [item.userId, item]));
 
     for (const userId of userIds) {
-      const tokenInfo = latestTokenByUser.get(userId);
+      const deviceInfo = latestDeviceByUser.get(userId);
+
       const streak = streakByUserId.get(userId);
 
-      if (!tokenInfo || !streak) {
+      if (!deviceInfo || !streak) {
         continue;
       }
 
       await this.processUserReminder({
         userId,
-        timezone: tokenInfo.timezone || 'UTC',
+        timezone: deviceInfo.timezone || 'UTC',
         streak,
       });
     }
@@ -128,7 +134,7 @@ export class StreakReminderService {
     userId: string;
     timezone: string;
     streak: UserStreak;
-  }) {
+  }): Promise<void> {
     const localToday = this.getLocalDateString(new Date(), params.timezone);
 
     if (!params.streak.lastActivityDate) {
@@ -149,6 +155,7 @@ export class StreakReminderService {
     }
 
     const secondsLeft = this.getSecondsUntilLocalMidnight(params.timezone);
+
     const rule = this.findReminderRule(secondsLeft);
 
     if (!rule) {
@@ -190,7 +197,7 @@ export class StreakReminderService {
     );
   }
 
-  private findReminderRule(secondsLeft: number) {
+  private findReminderRule(secondsLeft: number): ReminderRule | undefined {
     return this.reminderRules.find((rule) => {
       const lowerBound = rule.thresholdSeconds - this.reminderWindowSeconds;
 
@@ -198,7 +205,7 @@ export class StreakReminderService {
     });
   }
 
-  private getSecondsUntilLocalMidnight(timezone: string) {
+  private getSecondsUntilLocalMidnight(timezone: string): number {
     const localParts = this.getLocalDateTimeParts(new Date(), timezone);
 
     const secondsPassedToday =
@@ -207,7 +214,7 @@ export class StreakReminderService {
     return 24 * 60 * 60 - secondsPassedToday;
   }
 
-  private getLocalDateString(date: Date, timezone: string) {
+  private getLocalDateString(date: Date, timezone: string): string {
     const parts = this.getLocalDateTimeParts(date, timezone);
 
     return `${parts.year}-${this.pad(parts.month)}-${this.pad(parts.day)}`;
@@ -226,6 +233,7 @@ export class StreakReminderService {
     });
 
     const parts = formatter.formatToParts(date);
+
     const valueMap = new Map(parts.map((item) => [item.type, item.value]));
 
     return {
@@ -238,15 +246,17 @@ export class StreakReminderService {
     };
   }
 
-  private diffLocalDateDays(firstDate: string, secondDate: string) {
+  private diffLocalDateDays(firstDate: string, secondDate: string): number {
     const first = new Date(`${firstDate}T00:00:00.000Z`);
+
     const second = new Date(`${secondDate}T00:00:00.000Z`);
+
     const oneDayMs = 24 * 60 * 60 * 1000;
 
     return Math.round((second.getTime() - first.getTime()) / oneDayMs);
   }
 
-  private pad(value: number) {
+  private pad(value: number): string {
     return value.toString().padStart(2, '0');
   }
 }

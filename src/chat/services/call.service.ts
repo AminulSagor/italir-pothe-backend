@@ -15,8 +15,8 @@ import {
   AgoraTokenService,
   AgoraLiveRole,
 } from '../../webinar/services/agora-token.service';
-import { UserDeviceService } from './user-device.service';
 import { FirebasePushService } from '../../notifications/firebase-push.service';
+import { UserDeviceService } from 'src/devices/services/user-device.service';
 
 @Injectable()
 export class CallService {

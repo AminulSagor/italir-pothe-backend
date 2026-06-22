@@ -199,7 +199,10 @@ export class FilesService {
 
     this.validateFile(mimeType, sizeBytes, filePurpose);
 
-    const storageKey = this.s3Service.createStorageKey(filePurpose, originalName);
+    const storageKey = this.s3Service.createStorageKey(
+      filePurpose,
+      originalName,
+    );
 
     await this.s3Service.uploadBuffer({ storageKey, buffer, mimeType });
 
@@ -300,6 +303,7 @@ export class FilesService {
       FilePurpose.PROFILE_AVATAR,
       FilePurpose.REPORT_EVIDENCE,
       FilePurpose.WEBINAR_THUMBNAIL,
+      FilePurpose.NOTIFICATION_IMAGE,
     ];
 
     const audioPurposes = [

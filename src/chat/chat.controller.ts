@@ -33,10 +33,7 @@ export class ChatController {
   ) {}
 
   @Get('sync')
-  async syncMessages(
-    @Req() req: any,
-    @Query('since') since?: string,
-  ) {
+  async syncMessages(@Req() req: any, @Query('since') since?: string) {
     const me = req.user;
     const parts = await this.participantRepo.find({ where: { userId: me.id } });
     const conversationIds = parts.map((p) => p.conversationId);
@@ -61,7 +58,8 @@ export class ChatController {
     if (me.id === other) return { error: 'cannot create direct with self' };
 
     // enforce smaller uuid first
-    const [userOneId, userTwoId] = me.id < other ? [me.id, other] : [other, me.id];
+    const [userOneId, userTwoId] =
+      me.id < other ? [me.id, other] : [other, me.id];
 
     let direct = await this.directRepo.findOne({
       where: { userOneId, userTwoId },
@@ -81,8 +79,14 @@ export class ChatController {
     await this.directRepo.save(direct);
 
     // add participants
-    const p1 = this.participantRepo.create({ conversationId: savedConv.id, userId: userOneId });
-    const p2 = this.participantRepo.create({ conversationId: savedConv.id, userId: userTwoId });
+    const p1 = this.participantRepo.create({
+      conversationId: savedConv.id,
+      userId: userOneId,
+    });
+    const p2 = this.participantRepo.create({
+      conversationId: savedConv.id,
+      userId: userTwoId,
+    });
     await this.participantRepo.save([p1, p2]);
 
     return { conversationId: savedConv.id };
@@ -91,9 +95,16 @@ export class ChatController {
   @Get('conversations')
   async listConversations(@Req() req: any) {
     const me = req.user;
-    const parts = await this.participantRepo.find({ where: { userId: me.id } });
+
+    const parts = await this.participantRepo.find({
+      where: { userId: me.id },
+    });
+
     const conversationIds = parts.map((p) => p.conversationId);
-    if (!conversationIds.length) return [];
+
+    if (!conversationIds.length) {
+      return [];
+    }
 
     const convs = await this.conversationRepo.find({
       where: { id: In(conversationIds) },
@@ -107,7 +118,22 @@ export class ChatController {
 
     return convs.map((conv) => {
       const members = allParts.filter((p) => p.conversationId === conv.id);
-      return { ...conv, members };
+      const otherMember = members.find((p) => p.userId !== me.id);
+      const participantUser = otherMember?.user;
+
+      return {
+        ...conv,
+        participantId: otherMember?.userId ?? null,
+        participant: participantUser
+          ? {
+              id: participantUser.id,
+              fullName: participantUser.fullName,
+              avatarUrl: participantUser.profilePhotoFileId,
+              isOnline: false,
+            }
+          : null,
+        members,
+      };
     });
   }
 
@@ -140,10 +166,16 @@ export class ChatController {
     @Query('limit') limit = '50',
   ) {
     const me = req.user;
-    const parts = await this.participantRepo.findOne({ where: { conversationId: id, userId: me.id } });
+    const parts = await this.participantRepo.findOne({
+      where: { conversationId: id, userId: me.id },
+    });
     if (!parts) return { error: 'not a participant' };
 
-    const msgs = await this.messageRepo.find({ where: { conversationId: id }, order: { sequenceNo: 'ASC' }, take: Number(limit) });
+    const msgs = await this.messageRepo.find({
+      where: { conversationId: id },
+      order: { sequenceNo: 'ASC' },
+      take: Number(limit),
+    });
     return msgs;
   }
 }

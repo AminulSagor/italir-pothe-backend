@@ -28,6 +28,7 @@ export enum FilePurpose {
   PROFILE_AVATAR = 'profile_avatar',
   REPORT_EVIDENCE = 'report_evidence',
   WEBINAR_THUMBNAIL = 'webinar_thumbnail',
+  NOTIFICATION_IMAGE = 'notification_image',
 }
 
 export enum FileVisibility {

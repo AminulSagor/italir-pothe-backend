@@ -27,6 +27,7 @@ import { ProgressModule } from './module-2/progress/progress.module';
 import { SurvivalItalianModule } from './module-2/survival-italian/survival-italian.module';
 import { SkillBuilderModule } from './module-2/skill-builder/skill-builder.module';
 import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs.module';
+import { DevicesModule } from './devices/devices.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs
     SurvivalItalianModule,
     SkillBuilderModule,
     ImportantVerbsModule,
+    DevicesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
