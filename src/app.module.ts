@@ -30,6 +30,7 @@ import { SurvivalItalianModule } from './module-2/survival-italian/survival-ital
 import { SkillBuilderModule } from './module-2/skill-builder/skill-builder.module';
 import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs.module';
 import { CourseCommerceModule } from './module-2/course-commerce/course-commerce.module';
+import { AiTutorModule } from './ai-tutor/ai-tutor.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { CourseCommerceModule } from './module-2/course-commerce/course-commerce
     SkillBuilderModule,
     ImportantVerbsModule,
     CourseCommerceModule,
+    AiTutorModule,
   ],
   controllers: [AppController],
   providers: [AppService],
