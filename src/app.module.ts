@@ -24,6 +24,7 @@ import { ScoringModule } from './module-2/scoring/scoring.module';
 import { DailyChallengesModule } from './module-2/daily-challenges/daily-challenges.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { InfluencerHubModule } from './influencer-hub/influencer-hub.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ProgressModule } from './module-2/progress/progress.module';
 import { SurvivalItalianModule } from './module-2/survival-italian/survival-italian.module';
@@ -77,6 +78,7 @@ import { CourseCommerceModule } from './module-2/course-commerce/course-commerce
     DailyChallengesModule,
     FirebaseModule,
     NotificationsModule,
+    InfluencerHubModule,
     ProgressModule,
     SurvivalItalianModule,
     SkillBuilderModule,
