@@ -10,11 +10,13 @@ import { JwtStrategy } from './jwt.strategy';
 import { SmsService } from '../common/services/sms.service';
 import { EmailService } from '../common/services/email.service';
 import { Otp } from 'src/users/entities/otp.entity';
+import { PackageStoreModule } from 'src/package-store/package-store.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Otp]),
     PassportModule,
+    PackageStoreModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

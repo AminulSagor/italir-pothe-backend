@@ -47,6 +47,7 @@ import {
 } from 'src/module-2/scoring/services/streak.service';
 import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
+import { LeaderboardXpService } from 'src/module-2/leaderboard/services/leaderboard-xp.service';
 
 interface QuizRequestUser {
   id: string;
@@ -78,6 +79,7 @@ export class QuizSessionsService {
     private readonly quizGradingService: QuizGradingService,
     private readonly scoringService: ScoringService,
     private readonly streakService: StreakService,
+    private readonly leaderboardXpService: LeaderboardXpService,
     private readonly dailyChallengesService: DailyChallengesService,
   ) {}
 
@@ -248,6 +250,20 @@ export class QuizSessionsService {
       user.id,
       dto.clientActivityDate,
     );
+
+    await this.leaderboardXpService.awardQuizXp({
+      userId: user.id,
+      sourceReference: session.id,
+      idempotencyKey: `quiz-session:${session.id}:leaderboard-xp`,
+
+      baseXp: result.scoring.baseXp,
+      comboBonusXp: result.scoring.comboBonus,
+      masteryBonusXp: result.scoring.masteryBonus,
+      speedBonusXp: result.scoring.fastFinishBonus,
+      awardedXp: reward.totalXpEarned,
+      multiplier: reward.boostMultiplier,
+      streakDays: streak.currentDays,
+    });
 
     session.status = QuizSessionStatus.SUBMITTED;
     session.correctAnswers = result.correctAnswers;

@@ -6,6 +6,10 @@ import { DailyChallengesService } from 'src/module-2/daily-challenges/services/d
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 import { UserCourseProgress } from '../entities/user-course-progress.entity';
 import { UserLessonProgress } from '../entities/user-lesson-progress.entity';
+import { ScoringService } from 'src/module-2/scoring/services/scoring.service';
+import { StreakService } from 'src/module-2/scoring/services/streak.service';
+import { LeaderboardXpService } from 'src/module-2/leaderboard/services/leaderboard-xp.service';
+import { LeaderboardXpSourceType } from 'src/module-2/leaderboard/types/leaderboard.type';
 
 interface ProgressUser {
   id: string;
@@ -21,6 +25,9 @@ export class ProgressService {
     private readonly courseProgressRepository: Repository<UserCourseProgress>,
 
     private readonly dailyChallengesService: DailyChallengesService,
+    private readonly scoringService: ScoringService,
+    private readonly streakService: StreakService,
+    private readonly leaderboardXpService: LeaderboardXpService,
   ) {}
 
   async recordVideoProgress(params: {
@@ -140,6 +147,38 @@ export class ProgressService {
         sourceId: `lesson:${params.lessonId}:completed`,
         value: 1,
         clientActivityDate: params.clientActivityDate,
+      });
+
+      /*
+       * Existing ScoringService remains the
+       * source of truth for XP.
+       */
+      const reward = await this.scoringService.recordLessonCompletionXp({
+        userId: params.user.id,
+        lessonId: params.lessonId,
+        baseXp: 20,
+      });
+
+      const streak = await this.streakService.getUserStreakSummary(
+        params.user.id,
+      );
+
+      /*
+       * Mirror the exact scoring reward
+       * into the leaderboard.
+       */
+      await this.leaderboardXpService.awardXp({
+        userId: params.user.id,
+        sourceType: LeaderboardXpSourceType.LESSON_COMPLETION,
+        sourceReference: params.lessonId,
+        idempotencyKey: `lesson:${params.lessonId}:user:${params.user.id}:leaderboard-xp`,
+        baseXp: reward.baseXp,
+        streakBonusXp: 0,
+        masteryBonusXp: 0,
+        speedBonusXp: 0,
+        awardedXp: reward.totalXpEarned,
+        multiplier: reward.boostMultiplier,
+        streakDays: streak.currentDays,
       });
     }
 
