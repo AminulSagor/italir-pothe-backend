@@ -25,6 +25,7 @@ import { SmsService } from '../common/services/sms.service';
 import { Otp, OtpPurpose } from '../users/entities/otp.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ConfigService } from '@nestjs/config';
+import { StoreWalletService } from 'src/package-store/services/store-wallet.service';
 
 @Injectable()
 export class AuthService {
@@ -42,6 +43,7 @@ export class AuthService {
     private readonly smsService: SmsService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly storeWalletService: StoreWalletService,
   ) {}
 
   private normalizeIdentifier(identifier: string): string {
@@ -214,6 +216,8 @@ export class AuthService {
     });
 
     await this.userRepository.save(newUser);
+
+    await this.storeWalletService.initializeForNewUser(newUser.id);
 
     const identifier = email ?? phone;
 

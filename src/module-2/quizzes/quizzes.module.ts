@@ -18,6 +18,7 @@ import { QuizSessionsService } from './services/quiz-sessions.service';
 import { QuizGradingService } from './services/quiz-grading.service';
 import { ScoringModule } from '../scoring/scoring.module';
 import { DailyChallengesModule } from '../daily-challenges/daily-challenges.module';
+import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { DailyChallengesModule } from '../daily-challenges/daily-challenges.modu
       QuizAttemptAnswerItem,
     ]),
     ScoringModule,
+    LeaderboardModule,
     DailyChallengesModule,
   ],
   controllers: [AdminQuizzesController, QuizSessionsController],
