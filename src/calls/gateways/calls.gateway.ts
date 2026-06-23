@@ -140,6 +140,45 @@ export class CallsGateway
     }
   }
 
+  @SubscribeMessage('call:incoming:ack')
+  async acknowledgeIncomingCall(
+    @ConnectedSocket()
+    client: Socket,
+
+    @MessageBody()
+    payload: CallIdPayload,
+  ) {
+    const userId = client.data.userId as string | undefined;
+
+    if (!userId) {
+      return this.unauthorizedResponse();
+    }
+
+    if (!this.isValidCallId(payload?.callId)) {
+      return this.invalidCallIdResponse();
+    }
+
+    try {
+      const callId = payload.callId.trim();
+
+      await this.callOrchestratorService.acknowledgeIncoming(userId, callId);
+
+      this.logger.log(
+        `Incoming call acknowledged call=${callId} receiver=${userId}`,
+      );
+
+      return {
+        ok: true,
+        data: {
+          callId,
+          acknowledged: true,
+        },
+      };
+    } catch (error) {
+      return this.errorResponse(error);
+    }
+  }
+
   @SubscribeMessage('call:answer')
   async answerCall(
     @ConnectedSocket()

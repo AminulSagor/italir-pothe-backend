@@ -374,4 +374,12 @@ export class CallService {
         : 'The receiver is busy on another call',
     });
   }
+
+  async findCallById(callId: string): Promise<Call | null> {
+    return this.callRepository.findOne({
+      where: {
+        id: callId,
+      },
+    });
+  }
 }

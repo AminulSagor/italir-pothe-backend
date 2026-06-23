@@ -4,8 +4,11 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { DirectConversation } from '../chat/entities/direct-conversation.entity';
+import { DevicesModule } from '../devices/devices.module';
+import { FirebaseModule } from '../firebase/firebase.module';
 import { UserBlocksModule } from '../user-blocks/user-blocks.module';
 import { User } from '../users/entities/user.entity';
+
 import { Call } from './entities/call.entity';
 import { CallsGateway } from './gateways/calls.gateway';
 import { CallAgoraTokenService } from './services/call-agora-token.service';
@@ -18,17 +21,16 @@ import { CallService } from './services/call.service';
     ConfigModule,
 
     UserBlocksModule,
+    DevicesModule,
+    FirebaseModule,
 
     TypeOrmModule.forFeature([Call, DirectConversation, User]),
 
     JwtModule.registerAsync({
       imports: [ConfigModule],
-
       inject: [ConfigService],
-
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET')!,
-
         signOptions: {
           expiresIn: configService.get<string>('JWT_EXPIRES_IN') as any,
         },

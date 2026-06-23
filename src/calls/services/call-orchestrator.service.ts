@@ -6,14 +6,29 @@ import { Call } from '../entities/call.entity';
 import { CallAgoraTokenService } from './call-agora-token.service';
 import { CallRealtimeService } from './call-realtime.service';
 import { CallService } from './call.service';
+import { UserDeviceService } from 'src/devices/services/user-device.service';
+import { FirebaseAdminService } from 'src/firebase/services/firebase-admin.service';
+import { CallStatus } from '../enums/call.enums';
+
+interface PendingIncomingAck {
+  receiverId: string;
+  resolve: (acknowledged: boolean) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
 
 @Injectable()
 export class CallOrchestratorService {
+  private readonly incomingAckTimeoutMs = 2000;
+
+  private readonly pendingIncomingAcks = new Map<string, PendingIncomingAck>();
+
   constructor(
     private readonly callService: CallService,
     private readonly userBlocksService: UserBlocksService,
     private readonly callRealtimeService: CallRealtimeService,
     private readonly callAgoraTokenService: CallAgoraTokenService,
+    private readonly userDeviceService: UserDeviceService,
+    private readonly firebaseAdminService: FirebaseAdminService,
   ) {}
 
   async initiate(callerId: string, dto: InitiateCallDto) {
@@ -24,21 +39,32 @@ export class CallOrchestratorService {
 
     await this.userBlocksService.assertCanMessage(caller.id, receiver.id);
 
-    if (!this.callRealtimeService.isUserConnected(receiver.id)) {
-      throw new ConflictException({
-        code: 'RECEIVER_NOT_FOREGROUND',
-        message: 'The receiver is not connected to the foreground call socket',
-      });
-    }
-
+    /*
+     * Do not reject when the receiver socket is disconnected.
+     *
+     * If the receiver does not ACK the socket event,
+     * the next phase will send an FCM call notification.
+     */
     const { call, created } = await this.callService.createRingingCall({
       caller,
       receiver,
       dto,
     });
 
+    let socketDelivered = false;
+    let foregroundAcknowledged = false;
+
     if (created) {
-      const delivered = this.callRealtimeService.emitToUser(
+      /*
+       * Register the ACK waiter before emitting the event.
+       * This prevents a very fast Flutter ACK from being missed.
+       */
+      const ackPromise = this.waitForIncomingAcknowledgement({
+        callId: call.id,
+        receiverId: receiver.id,
+      });
+
+      socketDelivered = this.callRealtimeService.emitToUser(
         receiver.id,
         'call:incoming',
         {
@@ -47,13 +73,63 @@ export class CallOrchestratorService {
         },
       );
 
-      if (!delivered) {
-        await this.callService.deleteCall(call.id);
+      if (!socketDelivered) {
+        /*
+         * Resolve immediately because there is no connected
+         * receiver socket that can acknowledge the event.
+         */
+        this.resolveIncomingAcknowledgement(call.id, false);
+      }
 
-        throw new ConflictException({
-          code: 'RECEIVER_DISCONNECTED',
-          message: 'The receiver disconnected before the call was delivered',
-        });
+      foregroundAcknowledged = await ackPromise;
+
+      if (!foregroundAcknowledged) {
+        const latestCall = await this.callService.findCallById(call.id);
+
+        if (latestCall?.status === CallStatus.RINGING) {
+          const devices =
+            await this.userDeviceService.findActiveFcmDevicesByUsers([
+              receiver.id,
+            ]);
+
+          const tokens = devices
+            .map((device) => device.fcmToken)
+            .filter(
+              (token): token is string =>
+                typeof token === 'string' && token.trim().length > 0,
+            );
+
+          console.log('[CallPush] preparing incoming call push', {
+            callId: call.id,
+            receiverId: receiver.id,
+            tokensCount: tokens.length,
+          });
+
+          if (tokens.length > 0) {
+            await this.firebaseAdminService.sendDataToTokens({
+              tokens,
+              data: {
+                type: 'incoming_call',
+                callId: call.id,
+                conversationId: call.directConversationId,
+                callType: call.callType,
+                callerId: caller.id,
+                callerName: caller.fullName,
+                callerAvatarUrl: caller.avatarUrl ?? '',
+              },
+            });
+
+            console.log('[CallPush] incoming call push sent', {
+              callId: call.id,
+              receiverId: receiver.id,
+            });
+          }
+        } else {
+          console.log('[CallPush] skipped because call is not ringing', {
+            callId: call.id,
+            status: latestCall?.status ?? null,
+          });
+        }
       }
     }
 
@@ -67,10 +143,45 @@ export class CallOrchestratorService {
       receiver: this.presentUser(receiver),
       media,
       created,
+      socketDelivered,
+      foregroundAcknowledged,
+    };
+  }
+
+  async acknowledgeIncoming(userId: string, callId: string) {
+    const normalizedCallId = callId.trim();
+
+    const pending = this.pendingIncomingAcks.get(normalizedCallId);
+
+    if (!pending) {
+      throw new ConflictException({
+        code: 'CALL_ACK_NOT_PENDING',
+        message: 'The incoming-call acknowledgement window has expired',
+      });
+    }
+
+    if (pending.receiverId !== userId) {
+      throw new ConflictException({
+        code: 'CALL_ACK_FORBIDDEN',
+        message: 'Only the call receiver can acknowledge this incoming call',
+      });
+    }
+
+    this.resolveIncomingAcknowledgement(normalizedCallId, true);
+
+    return {
+      callId: normalizedCallId,
+      acknowledged: true,
     };
   }
 
   async answer(userId: string, callId: string) {
+    /*
+     * Remove any pending ACK waiter because answering
+     * proves that the receiver handled the call.
+     */
+    this.resolveIncomingAcknowledgement(callId, true);
+
     const call = await this.callService.answerRingingCall(callId, userId);
 
     const media = this.callAgoraTokenService.buildPublisherToken({
@@ -91,6 +202,8 @@ export class CallOrchestratorService {
   }
 
   async reject(userId: string, callId: string) {
+    this.resolveIncomingAcknowledgement(callId, true);
+
     const call = await this.callService.rejectRingingCall(callId, userId);
 
     this.callRealtimeService.emitToUser(call.callerId, 'call:rejected', {
@@ -104,6 +217,8 @@ export class CallOrchestratorService {
   }
 
   async cancel(userId: string, callId: string) {
+    this.resolveIncomingAcknowledgement(callId, false);
+
     const call = await this.callService.cancelRingingCall(callId, userId);
 
     this.callRealtimeService.emitToUser(call.receiverId, 'call:cancelled', {
@@ -117,6 +232,8 @@ export class CallOrchestratorService {
   }
 
   async end(userId: string, callId: string) {
+    this.resolveIncomingAcknowledgement(callId, false);
+
     const call = await this.callService.endCall(callId, userId);
 
     const otherUserId = this.getOtherUserId(call, userId);
@@ -129,6 +246,59 @@ export class CallOrchestratorService {
     return {
       call: this.presentCall(call),
     };
+  }
+
+  private waitForIncomingAcknowledgement({
+    callId,
+    receiverId,
+  }: {
+    callId: string;
+    receiverId: string;
+  }): Promise<boolean> {
+    /*
+     * Clear an old waiter if the same call ID somehow
+     * registered more than once.
+     */
+    this.resolveIncomingAcknowledgement(callId, false);
+
+    return new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        const current = this.pendingIncomingAcks.get(callId);
+
+        if (!current) {
+          return;
+        }
+
+        this.pendingIncomingAcks.delete(callId);
+
+        resolve(false);
+      }, this.incomingAckTimeoutMs);
+
+      this.pendingIncomingAcks.set(callId, {
+        receiverId,
+        resolve,
+        timeout,
+      });
+    });
+  }
+
+  private resolveIncomingAcknowledgement(
+    callId: string,
+    acknowledged: boolean,
+  ): void {
+    const normalizedCallId = callId.trim();
+
+    const pending = this.pendingIncomingAcks.get(normalizedCallId);
+
+    if (!pending) {
+      return;
+    }
+
+    clearTimeout(pending.timeout);
+
+    this.pendingIncomingAcks.delete(normalizedCallId);
+
+    pending.resolve(acknowledged);
   }
 
   private getOtherUserId(call: Call, currentUserId: string): string {
