@@ -32,6 +32,7 @@ import { SkillBuilderModule } from './module-2/skill-builder/skill-builder.modul
 import { ImportantVerbsModule } from './module-2/important-verbs/important-verbs.module';
 import { DevicesModule } from './devices/devices.module';
 import { CourseCommerceModule } from './module-2/course-commerce/course-commerce.module';
+import { CallsModule } from './calls/calls.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { CourseCommerceModule } from './module-2/course-commerce/course-commerce
     ImportantVerbsModule,
     DevicesModule,
     CourseCommerceModule,
+    CallsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -5,10 +5,9 @@ import { JwtModule } from '@nestjs/jwt';
 
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
-import { CallController } from './controllers/call.controller';
 
 import { ChatGateway } from './chat.gateway';
-import { CallService } from './services/call.service';
+
 import { FirebasePushService } from '../notifications/firebase-push.service';
 import { MessageDeliveryProcessor } from './message-delivery.processor';
 
@@ -20,7 +19,7 @@ import { MessageAttachment } from './entities/message-attachment.entity';
 import { MessageDeliveryJob } from './entities/message-delivery-job.entity';
 import { MessageReceipt } from './entities/message-receipt.entity';
 import { UserPresence } from './entities/user-presence.entity';
-import { Call } from './entities/call.entity';
+
 import { User } from '../users/entities/user.entity';
 
 import { PresenceModule } from '../presence/presence.module';
@@ -45,7 +44,7 @@ import { UserDeviceService } from 'src/devices/services/user-device.service';
       MessageReceipt,
       UserDevice,
       UserPresence,
-      Call,
+
       User,
     ]),
     ConfigModule,
@@ -60,15 +59,15 @@ import { UserDeviceService } from 'src/devices/services/user-device.service';
       }),
     }),
   ],
-  controllers: [ChatController, CallController, DeviceController],
+  controllers: [ChatController, DeviceController],
   providers: [
     ChatService,
-    CallService,
+
     UserDeviceService,
     FirebasePushService,
     ChatGateway,
     MessageDeliveryProcessor,
   ],
-  exports: [ChatService, CallService, UserDeviceService, FirebasePushService],
+  exports: [ChatService, UserDeviceService, FirebasePushService],
 })
 export class ChatModule {}
