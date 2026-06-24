@@ -121,7 +121,7 @@ export class DemoPaymentGatewayService {
   getGooglePlayProductId(order: CoursePurchaseOrder): string {
     const prefix =
       this.configService.get<string>('GOOGLE_PLAY_DEMO_PRODUCT_PREFIX') ??
-      'demo_course';
+      'demo';
 
     return [
       prefix,

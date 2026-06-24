@@ -26,6 +26,8 @@ import {
 } from '../types/daily-challenge.type';
 import { DAILY_CHALLENGE_VARIATIONS } from '../types/daily-challenge-variations';
 import { DailyLearningActivityLog } from '../entities/daily-learning-activity-log.entity';
+import { LeaderboardXpService } from 'src/module-2/leaderboard/services/leaderboard-xp.service';
+import { LeaderboardXpSourceType } from 'src/module-2/leaderboard/types/leaderboard.type';
 
 interface DailyChallengeUser {
   id: string;
@@ -64,6 +66,7 @@ export class DailyChallengesService {
 
     private readonly scoringService: ScoringService,
     private readonly streakService: StreakService,
+    private readonly leaderboardXpService: LeaderboardXpService,
   ) {}
 
   private readonly logger = new Logger(DailyChallengesService.name);
@@ -236,11 +239,27 @@ export class DailyChallengesService {
 
     await this.progressRepository.save(progress);
 
-    await this.scoringService.recordManualXp({
+    const reward = await this.scoringService.recordManualXp({
       userId: user.id,
       sourceId: `daily-task:${progress.id}`,
       amount: progress.rewardXp,
       reason: 'Daily challenge task reward',
+    });
+
+    const streak = await this.streakService.getUserStreakSummary(user.id);
+
+    await this.leaderboardXpService.awardXp({
+      userId: user.id,
+      sourceType: LeaderboardXpSourceType.DAILY_CHALLENGE,
+      sourceReference: progress.id,
+      idempotencyKey: `daily-task:${progress.id}:leaderboard-xp`,
+      baseXp: reward.baseXp,
+      streakBonusXp: 0,
+      masteryBonusXp: 0,
+      speedBonusXp: 0,
+      awardedXp: reward.totalXpEarned,
+      multiplier: reward.boostMultiplier,
+      streakDays: streak.currentDays,
     });
 
     return this.getToday(user, challengeDate);
@@ -301,8 +320,26 @@ export class DailyChallengesService {
       });
 
       savedReward.boostMultiplier = xpReward.boostMultiplier;
+
       savedReward.boostXp = xpReward.boostXp;
+
       savedReward.totalXpAwarded = xpReward.totalXpEarned;
+
+      const streak = await this.streakService.getUserStreakSummary(user.id);
+
+      await this.leaderboardXpService.awardXp({
+        userId: user.id,
+        sourceType: LeaderboardXpSourceType.DAILY_CHALLENGE,
+        sourceReference: savedReward.id,
+        idempotencyKey: `daily-chest:${savedReward.id}:leaderboard-xp`,
+        baseXp: xpReward.baseXp,
+        streakBonusXp: 0,
+        masteryBonusXp: 0,
+        speedBonusXp: 0,
+        awardedXp: xpReward.totalXpEarned,
+        multiplier: xpReward.boostMultiplier,
+        streakDays: streak.currentDays,
+      });
     }
 
     if (shouldRewardFreeze) {

@@ -11,6 +11,7 @@ export enum XpTransactionSource {
   FINAL_EXAM = 'final_exam',
   DAILY_CHALLENGE = 'daily_challenge',
   MANUAL_ADJUSTMENT = 'manual_adjustment',
+  LESSON_COMPLETION = 'lesson_completion',
 }
 
 @Entity('xp_transactions')

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, ILike, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, ILike, Repository } from 'typeorm';
 
 import { CreateCvDocumentDto } from '../dto/cv-document.dto';
 import {
@@ -18,6 +18,8 @@ import {
   CvTemplateStatus,
   CvTemplateStyleType,
 } from '../entities/cv-template.entity';
+import { StoreWalletService } from 'src/package-store/services/store-wallet.service';
+import { randomUUID } from 'crypto';
 
 type PaginationMeta = {
   page: number;
@@ -37,6 +39,9 @@ export class CvBuilderService {
 
     @InjectRepository(CvTemplateDefaultLayout)
     private readonly cvTemplateDefaultLayoutRepository: Repository<CvTemplateDefaultLayout>,
+
+    private readonly dataSource: DataSource,
+    private readonly storeWalletService: StoreWalletService,
   ) {}
 
   async createTemplate(dto: CreateCvTemplateDto, adminId: string) {
@@ -75,7 +80,8 @@ export class CvBuilderService {
     if (dto.fontFamily !== undefined) {
       template.fontFamily = dto.fontFamily.trim() || 'Inter';
     }
-    if (dto.primaryColor !== undefined) template.primaryColor = dto.primaryColor;
+    if (dto.primaryColor !== undefined)
+      template.primaryColor = dto.primaryColor;
     if (dto.accentColor !== undefined) template.accentColor = dto.accentColor;
     if (dto.isPremium !== undefined) template.isPremium = dto.isPremium;
     if (dto.status !== undefined) template.status = dto.status;
@@ -84,7 +90,8 @@ export class CvBuilderService {
         dto.previewImageUrl,
       );
     }
-    if (dto.schema !== undefined) template.schema = this.normalizeSchema(dto.schema);
+    if (dto.schema !== undefined)
+      template.schema = this.normalizeSchema(dto.schema);
 
     const savedTemplate = await this.cvTemplateRepository.save(template);
 
@@ -130,7 +137,9 @@ export class CvBuilderService {
     });
 
     return {
-      layout: defaultLayout ? this.mapDefaultLayoutResponse(defaultLayout) : null,
+      layout: defaultLayout
+        ? this.mapDefaultLayoutResponse(defaultLayout)
+        : null,
     };
   }
 
@@ -139,24 +148,32 @@ export class CvBuilderService {
     dto: SaveCvDefaultLayoutDto,
     adminId: string,
   ) {
-    const existingLayout = await this.cvTemplateDefaultLayoutRepository.findOne({
-      where: { styleType },
-    });
+    const existingLayout = await this.cvTemplateDefaultLayoutRepository.findOne(
+      {
+        where: { styleType },
+      },
+    );
 
-    const defaultLayout = existingLayout ??
+    const defaultLayout =
+      existingLayout ??
       this.cvTemplateDefaultLayoutRepository.create({
         styleType,
         updatedByAdminId: adminId,
       });
 
-    defaultLayout.pageSize = dto.pageSize ?? defaultLayout.pageSize ?? CvTemplatePageSize.A4;
-    defaultLayout.fontFamily = dto.fontFamily?.trim() || defaultLayout.fontFamily || 'Inter';
-    defaultLayout.primaryColor = dto.primaryColor ?? defaultLayout.primaryColor ?? '#183847';
-    defaultLayout.accentColor = dto.accentColor ?? defaultLayout.accentColor ?? '#F3F4F6';
+    defaultLayout.pageSize =
+      dto.pageSize ?? defaultLayout.pageSize ?? CvTemplatePageSize.A4;
+    defaultLayout.fontFamily =
+      dto.fontFamily?.trim() || defaultLayout.fontFamily || 'Inter';
+    defaultLayout.primaryColor =
+      dto.primaryColor ?? defaultLayout.primaryColor ?? '#183847';
+    defaultLayout.accentColor =
+      dto.accentColor ?? defaultLayout.accentColor ?? '#F3F4F6';
     defaultLayout.schema = this.normalizeSchema(dto.schema);
     defaultLayout.updatedByAdminId = adminId;
 
-    const savedLayout = await this.cvTemplateDefaultLayoutRepository.save(defaultLayout);
+    const savedLayout =
+      await this.cvTemplateDefaultLayoutRepository.save(defaultLayout);
 
     return {
       message: 'CV default layout saved successfully.',
@@ -182,48 +199,85 @@ export class CvBuilderService {
   }
 
   async createDocument(dto: CreateCvDocumentDto, userId: string) {
-    const template = await this.cvTemplateRepository.findOne({
-      where: {
-        id: dto.templateId,
-        status: CvTemplateStatus.ACTIVE,
-      },
+    const documentId = randomUUID();
+
+    return this.dataSource.transaction(async (manager) => {
+      const templateRepository = manager.getRepository(CvTemplate);
+
+      const documentRepository = manager.getRepository(CvDocument);
+
+      const template = await templateRepository.findOne({
+        where: {
+          id: dto.templateId,
+          status: CvTemplateStatus.ACTIVE,
+        },
+      });
+
+      if (!template) {
+        throw new NotFoundException('Active CV template not found');
+      }
+
+      /*
+       * Creating a final READY CV consumes one credit.
+       *
+       * Editing an existing CV should not call this method,
+       * so editing will not consume another credit.
+       */
+      const creditResult = await this.storeWalletService.consumeCvCredit(
+        userId,
+        manager,
+      );
+
+      const document = documentRepository.create({
+        id: documentId,
+
+        userId,
+
+        templateId: dto.templateId,
+
+        title: dto.title.trim(),
+
+        themeColor: dto.themeColor ?? template.primaryColor,
+
+        accentColor: dto.accentColor ?? template.accentColor,
+
+        formData: this.normalizeDocumentFormData(template, dto.formData),
+
+        templateSnapshot: this.mapTemplateResponse(template),
+
+        status: CvDocumentStatus.READY,
+      });
+
+      const savedDocument = await documentRepository.save(document);
+
+      return {
+        message: 'CV saved successfully.',
+
+        document: this.mapDocumentResponse(savedDocument, template),
+
+        cvCredit: {
+          consumed: 1,
+          remainingCredits: creditResult.remainingCredits,
+        },
+      };
     });
-
-    if (!template) throw new NotFoundException('Active CV template not found');
-
-    const document = this.cvDocumentRepository.create({
-      userId,
-      templateId: dto.templateId,
-      title: dto.title.trim(),
-      themeColor: dto.themeColor ?? template.primaryColor,
-      accentColor: dto.accentColor ?? template.accentColor,
-      formData: this.normalizeDocumentFormData(template, dto.formData),
-      templateSnapshot: this.mapTemplateResponse(template),
-      status: CvDocumentStatus.READY,
-    });
-
-    const savedDocument = await this.cvDocumentRepository.save(document);
-
-    return {
-      message: 'CV saved successfully.',
-      document: this.mapDocumentResponse(savedDocument, template),
-    };
   }
 
   async getMyDocuments(userId: string, query: PaginationQueryDto) {
     const pagination = this.normalizePagination(query);
 
-    const [documents, totalItems] = await this.cvDocumentRepository.findAndCount({
-      where: {
-        userId,
-      },
-      relations: ['template'],
-      order: {
-        updatedAt: 'DESC',
-      },
-      skip: (pagination.page - 1) * pagination.limit,
-      take: pagination.limit,
-    });
+    const [documents, totalItems] =
+      await this.cvDocumentRepository.findAndCount({
+        where: {
+          userId,
+        },
+        relations: ['template'],
+        order: {
+          updatedAt: 'DESC',
+        },
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit,
+      });
 
     return {
       documents: documents.map((document) =>
@@ -250,17 +304,20 @@ export class CvBuilderService {
       ? { ...baseWhere, title: ILike(`%${search}%`) }
       : baseWhere;
 
-    const [templates, totalItems] = await this.cvTemplateRepository.findAndCount({
-      where,
-      order: {
-        createdAt: 'DESC',
-      },
-      skip: (pagination.page - 1) * pagination.limit,
-      take: pagination.limit,
-    });
+    const [templates, totalItems] =
+      await this.cvTemplateRepository.findAndCount({
+        where,
+        order: {
+          createdAt: 'DESC',
+        },
+        skip: (pagination.page - 1) * pagination.limit,
+        take: pagination.limit,
+      });
 
     return {
-      templates: templates.map((template) => this.mapTemplateResponse(template)),
+      templates: templates.map((template) =>
+        this.mapTemplateResponse(template),
+      ),
       pagination: this.buildPaginationMeta(totalItems, pagination),
     };
   }
@@ -308,7 +365,10 @@ export class CvBuilderService {
     };
   }
 
-  private mapDocumentResponse(document: CvDocument, template?: CvTemplate | null) {
+  private mapDocumentResponse(
+    document: CvDocument,
+    template?: CvTemplate | null,
+  ) {
     const templateResponse = this.resolveDocumentTemplateResponse(
       document,
       template,
@@ -346,7 +406,8 @@ export class CvBuilderService {
     formData: Record<string, unknown>,
   ): Record<string, unknown> {
     const schema = this.asRecord(template.schema);
-    const rawSections = schema && Array.isArray(schema.sections) ? schema.sections : [];
+    const rawSections =
+      schema && Array.isArray(schema.sections) ? schema.sections : [];
     const normalizedData: Record<string, unknown> = {};
 
     for (const rawSection of rawSections) {
@@ -406,7 +467,10 @@ export class CvBuilderService {
     }
 
     if (Array.isArray(value)) {
-      if (fieldType.toLowerCase() === 'dynamicitems' || fieldType.toLowerCase() === 'dynamic_items') {
+      if (
+        fieldType.toLowerCase() === 'dynamicitems' ||
+        fieldType.toLowerCase() === 'dynamic_items'
+      ) {
         const normalizedItems = value
           .map((item) => this.asRecord(item))
           .filter((item): item is Record<string, unknown> => Boolean(item))
@@ -457,7 +521,9 @@ export class CvBuilderService {
 
   private normalizeNullableString(value?: string | null): string | null {
     const normalizedValue = value?.trim();
-    return normalizedValue && normalizedValue.length > 0 ? normalizedValue : null;
+    return normalizedValue && normalizedValue.length > 0
+      ? normalizedValue
+      : null;
   }
 
   private normalizeSchema(schema?: Record<string, unknown>) {
@@ -559,7 +625,11 @@ export class CvBuilderService {
           width: 420,
           height: 2,
           zIndex: 2,
-          style: { backgroundColor: '#183847', borderColor: '#183847', borderWidth: 2 },
+          style: {
+            backgroundColor: '#183847',
+            borderColor: '#183847',
+            borderWidth: 2,
+          },
         },
       ],
     };
@@ -571,12 +641,32 @@ export class CvBuilderService {
           title: 'Personal Details',
           required: false,
           fields: [
-            { key: 'fullName', label: 'Full name', type: 'text', required: false },
-            { key: 'professionalTitle', label: 'Professional title', type: 'text', required: false },
+            {
+              key: 'fullName',
+              label: 'Full name',
+              type: 'text',
+              required: false,
+            },
+            {
+              key: 'professionalTitle',
+              label: 'Professional title',
+              type: 'text',
+              required: false,
+            },
             { key: 'email', label: 'Email', type: 'email', required: false },
             { key: 'phone', label: 'Phone', type: 'phone', required: false },
-            { key: 'location', label: 'Location', type: 'text', required: false },
-            { key: 'profilePhoto', label: 'Profile photo', type: 'photoUrl', required: false },
+            {
+              key: 'location',
+              label: 'Location',
+              type: 'text',
+              required: false,
+            },
+            {
+              key: 'profilePhoto',
+              label: 'Profile photo',
+              type: 'photoUrl',
+              required: false,
+            },
           ],
         },
         {
@@ -584,7 +674,12 @@ export class CvBuilderService {
           title: 'Summary',
           required: false,
           fields: [
-            { key: 'summary', label: 'Summary', type: 'textarea', required: false },
+            {
+              key: 'summary',
+              label: 'Summary',
+              type: 'textarea',
+              required: false,
+            },
           ],
         },
         {
@@ -592,7 +687,12 @@ export class CvBuilderService {
           title: 'Professional Experience',
           required: false,
           fields: [
-            { key: 'experience', label: 'Experience items', type: 'list', required: false },
+            {
+              key: 'experience',
+              label: 'Experience items',
+              type: 'list',
+              required: false,
+            },
           ],
         },
       ],

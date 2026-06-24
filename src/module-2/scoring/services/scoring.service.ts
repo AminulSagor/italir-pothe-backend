@@ -24,6 +24,12 @@ export interface XpRewardSummary {
   xpBoost: XpBoostState;
 }
 
+interface RecordLessonCompletionXpPayload {
+  userId: string;
+  lessonId: string;
+  baseXp: number;
+}
+
 interface RecordQuizCompletionXpPayload {
   userId: string;
   sessionId: string;
@@ -87,6 +93,37 @@ export class ScoringService {
       baseXp: payload.baseXp,
       bonusXp: payload.bonusXp,
       reason: 'Quiz completion reward',
+      applyBoost: true,
+    });
+  }
+
+  async recordLessonCompletionXp(
+    payload: RecordLessonCompletionXpPayload,
+  ): Promise<XpRewardSummary> {
+    /*
+     * Include userId because the same lesson can be
+     * completed by many different users.
+     */
+    const sourceId = `user:${payload.userId}:lesson:${payload.lessonId}`;
+
+    const existingTransaction = await this.xpTransactionRepository.findOne({
+      where: {
+        source: XpTransactionSource.LESSON_COMPLETION,
+        sourceId,
+      },
+    });
+
+    if (existingTransaction) {
+      return this.buildRewardSummaryFromTransaction(existingTransaction);
+    }
+
+    return this.recordXpTransaction({
+      userId: payload.userId,
+      source: XpTransactionSource.LESSON_COMPLETION,
+      sourceId,
+      baseXp: payload.baseXp,
+      bonusXp: 0,
+      reason: 'Lesson completion reward',
       applyBoost: true,
     });
   }
