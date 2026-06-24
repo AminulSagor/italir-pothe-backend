@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -190,8 +191,10 @@ export class UsersService {
     const user = await this.findUserById(userId);
     const email = this.normalizeEmail(dto.email);
 
-    if (user.email === email && user.isEmailVerified) {
-      throw new BadRequestException('This email is already verified.');
+    if (user.isEmailVerified) {
+      throw new ForbiddenException(
+        'A verified email address cannot be changed.',
+      );
     }
 
     await this.ensureEmailIsAvailable(email, user.id);
@@ -219,6 +222,12 @@ export class UsersService {
   async verifyEmailChangeOtp(userId: string, dto: VerifyEmailChangeOtpDto) {
     const user = await this.findUserById(userId);
     const email = this.normalizeEmail(dto.email);
+
+    if (user.isEmailVerified) {
+      throw new ForbiddenException(
+        'A verified email address cannot be changed.',
+      );
+    }
 
     await this.ensureEmailIsAvailable(email, user.id);
 
@@ -250,8 +259,10 @@ export class UsersService {
     const user = await this.findUserById(userId);
     const phone = dto.phone.trim();
 
-    if (user.phone === phone && user.isPhoneVerified) {
-      throw new BadRequestException('This phone number is already verified.');
+    if (user.isPhoneVerified) {
+      throw new ForbiddenException(
+        'A verified phone number cannot be changed.',
+      );
     }
 
     await this.ensurePhoneIsAvailable(phone, user.id);
@@ -279,6 +290,12 @@ export class UsersService {
   async verifyPhoneChangeOtp(userId: string, dto: VerifyPhoneChangeOtpDto) {
     const user = await this.findUserById(userId);
     const phone = dto.phone.trim();
+
+    if (user.isPhoneVerified) {
+      throw new ForbiddenException(
+        'A verified phone number cannot be changed.',
+      );
+    }
 
     await this.ensurePhoneIsAvailable(phone, user.id);
 
