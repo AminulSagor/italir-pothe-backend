@@ -71,26 +71,38 @@ export class FirebaseAdminService {
     for (const chunk of chunks) {
       const message: MulticastMessage = {
         tokens: chunk,
+
         notification: {
           title: params.title,
           body: params.body,
           imageUrl: params.imageUrl ?? undefined,
         },
+
         data: {
           deepLink: params.deepLink ?? '',
+          imageUrl: params.imageUrl ?? '',
         },
+
         android: {
           priority: 'high',
           notification: {
             sound: 'default',
+            imageUrl: params.imageUrl ?? undefined,
           },
         },
+
         apns: {
           payload: {
             aps: {
               sound: 'default',
+              mutableContent: Boolean(params.imageUrl),
             },
           },
+          fcmOptions: params.imageUrl
+            ? {
+                imageUrl: params.imageUrl,
+              }
+            : undefined,
         },
       };
 
@@ -173,5 +185,32 @@ export class FirebaseAdminService {
     }
 
     return chunks;
+  }
+
+  async sendDataToTokens(params: {
+    tokens: string[];
+    data: Record<string, string>;
+  }): Promise<void> {
+    if (!this.firebaseApp || params.tokens.length === 0) {
+      return;
+    }
+
+    await getMessaging(this.firebaseApp).sendEachForMulticast({
+      tokens: [...new Set(params.tokens)],
+      data: params.data,
+      android: {
+        priority: 'high',
+      },
+      apns: {
+        headers: {
+          'apns-priority': '10',
+        },
+        payload: {
+          aps: {
+            contentAvailable: true,
+          },
+        },
+      },
+    });
   }
 }

@@ -6,11 +6,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 
 import {
   CheckQuizAnswerDto,
   CompleteQuizSessionDto,
+  StartQuizSessionDto,
 } from '../dto/quiz-session.dto';
 import { QuizAcceptedAnswer } from '../entities/quiz-accepted-answer.entity';
 import { QuizAttemptAnswerItem } from '../entities/quiz-attempt-answer-item.entity';
@@ -87,6 +88,7 @@ export class QuizSessionsService {
 
   async startLessonQuiz(
     lessonId: string,
+    dto: StartQuizSessionDto,
     user: QuizRequestUser,
   ): Promise<QuizSessionResponse> {
     const quiz = await this.quizRepository.findOne({
@@ -104,7 +106,7 @@ export class QuizSessionsService {
       throw new NotFoundException('Published quiz not found for this lesson');
     }
 
-    const questions = await this.findActiveQuestions(quiz.id);
+    const questions = await this.findPublishedQuizQuestions(quiz);
 
     if (questions.length === 0) {
       throw new BadRequestException('This quiz has no active questions');
@@ -119,13 +121,50 @@ export class QuizSessionsService {
       correctAnswers: 0,
       score: 0,
       earnedXp: 0,
-      startedAt: new Date(),
+      startedAt:
+        this.parseClientActivityDate(dto.clientActivityDate) ?? new Date(),
       submittedAt: null,
     });
 
     const savedSession = await this.sessionRepository.save(session);
 
     return this.findSessionById(savedSession.id, user);
+  }
+
+
+  async getLessonQuizAvailability(lessonId: string) {
+    const quiz = await this.quizRepository.findOne({
+      where: {
+        lessonId,
+        status: QuizStatus.PUBLISHED,
+      },
+      order: {
+        sortOrder: 'ASC',
+        createdAt: 'DESC',
+      },
+    });
+
+    if (!quiz) {
+      return {
+        lessonId,
+        hasQuiz: false,
+        quizId: null,
+        title: null,
+        description: null,
+        totalQuestions: 0,
+      };
+    }
+
+    const questions = await this.findPublishedQuizQuestions(quiz);
+
+    return {
+      lessonId,
+      hasQuiz: questions.length > 0,
+      quizId: quiz.id,
+      title: quiz.title,
+      description: quiz.description,
+      totalQuestions: questions.length,
+    };
   }
 
   async findSessionById(
@@ -221,8 +260,12 @@ export class QuizSessionsService {
       );
     }
 
+    const completedAt =
+      this.parseClientActivityDate(dto.clientActivityDate) ?? new Date();
     const totalTimeSeconds =
-      dto.totalTimeSeconds ?? this.calculateElapsedSeconds(session) ?? 0;
+      this.calculateElapsedSeconds(session, completedAt) ??
+      dto.totalTimeSeconds ??
+      0;
 
     const result = this.calculateResult(session, questions, totalTimeSeconds);
     const bonusXp =
@@ -270,7 +313,7 @@ export class QuizSessionsService {
     session.score = result.scorePercentage;
     session.earnedXp = reward.totalXpEarned;
     session.timeTakenSeconds = totalTimeSeconds;
-    session.submittedAt = new Date();
+    session.submittedAt = completedAt;
 
     await this.sessionRepository.save(session);
 
@@ -825,6 +868,49 @@ export class QuizSessionsService {
     return session;
   }
 
+  private async findPublishedQuizQuestions(
+    quiz: Quiz,
+  ): Promise<QuizQuestion[]> {
+    const activeQuestions = await this.findActiveQuestions(quiz.id);
+    if (activeQuestions.length > 0) {
+      return activeQuestions;
+    }
+
+    // Compatibility repair for quizzes published before publishing also
+    // activated their draft questions. Only repair when no active questions
+    // exist, so newly added draft questions are not exposed automatically.
+    const legacyQuestions = await this.questionRepository.find({
+      where: {
+        quizId: quiz.id,
+        status: Not(QuizQuestionStatus.ARCHIVED),
+      },
+      relations: ['options', 'pairs', 'sequenceItems', 'acceptedAnswers'],
+      order: {
+        sortOrder: 'ASC',
+        createdAt: 'ASC',
+      },
+    });
+
+    if (legacyQuestions.length === 0) {
+      return [];
+    }
+
+    await this.questionRepository.update(
+      {
+        quizId: quiz.id,
+        status: QuizQuestionStatus.DRAFT,
+      },
+      {
+        status: QuizQuestionStatus.ACTIVE,
+      },
+    );
+
+    return legacyQuestions.map((question) => {
+      question.status = QuizQuestionStatus.ACTIVE;
+      return this.sortQuestionRelations(question);
+    });
+  }
+
   private async findActiveQuestions(quizId: string): Promise<QuizQuestion[]> {
     const questions = await this.questionRepository.find({
       where: {
@@ -935,6 +1021,7 @@ export class QuizSessionsService {
         (item) => ({
           id: item.id,
           wordText: item.wordText,
+          isRequired: item.isRequired,
         }),
       ),
       matchingItems: this.buildRuntimeMatchingItems(question.pairs ?? []),
@@ -955,6 +1042,7 @@ export class QuizSessionsService {
         leftLabel: pair.leftLabel,
       })),
       rightItems: this.shuffleItems(pairs).map((pair) => ({
+        pairId: pair.id,
         rightText: pair.rightText,
         rightLabel: pair.rightLabel,
       })),
@@ -1209,17 +1297,25 @@ export class QuizSessionsService {
     });
   }
 
-  private calculateElapsedSeconds(session: QuizSession): number | undefined {
-    if (!session.startedAt || !session.submittedAt) {
+  private calculateElapsedSeconds(
+    session: QuizSession,
+    completedAt: Date | null = session.submittedAt,
+  ): number | undefined {
+    if (!session.startedAt || !completedAt) {
       return undefined;
     }
 
     return Math.max(
       0,
-      Math.floor(
-        (session.submittedAt.getTime() - session.startedAt.getTime()) / 1000,
-      ),
+      Math.floor((completedAt.getTime() - session.startedAt.getTime()) / 1000),
     );
+  }
+
+  private parseClientActivityDate(value?: string): Date | null {
+    if (!value) return null;
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
   private buildCorrectAnswerText(answer: string | null | undefined): string {

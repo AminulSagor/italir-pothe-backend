@@ -57,7 +57,12 @@ interface UserSafeQuestion {
     leftItems: { id: string; text: string; sortOrder: number }[];
     rightItems: { id: string; text: string; sortOrder: number }[];
   };
-  sequenceItems: { id: string; text: string; sortOrder: number }[];
+  sequenceItems: {
+    id: string;
+    text: string;
+    sortOrder: number;
+    isRequired: boolean;
+  }[];
 }
 
 @Injectable()
@@ -494,13 +499,12 @@ export class ExamsService {
       const isCorrect =
         submittedPairs.length === question.pairs.length &&
         submittedPairs.every((item) => {
-          const leftText = this.normalizeText(item.textValue ?? '');
-          const rightText = this.normalizeText(item.matchedWithItemId ?? '');
+          if (!item.selectedItemId || !item.matchedWithItemId) return false;
 
           return question.pairs.some(
             (pair) =>
-              this.normalizeText(pair.leftText) === leftText &&
-              this.normalizeText(pair.rightText) === rightText,
+              pair.id === item.selectedItemId &&
+              pair.id === item.matchedWithItemId,
           );
         });
 
@@ -558,6 +562,7 @@ export class ExamsService {
           id: item.id,
           text: item.itemText,
           sortOrder: item.correctOrder,
+          isRequired: !item.isDecoy,
         })),
       ),
     };

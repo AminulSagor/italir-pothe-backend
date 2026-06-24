@@ -9,6 +9,7 @@ export interface QuizRuntimeOption {
 export interface QuizRuntimeSequenceItem {
   id: string;
   wordText: string;
+  isRequired: boolean;
 }
 
 export interface QuizRuntimeMatchingLeftItem {
@@ -18,6 +19,7 @@ export interface QuizRuntimeMatchingLeftItem {
 }
 
 export interface QuizRuntimeMatchingRightItem {
+  pairId: string;
   rightText: string;
   rightLabel: string | null;
 }

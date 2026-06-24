@@ -1,55 +1,64 @@
+import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { InjectRepository } from '@nestjs/typeorm';
 import {
-  SubscribeMessage,
-  WebSocketGateway,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { JwtService } from '@nestjs/jwt';
-import { Logger } from '@nestjs/common';
-import { ChatService } from './chat.service';
-import { UserBlocksService } from '../user-blocks/user-blocks.service';
-import { CallService } from './services/call.service';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+
+import { PresenceService } from '../presence/presence.service';
+import { UserBlocksService } from '../user-blocks/user-blocks.service';
 import { User } from '../users/entities/user.entity';
+import { ChatService } from './chat.service';
+import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Conversation } from './entities/conversation.entity';
 import { DirectConversation } from './entities/direct-conversation.entity';
-import { ConversationParticipant } from './entities/conversation-participant.entity';
-import { Call, CallStatus, CallType } from './entities/call.entity';
-import { PresenceService } from '../presence/presence.service';
 
-@WebSocketGateway({ namespace: 'chat', cors: true })
+@WebSocketGateway({
+  namespace: 'chat',
+  cors: true,
+})
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
-  // userId -> set of socket ids
+
+  /**
+   * Tracks all active socket connections for each user.
+   *
+   * userId -> socket IDs
+   */
   private readonly connections = new Map<string, Set<string>>();
 
   constructor(
     private readonly jwtService: JwtService,
     private readonly chatService: ChatService,
-    private readonly callService: CallService,
     private readonly userBlocksService: UserBlocksService,
+
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+
     @InjectRepository(Conversation)
     private readonly conversationRepo: Repository<Conversation>,
+
     @InjectRepository(DirectConversation)
     private readonly directConversationRepo: Repository<DirectConversation>,
+
     @InjectRepository(ConversationParticipant)
     private readonly participantRepo: Repository<ConversationParticipant>,
-    @InjectRepository(Call)
-    private readonly callRepo: Repository<Call>,
+
     private readonly presenceService: PresenceService,
   ) {}
 
-  async handleConnection(client: Socket) {
+  async handleConnection(client: Socket): Promise<void> {
     try {
-      let token = (client.handshake.auth && client.handshake.auth.token) || client.handshake.query?.token;
+      let token = client.handshake.auth?.token ?? client.handshake.query?.token;
 
       if (!token) {
         this.logger.warn('Connection without token, disconnecting');
@@ -61,10 +70,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         token = token.slice(7);
       }
 
-      const payload = this.jwtService.verify(token as string);
-      const userId = payload.sub as string;
+      if (typeof token !== 'string') {
+        this.logger.warn('Invalid socket token, disconnecting');
+        client.disconnect(true);
+        return;
+      }
 
-      const user = await this.userRepo.findOne({ where: { id: userId } });
+      const payload = this.jwtService.verify<{ sub: string }>(token);
+      const userId = payload.sub;
+
+      const user = await this.userRepo.findOne({
+        where: { id: userId },
+      });
+
       if (!user) {
         client.disconnect(true);
         return;
@@ -72,87 +90,140 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       client.data.user = user;
 
-      // track connection
-      const set = this.connections.get(user.id) ?? new Set<string>();
-      set.add(client.id);
-      this.connections.set(user.id, set);
+      const userConnections =
+        this.connections.get(user.id) ?? new Set<string>();
+
+      userConnections.add(client.id);
+      this.connections.set(user.id, userConnections);
 
       await this.presenceService.handleSocketConnect(user.id, client.id);
 
-      // join personal room
-      client.join(this.userRoom(user.id));
+      // Join the user's private Socket.IO room.
+      await client.join(this.userRoom(user.id));
 
-      // Broadcast presence change
-      if (set.size === 1) { // They just came online
-        this.server.emit('user_presence_change', { userId: user.id, isOnline: true });
+      // Broadcast online presence only for the user's first active socket.
+      if (userConnections.size === 1) {
+        this.server.emit('user_presence_change', {
+          userId: user.id,
+          isOnline: true,
+        });
       }
 
       this.logger.log(`User ${user.id} connected (socket=${client.id})`);
-    } catch (err) {
-      this.logger.warn('Auth failed for socket connection', err?.message ?? err);
+    } catch (error) {
+      this.logger.warn(
+        'Auth failed for socket connection',
+        error instanceof Error ? error.message : String(error),
+      );
+
       client.disconnect(true);
     }
   }
 
-  async handleDisconnect(client: Socket) {
-    const user: User | undefined = client.data.user;
-    if (user) {
-      const set = this.connections.get(user.id);
-      if (set) {
-        set.delete(client.id);
-        if (set.size === 0) {
-          this.connections.delete(user.id);
-          this.server.emit('user_presence_change', { userId: user.id, isOnline: false });
-        }
-      }
-      await this.presenceService.handleSocketDisconnect(user.id, client.id);
-      this.logger.log(`User ${user.id} disconnected (socket=${client.id})`);
+  async handleDisconnect(client: Socket): Promise<void> {
+    const user = client.data.user as User | undefined;
+
+    if (!user) {
+      return;
     }
+
+    const userConnections = this.connections.get(user.id);
+
+    if (userConnections) {
+      userConnections.delete(client.id);
+
+      if (userConnections.size === 0) {
+        this.connections.delete(user.id);
+
+        this.server.emit('user_presence_change', {
+          userId: user.id,
+          isOnline: false,
+        });
+      }
+    }
+
+    await this.presenceService.handleSocketDisconnect(user.id, client.id);
+
+    this.logger.log(`User ${user.id} disconnected (socket=${client.id})`);
   }
 
-  private conversationRoom(conversationId: string) {
+  private conversationRoom(conversationId: string): string {
     return `conversation:${conversationId}`;
   }
 
-  private userRoom(userId: string) {
+  private userRoom(userId: string): string {
     return `user:${userId}`;
   }
 
-  // Send directly to a user's personal room. Returns true if sent to at least one socket.
-  sendToUser(userId: string, event: string, payload: any): boolean {
+  /**
+   * Sends an event to every connected socket belonging to a user.
+   *
+   * Returns true when the user currently has at least one connected socket.
+   */
+  sendToUser(userId: string, event: string, payload: unknown): boolean {
     const room = this.userRoom(userId);
-    
-    // Always emit the event to ensure Socket.IO delivers it to any connected sockets
+
     this.server.to(room).emit(event, payload);
 
-    // Retrieve adapter status for delivery/online confirmation
-    const adapter = (this.server as any).adapter || (this.server as any).sockets?.adapter;
-    const sockets = adapter?.rooms?.get(room);
-    const isOnline = !!(sockets && sockets.size > 0);
+    const adapter =
+      (this.server as any).adapter ?? (this.server as any).sockets?.adapter;
 
-    this.logger.log(`sendToUser: Emitted ${event} to room ${room}. Detected online status: ${isOnline}`);
+    const sockets = adapter?.rooms?.get(room);
+    const isOnline = Boolean(sockets && sockets.size > 0);
+
+    this.logger.log(
+      `sendToUser: Emitted ${event} to room ${room}. ` +
+        `Detected online status: ${isOnline}`,
+    );
+
     return isOnline;
   }
 
   @SubscribeMessage('join_conversation')
-  async handleJoinConversation(client: Socket, payload: { conversationId: string }) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
+  async handleJoinConversation(
+    client: Socket,
+    payload: {
+      conversationId: string;
+    },
+  ) {
+    const user = client.data.user as User | undefined;
+
+    if (!user) {
+      return { error: 'Unauthorized' };
+    }
 
     const room = this.conversationRoom(payload.conversationId);
-    client.join(room);
-    this.logger.log(`User ${user.id} joined conversation ${payload.conversationId}`);
+
+    await client.join(room);
+
+    this.logger.log(
+      `User ${user.id} joined conversation ${payload.conversationId}`,
+    );
+
     return { ok: true };
   }
 
   @SubscribeMessage('leave_conversation')
-  async handleLeaveConversation(client: Socket, payload: { conversationId: string }) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
+  async handleLeaveConversation(
+    client: Socket,
+    payload: {
+      conversationId: string;
+    },
+  ) {
+    const user = client.data.user as User | undefined;
+
+    if (!user) {
+      return { error: 'Unauthorized' };
+    }
 
     const room = this.conversationRoom(payload.conversationId);
-    client.leave(room);
-    this.logger.log(`User ${user.id} left conversation ${payload.conversationId}`);
+
+    await client.leave(room);
+
+    this.logger.log(
+      `User ${user.id} left conversation ${payload.conversationId}`,
+    );
+
     return { ok: true };
   }
 
@@ -164,36 +235,56 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       content?: string | null;
       clientMessageId?: string | null;
       messageType?: string;
-      attachments?: Array<{ fileUrl: string; fileName?: string; mimeType?: string; fileSizeBytes?: string; attachmentType?: string }>;
+      attachments?: Array<{
+        fileUrl: string;
+        fileName?: string;
+        mimeType?: string;
+        fileSizeBytes?: string;
+        attachmentType?: string;
+      }>;
     },
   ) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
+    const user = client.data.user as User | undefined;
 
-    // Check if this is a direct conversation and validate block status
+    if (!user) {
+      return { error: 'Unauthorized' };
+    }
+
     const conversation = await this.conversationRepo.findOne({
-      where: { id: payload.conversationId },
+      where: {
+        id: payload.conversationId,
+      },
     });
 
-    if (conversation && conversation.type === 'direct') {
-      const directConv = await this.directConversationRepo.findOne({
-        where: { conversationId: payload.conversationId },
+    /*
+     * For direct conversations, verify that neither user has blocked
+     * the other before allowing the message.
+     */
+    if (conversation?.type === 'direct') {
+      const directConversation = await this.directConversationRepo.findOne({
+        where: {
+          conversationId: payload.conversationId,
+        },
       });
 
-      if (directConv) {
-        // Get the other user in the direct conversation
+      if (directConversation) {
         const otherUserId =
-          directConv.userOneId === user.id ? directConv.userTwoId : directConv.userOneId;
+          directConversation.userOneId === user.id
+            ? directConversation.userTwoId
+            : directConversation.userOneId;
 
         try {
           await this.userBlocksService.assertCanMessage(user.id, otherUserId);
         } catch (error) {
-          return { error: error.message || 'Cannot send message' };
+          return {
+            error:
+              error instanceof Error ? error.message : 'Cannot send message',
+          };
         }
       }
     }
 
-    const saved = await this.chatService.createMessage({
+    const savedMessage = await this.chatService.createMessage({
       conversationId: payload.conversationId,
       senderId: user.id,
       clientMessageId: payload.clientMessageId ?? null,
@@ -202,215 +293,116 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       attachments: payload.attachments as any,
     });
 
-    // broadcast to conversation room
     const room = this.conversationRoom(payload.conversationId);
-    // debug: log room membership before broadcasting
-    try {
-      const adapter = (this.server as any).adapter || (this.server as any).sockets?.adapter;
-      const adapterRooms = adapter?.rooms;
-      const roomSockets = adapterRooms?.get(room);
-      this.logger.log(`Broadcasting message ${saved.id} to room ${room}`);
-      this.logger.log(`Room ${room} has ${roomSockets ? roomSockets.size : 0} socket(s)`);
-      if (roomSockets && roomSockets.size > 0) {
-        this.logger.log(`Sockets in room: ${Array.from(roomSockets).join(', ')}`);
-      }
-    } catch (err) {
-      this.logger.warn('Failed to read room sockets for debugging', err?.message ?? err);
-    }
-
-    this.server.to(room).emit('message', saved);
-
-    // create delivery jobs for participants (excluding sender)
-    const participantIds = await this.chatService.getConversationParticipantIds(payload.conversationId);
-    const receivers = participantIds.filter((id) => id !== user.id);
-
-    if (receivers.length) {
-      await this.chatService.createDeliveryJobs({
-        messageId: saved.id,
-        conversationId: payload.conversationId,
-        receiverIds: receivers,
-      });
-
-      // Send receive_message and new_message events to each recipient's personal user room
-      for (const receiverId of receivers) {
-        this.sendToUser(receiverId, 'receive_message', saved);
-        this.sendToUser(receiverId, 'new_message', saved);
-      }
-    }
-
-    return { ok: true, messageId: saved.id };
-  }
-
-  @SubscribeMessage('call:initiate')
-  async handleInitiateCall(
-    client: Socket,
-    payload: {
-      directConversationId: string;
-      recipientId: string;
-      callType: 'audio' | 'video';
-    },
-  ) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
 
     try {
-      // Check if users are blocked
-      await this.userBlocksService.assertCanMessage(user.id, payload.recipientId);
+      const adapter =
+        (this.server as any).adapter ?? (this.server as any).sockets?.adapter;
 
-      const callType = payload.callType === 'audio' ? CallType.AUDIO : CallType.VIDEO;
-
-      const call = await this.callService.initiateCall({
-        directConversationId: payload.directConversationId,
-        callerId: user.id,
-        recipientId: payload.recipientId,
-        callType: callType,
-      });
-
-      // Generate token for caller
-      const agoraToken = this.callService.generateAgoraToken({
-        call,
-        userId: user.id,
-      });
-
-      // Notify recipient in their personal room
-      this.sendToUser(payload.recipientId, 'call:incoming', {
-        callId: call.id,
-        callerId: user.id,
-        callerName: user.fullName,
-        callType: payload.callType,
-        timestamp: new Date(),
-      });
-
-      // Send token to caller
-      client.emit('call:initiated', {
-        callId: call.id,
-        agoraToken,
-      });
+      const roomSockets = adapter?.rooms?.get(room);
 
       this.logger.log(
-        `Call initiated from ${user.id} to ${payload.recipientId}: ${call.id}`,
+        `Broadcasting message ${savedMessage.id} to room ${room}`,
       );
 
-      return { ok: true, callId: call.id };
+      this.logger.log(`Room ${room} has ${roomSockets?.size ?? 0} socket(s)`);
+
+      if (roomSockets && roomSockets.size > 0) {
+        this.logger.log(
+          `Sockets in room: ${Array.from(roomSockets).join(', ')}`,
+        );
+      }
     } catch (error) {
-      this.logger.error(`Failed to initiate call: ${error.message}`);
-      return { error: error.message };
+      this.logger.warn(
+        'Failed to read room sockets for debugging',
+        error instanceof Error ? error.message : String(error),
+      );
     }
-  }
 
-  @SubscribeMessage('call:answer')
-  async handleAnswerCall(client: Socket, payload: { callId: string }) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
+    // Broadcast the message to users currently viewing the conversation.
+    this.server.to(room).emit('message', savedMessage);
 
-    try {
-      const call = await this.callService.answerCall(payload.callId, user.id);
+    const participantIds = await this.chatService.getConversationParticipantIds(
+      payload.conversationId,
+    );
 
-      // Generate token for recipient
-      const agoraToken = this.callService.generateAgoraToken({
-        call,
-        userId: user.id,
+    const receiverIds = participantIds.filter(
+      (participantId) => participantId !== user.id,
+    );
+
+    if (receiverIds.length > 0) {
+      await this.chatService.createDeliveryJobs({
+        messageId: savedMessage.id,
+        conversationId: payload.conversationId,
+        receiverIds,
       });
 
-      // Notify caller
-      this.sendToUser(call.callerId, 'call:answered', {
-        callId: call.id,
-        timestamp: new Date(),
-      });
+      for (const receiverId of receiverIds) {
+        this.sendToUser(receiverId, 'receive_message', savedMessage);
 
-      // Send token to recipient
-      client.emit('call:agoraToken', agoraToken);
+        this.sendToUser(receiverId, 'new_message', savedMessage);
 
-      this.logger.log(`Call answered: ${payload.callId}`);
+        try {
+          await this.participantRepo.increment(
+            {
+              conversationId: payload.conversationId,
+              userId: receiverId,
+            },
+            'unreadCount',
+            1,
+          );
 
-      return { ok: true, agoraToken };
-    } catch (error) {
-      this.logger.error(`Failed to answer call: ${error.message}`);
-      return { error: error.message };
+          const participant = await this.participantRepo.findOne({
+            where: {
+              conversationId: payload.conversationId,
+              userId: receiverId,
+            },
+          });
+
+          const isHighlighted = Boolean(
+            (participant?.lastReadSequenceNo ?? 0) < savedMessage.sequenceNo &&
+            savedMessage.senderId !== receiverId,
+          );
+
+          this.sendToUser(receiverId, 'conversation:unread', {
+            conversationId: payload.conversationId,
+            unreadCount: participant?.unreadCount ?? 0,
+            isHighlighted,
+          });
+        } catch (error) {
+          this.logger.warn(
+            `Failed to update unread count for receiver ${receiverId}`,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
     }
+
+    return {
+      ok: true,
+      messageId: savedMessage.id,
+    };
   }
 
-  @SubscribeMessage('call:reject')
-  async handleRejectCall(client: Socket, payload: { callId: string }) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
+  @SubscribeMessage('presence:heartbeat')
+  async handlePresenceHeartbeat(client: Socket) {
+    const user = client.data.user as User | undefined;
 
-    try {
-      const call = await this.callService.rejectCall(payload.callId, user.id);
-
-      // Notify caller
-      this.sendToUser(call.callerId, 'call:rejected', {
-        callId: call.id,
-        timestamp: new Date(),
-      });
-
-      this.logger.log(`Call rejected: ${payload.callId}`);
-
-      return { ok: true };
-    } catch (error) {
-      this.logger.error(`Failed to reject call: ${error.message}`);
-      return { error: error.message };
+    if (!user) {
+      return { error: 'Unauthorized' };
     }
-  }
-
-  @SubscribeMessage('call:end')
-  async handleEndCall(client: Socket, payload: { callId: string }) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
 
     try {
-      const call = await this.callService.endCall(payload.callId, user.id);
-
-      const otherUserId = user.id === call.callerId ? call.recipientId : call.callerId;
-
-      // Notify the other user
-      this.sendToUser(otherUserId, 'call:ended', {
-        callId: call.id,
-        duration: call.durationSeconds,
-        timestamp: new Date(),
-      });
-
-      this.logger.log(`Call ended: ${payload.callId}, Duration: ${call.durationSeconds}s`);
-
-      return { ok: true, duration: call.durationSeconds };
+      return await this.presenceService.heartbeat(user.id);
     } catch (error) {
-      this.logger.error(`Failed to end call: ${error.message}`);
-      return { error: error.message };
-    }
-  }
-
-  @SubscribeMessage('call:history')
-  async handleCallHistory(client: Socket, payload: { directConversationId: string }) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
-
-    try {
-      const history = await this.callService.getCallHistory(
-        payload.directConversationId,
-        50,
+      this.logger.warn(
+        `Presence heartbeat failed for ${user.id}`,
+        error instanceof Error ? error.message : String(error),
       );
 
-      return { ok: true, calls: history };
-    } catch (error) {
-      this.logger.error(`Failed to fetch call history: ${error.message}`);
-      return { error: error.message };
-    }
-  }
-
-  @SubscribeMessage('call:active')
-  async handleGetActiveCall(client: Socket, payload: { directConversationId: string }) {
-    const user: User = client.data.user;
-    if (!user) return { error: 'Unauthorized' };
-
-    try {
-      const activeCall = await this.callService.getActiveCall(
-        payload.directConversationId,
-      );
-
-      return { ok: true, call: activeCall || null };
-    } catch (error) {
-      this.logger.error(`Failed to fetch active call: ${error.message}`);
-      return { error: error.message };
+      return {
+        error: 'Failed to refresh presence',
+      };
     }
   }
 }

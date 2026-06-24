@@ -1,0 +1,138 @@
+{
+  "info": {
+    "name": "Influencer Hub - API Collection",
+    "_postman_id": "influencer-hub-collection",
+    "description": "Postman collection with key admin and public endpoints for the Influencer Hub module. Set the collection variables `baseUrl` and `admin_token` before sending requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Admin - Dashboard",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Accept", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/admin/influencers/dashboard",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","admin","influencers","dashboard"]
+        }
+      },
+      "response": [
+        {
+          "name": "Example - Dashboard Success",
+          "originalRequest": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/admin/influencers/dashboard", "host": ["{{baseUrl}}"], "path": ["api","admin","influencers","dashboard"] } },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [ { "key": "Content-Type", "value": "application/json" } ],
+          "body": "{\"success\":true,\"message\":\"Influencer dashboard retrieved successfully.\",\"data\":{\"totalPartners\":28,\"activePartners\":24,\"totalLinkedUsers\":4250,\"totalSales\":\"49450.00\",\"lifetimeCommissionEarned\":\"8560.00\",\"totalCommissionOwed\":\"1450.00\",\"pendingPayoutAmount\":\"450.00\",\"paidPayoutAmount\":\"7110.00\",\"currency\":\"EUR\"}}"
+        }
+      ]
+    },
+    {
+      "name": "Admin - List Partners",
+      "request": {
+        "method": "GET",
+        "header": [ { "key": "Accept", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{admin_token}}" } ],
+        "url": {
+          "raw": "{{baseUrl}}/api/admin/influencers?page=1&limit=10&search=Jane",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","admin","influencers"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "10" },
+            { "key": "search", "value": "Jane" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin - Create Partner",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{admin_token}}" } ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fullName\": \"Jane Doe\",\n  \"email\": \"jane@example.com\",\n  \"paymentMethod\": \"BANK_TRANSFER\",\n  \"paymentDetails\": { \"iban\": \"DE89370400440532013000\" },\n  \"currency\": \"EUR\",\n  \"socialHandles\": [{ \"platform\": \"INSTAGRAM\", \"handle\": \"janedoe\", \"url\": \"https://instagram.com/janedoe\" }],\n  \"deal\": { \"couponCode\": \"JANE10\", \"userDiscountPercentage\": \"10.0\", \"influencerSharePercentage\": \"5.0\", \"lifetimeAssociationEnabled\": true }\n}",
+        },
+        "url": { "raw": "{{baseUrl}}/api/admin/influencers", "host": ["{{baseUrl}}"], "path": ["api","admin","influencers"] }
+      },
+      "response": [
+        {
+          "name": "Example - Create Partner Success",
+          "originalRequest": { "method": "POST", "url": { "raw": "{{baseUrl}}/api/admin/influencers", "host": ["{{baseUrl}}"], "path": ["api","admin","influencers"] } },
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": "json",
+          "header": [ { "key": "Content-Type", "value": "application/json" } ],
+          "body": "{\"success\":true,\"message\":\"Influencer partner created successfully.\",\"data\":{\"id\":\"00000000-0000-0000-0000-000000000000\",\"fullName\":\"Jane Doe\"}}"
+        }
+      ]
+    },
+    {
+      "name": "Admin - Get Partner",
+      "request": {
+        "method": "GET",
+        "header": [ { "key": "Accept", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{admin_token}}" } ],
+        "url": { "raw": "{{baseUrl}}/api/admin/influencers/{{partnerId}}", "host": ["{{baseUrl}}"], "path": ["api","admin","influencers","{{partnerId}}"] }
+      }
+    },
+    {
+      "name": "Admin - Update Partner",
+      "request": {
+        "method": "PATCH",
+        "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{admin_token}}" } ],
+        "body": { "mode": "raw", "raw": "{ \"administrativeNotes\": \"Updated notes by admin\" }" },
+        "url": { "raw": "{{baseUrl}}/api/admin/influencers/{{partnerId}}", "host": ["{{baseUrl}}"], "path": ["api","admin","influencers","{{partnerId}}"] }
+      },
+      "response": [
+        {
+          "name": "Example - Update Partner Success",
+          "originalRequest": { "method": "PATCH", "url": { "raw": "{{baseUrl}}/api/admin/influencers/{{partnerId}}", "host": ["{{baseUrl}}"], "path": ["api","admin","influencers","{{partnerId}}"] } },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [ { "key": "Content-Type", "value": "application/json" } ],
+          "body": "{\"success\":true,\"message\":\"Influencer partner updated successfully.\",\"data\":{\"id\":\"{{partnerId}}\"}}"
+        }
+      ]
+    },
+    {
+      "name": "Public - Validate Coupon",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{ \"couponCode\": \"JANE10\", \"orderSubtotal\": \"100.00\", \"currency\": \"EUR\" }" },
+        "url": { "raw": "{{baseUrl}}/api/coupons/validate", "host": ["{{baseUrl}}"], "path": ["api","coupons","validate"] }
+      },
+      "response": [
+        {
+          "name": "Example - Coupon Valid",
+          "originalRequest": { "method": "POST", "url": { "raw": "{{baseUrl}}/api/coupons/validate", "host": ["{{baseUrl}}"], "path": ["api","coupons","validate"] } },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [ { "key": "Content-Type", "value": "application/json" } ],
+          "body": "{\"success\":true,\"message\":\"Coupon validation result.\",\"data\":{\"valid\":true,\"couponCode\":\"JANE10\",\"discountPercentage\":\"10.0\",\"discountAmount\":\"10.00\",\"finalSubtotal\":\"90.00\",\"partnerDisplayName\":\"Jane Doe\",\"reasonCode\":null}}"
+        }
+      ]
+    },
+    {
+      "name": "Internal - Handle Paid Order (internal)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{admin_token}}" } ],
+        "body": { "mode": "raw", "raw": "{ \"orderId\": \"ORDER_12345\" }" },
+        "url": { "raw": "{{baseUrl}}/api/internal/influencer-hub/orders/handle-paid", "host": ["{{baseUrl}}"], "path": ["api","internal","influencer-hub","orders","handle-paid"] }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000", "type": "string" },
+    { "key": "admin_token", "value": "", "type": "string" },
+    { "key": "partnerId", "value": "<REPLACE_PARTNER_ID>", "type": "string" }
+  ]
+}

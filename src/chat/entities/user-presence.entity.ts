@@ -10,7 +10,7 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { PresenceStatus } from '../enums/chat.enums';
-import { UserDevice } from './user-device.entity';
+import { UserDevice } from 'src/devices/entities/user-device.entity';
 
 @Entity('user_presence')
 @Index('IDX_user_presence_status', ['status'])
