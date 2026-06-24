@@ -79,6 +79,18 @@ export class ProgressController {
     });
   }
 
+
+  @Get('lessons/:lessonId')
+  async getLessonProgress(
+    @Param('lessonId') lessonId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.progressService.getLessonProgress(
+      this.getCurrentUser(request).id,
+      lessonId,
+    );
+  }
+
   @Get('courses/:courseId')
   async getCourseProgress(
     @Param('courseId') courseId: string,

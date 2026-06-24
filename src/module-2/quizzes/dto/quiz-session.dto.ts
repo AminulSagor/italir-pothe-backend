@@ -47,6 +47,12 @@ export class CheckQuizAnswerDto {
   timeSpentSeconds?: number;
 }
 
+export class StartQuizSessionDto {
+  @IsOptional()
+  @IsDateString()
+  clientActivityDate?: string;
+}
+
 export class CompleteQuizSessionDto {
   @IsOptional()
   @IsInt()

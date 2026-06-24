@@ -161,12 +161,9 @@ export class VocabularyFlashcardsService {
 
     await this.recordVocabularyDailyActivities({
       userId: user.id,
-      lessonId: savedSession.lessonId,
-      sessionId: savedSession.id,
-      totalReviewed: savedSession.totalCards,
-      knownCount: savedSession.knownCount,
-      weakCount: savedSession.weakCount,
-      isWeakReview: false,
+      reviewedVocabularyIds: vocabularyIds,
+      knownVocabularyIds: dto.knownVocabularyIds,
+      weakClearedVocabularyIds: [],
       clientActivityDate: dto.clientActivityDate,
     });
 
@@ -278,12 +275,9 @@ export class VocabularyFlashcardsService {
 
     await this.recordVocabularyDailyActivities({
       userId: user.id,
-      lessonId: sourceSession.lessonId,
-      sessionId: savedWeakReviewSession.id,
-      totalReviewed: submittedIds.length,
-      knownCount: dto.knownVocabularyIds.length,
-      weakCount: dto.stillWeakVocabularyIds.length,
-      isWeakReview: true,
+      reviewedVocabularyIds: submittedIds,
+      knownVocabularyIds: dto.knownVocabularyIds,
+      weakClearedVocabularyIds: dto.knownVocabularyIds,
       clientActivityDate: dto.clientActivityDate,
     });
 
@@ -296,55 +290,62 @@ export class VocabularyFlashcardsService {
 
   private async recordVocabularyDailyActivities(params: {
     userId: string;
-    lessonId: string;
-    sessionId: string;
-    totalReviewed: number;
-    knownCount: number;
-    weakCount: number;
-    isWeakReview: boolean;
+    reviewedVocabularyIds: string[];
+    knownVocabularyIds: string[];
+    weakClearedVocabularyIds: string[];
     clientActivityDate?: string;
   }) {
-    const sourcePrefix = `vocab-session:${params.sessionId}`;
+    const activityDate = this.resolveActivityDate(params.clientActivityDate);
 
     await Promise.all([
-      this.dailyChallengesService.recordInternalActivity({
+      ...this.buildVocabularyActivityRequests({
         userId: params.userId,
+        vocabularyIds: params.reviewedVocabularyIds,
+        activityDate,
         activityType: LearningActivityType.VOCABULARY_FLASHCARD_REVIEWED,
-        sourceId: `${sourcePrefix}:reviewed`,
-        value: params.totalReviewed,
-        clientActivityDate: params.clientActivityDate,
+        eventKey: 'reviewed',
       }),
-
-      this.dailyChallengesService.recordInternalActivity({
+      ...this.buildVocabularyActivityRequests({
         userId: params.userId,
+        vocabularyIds: params.knownVocabularyIds,
+        activityDate,
         activityType: LearningActivityType.VOCABULARY_WORD_LEARNED,
-        sourceId: `${sourcePrefix}:known`,
-        value: params.knownCount,
-        clientActivityDate: params.clientActivityDate,
+        eventKey: 'known',
       }),
-
-      this.recordWeakClearActivityIfNeeded(params),
+      ...this.buildVocabularyActivityRequests({
+        userId: params.userId,
+        vocabularyIds: params.weakClearedVocabularyIds,
+        activityDate,
+        activityType: LearningActivityType.VOCABULARY_WEAK_WORD_CLEARED,
+        eventKey: 'weak-cleared',
+      }),
     ]);
   }
 
-  private async recordWeakClearActivityIfNeeded(params: {
+  private buildVocabularyActivityRequests(params: {
     userId: string;
-    sessionId: string;
-    knownCount: number;
-    isWeakReview: boolean;
-    clientActivityDate?: string;
+    vocabularyIds: string[];
+    activityDate: string;
+    activityType: LearningActivityType;
+    eventKey: string;
   }) {
-    if (!params.isWeakReview || params.knownCount <= 0) {
-      return;
-    }
+    const uniqueVocabularyIds = [...new Set(params.vocabularyIds)];
 
-    await this.dailyChallengesService.recordInternalActivity({
-      userId: params.userId,
-      activityType: LearningActivityType.VOCABULARY_WEAK_WORD_CLEARED,
-      sourceId: `vocab-session:${params.sessionId}:weak-cleared`,
-      value: params.knownCount,
-      clientActivityDate: params.clientActivityDate,
-    });
+    return uniqueVocabularyIds.map((vocabularyId) =>
+      this.dailyChallengesService.recordInternalActivity({
+        userId: params.userId,
+        activityType: params.activityType,
+        sourceId:
+          `vocabulary:${vocabularyId}:${params.eventKey}:${params.activityDate}`,
+        value: 1,
+        clientActivityDate: params.activityDate,
+      }),
+    );
+  }
+
+  private resolveActivityDate(value?: string) {
+    const datePrefix = value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+    return datePrefix ?? new Date().toISOString().slice(0, 10);
   }
 
   async getSessionResult(

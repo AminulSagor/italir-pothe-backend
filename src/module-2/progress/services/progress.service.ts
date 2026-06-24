@@ -187,6 +187,27 @@ export class ProgressService {
     return this.getCourseProgress(params.user.id, params.courseId);
   }
 
+
+  async getLessonProgress(userId: string, lessonId: string) {
+    const progress = await this.lessonProgressRepository.findOne({
+      where: { userId, lessonId },
+    });
+
+    if (!progress) {
+      return {
+        userId,
+        lessonId,
+        courseId: null,
+        videoWatchPercent: 0,
+        isTheoryRead: false,
+        isCompleted: false,
+        completedAt: null,
+      };
+    }
+
+    return progress;
+  }
+
   async getCourseProgress(userId: string, courseId: string) {
     const progress = await this.courseProgressRepository.findOne({
       where: { userId, courseId },
