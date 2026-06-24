@@ -28,6 +28,8 @@ const AI_TUTOR_LEVELS = [
 ] as const;
 const AI_TUTOR_GUIDED_MODES = ["guided", "assisted", "free"] as const;
 const AI_TUTOR_GUIDED_LEVELS = ["A1", "A2", "B1"] as const;
+const AI_TUTOR_CHAT_MODES = ["general", "writing_help"] as const;
+const AI_TUTOR_WRITING_SOURCE_LANGUAGES = ["english", "bangla"] as const;
 
 export class AiTutorLearnerProfileDto {
   @IsIn(AI_TUTOR_LEVELS)
@@ -146,6 +148,14 @@ export class SendAiTutorMessageDto {
   @ArrayMaxSize(12)
   @IsString({ each: true })
   recentMistakeTags?: string[];
+
+  @IsOptional()
+  @IsIn(AI_TUTOR_CHAT_MODES)
+  chatMode?: "general" | "writing_help";
+
+  @IsOptional()
+  @IsIn(AI_TUTOR_WRITING_SOURCE_LANGUAGES)
+  sourceLanguage?: "english" | "bangla";
 }
 
 export class TranscribeAiTutorLevelTestDto {

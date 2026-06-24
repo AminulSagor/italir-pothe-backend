@@ -92,6 +92,13 @@ export class AiTutorService {
     dto: SendAiTutorMessageDto,
   ) {
     const learnerProfile = await this.findStoredProfile(user.id);
+    const chatMode =
+      dto.chatMode === "writing_help" ? "writing_help" : "general";
+    const sourceLanguage =
+      chatMode === "writing_help"
+        ? (dto.sourceLanguage ?? "english")
+        : undefined;
+
     return this.requestJson("/v1/chat", {
       userId: user.id,
       displayName: user.fullName ?? "Italian learner",
@@ -101,6 +108,8 @@ export class AiTutorService {
       learnerProfile,
       memoryFacts: dto.memoryFacts ?? [],
       recentMistakeTags: dto.recentMistakeTags ?? [],
+      chatMode,
+      sourceLanguage,
     });
   }
 
