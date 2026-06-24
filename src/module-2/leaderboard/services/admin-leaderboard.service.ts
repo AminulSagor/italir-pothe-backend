@@ -1,30 +1,11 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
-import {
-  AdminLeaderboardQueryDto,
-  CreateLeaderboardRewardDto,
-  RewardHistoryQueryDto,
-  UpdateRewardStatusDto,
-} from '../dto/admin-leaderboard.dto';
+import { AdminLeaderboardQueryDto } from '../dto/admin-leaderboard.dto';
 import { LeaderboardProfile } from '../entities/leaderboard-profile.entity';
-import { LeaderboardReward } from '../entities/leaderboard-reward.entity';
-import {
-  LeagueKey,
-  LeaderboardRewardStatus,
-  LeaderboardRewardType,
-  LeaderboardSortOrder,
-  LeaderboardXpSourceType,
-} from '../types/leaderboard.type';
+import { LeaderboardSortOrder } from '../types/leaderboard.type';
 import { LeagueConfigService } from './league-config.service';
-import { LeaderboardProfileService } from './leaderboard-profile.service';
-import { LeaderboardXpService } from './leaderboard-xp.service';
-import { ScoringService } from 'src/module-2/scoring/services/scoring.service';
 
 @Injectable()
 export class AdminLeaderboardService {
@@ -32,13 +13,7 @@ export class AdminLeaderboardService {
     @InjectRepository(LeaderboardProfile)
     private readonly profileRepository: Repository<LeaderboardProfile>,
 
-    @InjectRepository(LeaderboardReward)
-    private readonly rewardRepository: Repository<LeaderboardReward>,
-
     private readonly leagueConfigService: LeagueConfigService,
-    private readonly profileService: LeaderboardProfileService,
-    private readonly xpService: LeaderboardXpService,
-    private readonly scoringService: ScoringService,
   ) {}
 
   async getDashboard(query: AdminLeaderboardQueryDto) {
@@ -70,7 +45,7 @@ export class AdminLeaderboardService {
       }).length,
     }));
 
-    const topTen = allProfiles
+    const globalTopTen = allProfiles
       .slice(0, 10)
       .map((profile) =>
         this.mapProfile(
@@ -96,12 +71,11 @@ export class AdminLeaderboardService {
     if (query.search?.trim()) {
       const search = query.search.trim().toLowerCase();
 
-      filtered = filtered.filter((profile) => {
-        return (
+      filtered = filtered.filter(
+        (profile) =>
           profile.displayName.toLowerCase().includes(search) ||
-          profile.username?.toLowerCase().includes(search)
-        );
-      });
+          profile.username?.toLowerCase().includes(search),
+      );
     }
 
     const sortOrder = query.sortOrder ?? LeaderboardSortOrder.ASC;
@@ -152,7 +126,7 @@ export class AdminLeaderboardService {
 
     return {
       leagueCards,
-      globalTopTen: topTen,
+      globalTopTen,
       items,
       meta: {
         page,
@@ -227,172 +201,6 @@ export class AdminLeaderboardService {
         row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','),
       )
       .join('\n');
-  }
-
-  async createReward(params: {
-    adminUserId: string;
-    userId: string;
-    dto: CreateLeaderboardRewardDto;
-  }) {
-    const profile = await this.profileService.ensureProfile(params.userId);
-
-    const definitions = await this.leagueConfigService.getDefinitions();
-
-    const league = this.leagueConfigService.resolveLeague(
-      profile.totalXp,
-      definitions,
-    );
-
-    if (
-      params.dto.rewardType === LeaderboardRewardType.XP &&
-      !params.dto.xpAmount
-    ) {
-      throw new BadRequestException('xpAmount is required for an XP reward.');
-    }
-
-    let reward = this.rewardRepository.create({
-      userId: params.userId,
-      leagueKey: league.key,
-      rewardType: params.dto.rewardType,
-      title: params.dto.title.trim(),
-      description: params.dto.description?.trim() || null,
-      rewardValue: params.dto.rewardValue?.trim() || null,
-      xpAmount: params.dto.xpAmount ?? null,
-      status: LeaderboardRewardStatus.PENDING,
-      issuedByUserId: params.adminUserId,
-      issuedAt: new Date(),
-    });
-
-    reward = await this.rewardRepository.save(reward);
-
-    let xpResult: unknown = null;
-
-    if (reward.rewardType === LeaderboardRewardType.XP && reward.xpAmount) {
-      const scoringResult = await this.scoringService.recordManualXp({
-        userId: reward.userId,
-        sourceId: `leaderboard-reward:${reward.id}`,
-        amount: reward.xpAmount,
-        reason: reward.title,
-      });
-
-      const leaderboardResult = await this.xpService.awardXp({
-        userId: reward.userId,
-        sourceType: LeaderboardXpSourceType.ADMIN_REWARD,
-        sourceReference: reward.id,
-        idempotencyKey: `leaderboard-reward:${reward.id}:leaderboard-xp`,
-        baseXp: scoringResult.baseXp,
-        streakBonusXp: 0,
-        masteryBonusXp: 0,
-        speedBonusXp: 0,
-        awardedXp: scoringResult.totalXpEarned,
-        multiplier: scoringResult.boostMultiplier,
-        streakDays: profile.streakDays,
-      });
-
-      xpResult = {
-        scoring: scoringResult,
-        leaderboard: leaderboardResult,
-      };
-    }
-
-    return {
-      message: 'Leaderboard reward created successfully.',
-      reward,
-      xpResult,
-    };
-  }
-
-  async findRewardHistory(query: RewardHistoryQueryDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-
-    const queryBuilder = this.rewardRepository
-      .createQueryBuilder('reward')
-      .orderBy('reward.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
-
-    if (query.status) {
-      queryBuilder.andWhere('reward.status = :status', {
-        status: query.status,
-      });
-    }
-
-    if (query.rewardType) {
-      queryBuilder.andWhere('reward.rewardType = :rewardType', {
-        rewardType: query.rewardType,
-      });
-    }
-
-    const [rewards, total] = await queryBuilder.getManyAndCount();
-
-    const userIds = [...new Set(rewards.map((reward) => reward.userId))];
-
-    const profiles = userIds.length
-      ? await this.profileRepository.find({
-          where: {
-            userId: In(userIds),
-          },
-        })
-      : [];
-
-    const profileMap = new Map(
-      profiles.map((profile) => [profile.userId, profile]),
-    );
-
-    return {
-      items: rewards.map((reward) => {
-        const profile = profileMap.get(reward.userId);
-
-        return {
-          id: reward.id,
-          user: {
-            id: reward.userId,
-            displayName: profile?.displayName ?? 'Learner',
-            username: profile?.username ?? null,
-            avatarUrl: profile?.avatarUrl ?? null,
-          },
-          leagueKey: reward.leagueKey,
-          rewardType: reward.rewardType,
-          title: reward.title,
-          description: reward.description,
-          rewardValue: reward.rewardValue,
-          xpAmount: reward.xpAmount,
-          status: reward.status,
-          issuedByUserId: reward.issuedByUserId,
-          issuedAt: reward.issuedAt,
-          createdAt: reward.createdAt,
-          updatedAt: reward.updatedAt,
-        };
-      }),
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
-  }
-
-  async updateRewardStatus(rewardId: string, dto: UpdateRewardStatusDto) {
-    const reward = await this.rewardRepository.findOne({
-      where: {
-        id: rewardId,
-      },
-    });
-
-    if (!reward) {
-      throw new NotFoundException('Leaderboard reward not found.');
-    }
-
-    reward.status = dto.status;
-
-    await this.rewardRepository.save(reward);
-
-    return {
-      message: 'Reward status updated successfully.',
-      reward,
-    };
   }
 
   private mapProfile(

@@ -3,6 +3,7 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -12,10 +13,16 @@ import {
   LeaderboardRewardStatus,
   LeaderboardRewardType,
 } from '../types/leaderboard.type';
+import { LeaderboardRewardContent } from './leaderboard-reward-content.entity';
+import { LeaderboardRewardFulfillment } from './leaderboard-reward-fulfillment.entity';
+import { LeaderboardRewardShippingAddress } from './leaderboard-reward-shipping-address.entity';
+import { LeaderboardRewardValue } from './leaderboard-reward-value.entity';
 
 @Entity('leaderboard_rewards')
 @Index(['userId', 'createdAt'])
 @Index(['status'])
+@Index(['rewardType'])
+@Index(['leagueKey'])
 export class LeaderboardReward {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -45,23 +52,10 @@ export class LeaderboardReward {
 
   @Column({
     type: 'varchar',
-    length: 1000,
-    nullable: true,
-  })
-  description: string | null;
-
-  @Column({
-    type: 'varchar',
     length: 300,
     nullable: true,
   })
-  rewardValue: string | null;
-
-  @Column({
-    type: 'integer',
-    nullable: true,
-  })
-  xpAmount: number | null;
+  subtitle: string | null;
 
   @Column({
     type: 'enum',
@@ -76,9 +70,34 @@ export class LeaderboardReward {
   issuedByUserId: string;
 
   @Column({
-    type: 'timestamptz',
+    type: 'boolean',
+    default: true,
   })
-  issuedAt: Date;
+  sendPushNotification: boolean;
+
+  @Column({
+    type: 'boolean',
+    default: true,
+  })
+  playConfettiAnimation: boolean;
+
+  @Column({
+    type: 'boolean',
+    default: false,
+  })
+  requestShippingAddress: boolean;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  seenAt: Date | null;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  openedAt: Date | null;
 
   @CreateDateColumn({
     type: 'timestamptz',
@@ -89,4 +108,22 @@ export class LeaderboardReward {
     type: 'timestamptz',
   })
   updatedAt: Date;
+
+  @OneToOne(() => LeaderboardRewardContent, (content) => content.reward)
+  content: LeaderboardRewardContent;
+
+  @OneToOne(() => LeaderboardRewardValue, (value) => value.reward)
+  value: LeaderboardRewardValue;
+
+  @OneToOne(
+    () => LeaderboardRewardFulfillment,
+    (fulfillment) => fulfillment.reward,
+  )
+  fulfillment: LeaderboardRewardFulfillment;
+
+  @OneToOne(
+    () => LeaderboardRewardShippingAddress,
+    (shippingAddress) => shippingAddress.reward,
+  )
+  shippingAddress: LeaderboardRewardShippingAddress;
 }
