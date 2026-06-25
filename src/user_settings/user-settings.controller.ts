@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Patch,
   Post,
@@ -11,12 +12,20 @@ import {
 
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+import {
+  RequestEmailChangeOtpDto,
+  RequestPhoneChangeOtpDto,
+  VerifyEmailChangeOtpDto,
+  VerifyPhoneChangeOtpDto,
+} from '../users/dto/user-profile.dto';
 import { ChangeUserPasswordDto } from './dto/change-user-password.dto';
 import { ConfirmAvatarUploadDto } from './dto/confirm-avatar-upload.dto';
+import { DeleteUserAccountDto } from './dto/delete-user-account.dto';
 import { PrepareAvatarUploadDto } from './dto/prepare-avatar-upload.dto';
 import { UpdateFullNameDto } from './dto/update-full-name.dto';
 import {
   AvatarUploadPreparationResponse,
+  ContactChangeOtpResponse,
   UserSettingsMessageResponse,
   UserSettingsProfileResponse,
 } from './types/user-settings.types';
@@ -40,6 +49,50 @@ export class UserSettingsController {
     @Body() dto: UpdateFullNameDto,
   ): Promise<UserSettingsProfileResponse> {
     return this.userSettingsService.updateFullName(
+      this.getUserId(request),
+      dto,
+    );
+  }
+
+  @Post('email/request-otp')
+  requestEmailChangeOtp(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestEmailChangeOtpDto,
+  ): Promise<ContactChangeOtpResponse> {
+    return this.userSettingsService.requestEmailChangeOtp(
+      this.getUserId(request),
+      dto,
+    );
+  }
+
+  @Post('email/verify-otp')
+  verifyEmailChangeOtp(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: VerifyEmailChangeOtpDto,
+  ): Promise<UserSettingsProfileResponse> {
+    return this.userSettingsService.verifyEmailChangeOtp(
+      this.getUserId(request),
+      dto,
+    );
+  }
+
+  @Post('phone/request-otp')
+  requestPhoneChangeOtp(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestPhoneChangeOtpDto,
+  ): Promise<ContactChangeOtpResponse> {
+    return this.userSettingsService.requestPhoneChangeOtp(
+      this.getUserId(request),
+      dto,
+    );
+  }
+
+  @Post('phone/verify-otp')
+  verifyPhoneChangeOtp(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: VerifyPhoneChangeOtpDto,
+  ): Promise<UserSettingsProfileResponse> {
+    return this.userSettingsService.verifyPhoneChangeOtp(
       this.getUserId(request),
       dto,
     );
@@ -70,6 +123,17 @@ export class UserSettingsController {
     @Body() dto: ChangeUserPasswordDto,
   ): Promise<UserSettingsMessageResponse> {
     return this.userSettingsService.changePassword(
+      this.getUserId(request),
+      dto,
+    );
+  }
+
+  @Delete('account')
+  deleteAccount(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: DeleteUserAccountDto,
+  ): Promise<UserSettingsMessageResponse> {
+    return this.userSettingsService.deleteAccount(
       this.getUserId(request),
       dto,
     );

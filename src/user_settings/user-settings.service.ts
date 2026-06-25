@@ -6,21 +6,34 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 
-import { FilesService } from '../files/services/files.service';
-import { S3Service } from '../files/services/s3.service';
+import { AiTutorLearnerProfile } from '../ai-tutor/entities/ai-tutor-learner-profile.entity';
+import { UserDevice } from '../devices/entities/user-device.entity';
 import {
   FilePurpose,
   FileVisibility,
 } from '../files/entities/file.entity';
+import { FilesService } from '../files/services/files.service';
+import { S3Service } from '../files/services/s3.service';
+import { UserStreak } from '../module-2/scoring/entities/user-streak.entity';
+import {
+  RequestEmailChangeOtpDto,
+  RequestPhoneChangeOtpDto,
+  VerifyEmailChangeOtpDto,
+  VerifyPhoneChangeOtpDto,
+} from '../users/dto/user-profile.dto';
 import { User } from '../users/entities/user.entity';
+import { UsersService } from '../users/users.service';
 import { ChangeUserPasswordDto } from './dto/change-user-password.dto';
 import { ConfirmAvatarUploadDto } from './dto/confirm-avatar-upload.dto';
+import { DeleteUserAccountDto } from './dto/delete-user-account.dto';
 import { PrepareAvatarUploadDto } from './dto/prepare-avatar-upload.dto';
 import { UpdateFullNameDto } from './dto/update-full-name.dto';
 import {
   AvatarUploadPreparationResponse,
+  ContactChangeOtpResponse,
   UserSettingsMessageResponse,
   UserSettingsProfilePayload,
   UserSettingsProfileResponse,
@@ -31,6 +44,11 @@ export class UserSettingsService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(UserStreak)
+    private readonly userStreakRepository: Repository<UserStreak>,
+    @InjectRepository(AiTutorLearnerProfile)
+    private readonly learnerProfileRepository: Repository<AiTutorLearnerProfile>,
+    private readonly usersService: UsersService,
     private readonly filesService: FilesService,
     private readonly s3Service: S3Service,
   ) {}
@@ -54,6 +72,60 @@ export class UserSettingsService {
     return {
       message: 'Full name updated successfully.',
       profile: await this.toProfilePayload(user),
+    };
+  }
+
+  async requestEmailChangeOtp(
+    userId: string,
+    dto: RequestEmailChangeOtpDto,
+  ): Promise<ContactChangeOtpResponse> {
+    const result = await this.usersService.requestEmailChangeOtp(userId, dto);
+
+    return {
+      message: result.message,
+      contactType: 'email',
+      destination: result.email,
+      ...(result.devOtp ? { devOtp: result.devOtp } : {}),
+    };
+  }
+
+  async verifyEmailChangeOtp(
+    userId: string,
+    dto: VerifyEmailChangeOtpDto,
+  ): Promise<UserSettingsProfileResponse> {
+    const result = await this.usersService.verifyEmailChangeOtp(userId, dto);
+    const profile = await this.getProfile(userId);
+
+    return {
+      message: result.message,
+      profile: profile.profile,
+    };
+  }
+
+  async requestPhoneChangeOtp(
+    userId: string,
+    dto: RequestPhoneChangeOtpDto,
+  ): Promise<ContactChangeOtpResponse> {
+    const result = await this.usersService.requestPhoneChangeOtp(userId, dto);
+
+    return {
+      message: result.message,
+      contactType: 'phone',
+      destination: result.phone,
+      ...(result.devOtp ? { devOtp: result.devOtp } : {}),
+    };
+  }
+
+  async verifyPhoneChangeOtp(
+    userId: string,
+    dto: VerifyPhoneChangeOtpDto,
+  ): Promise<UserSettingsProfileResponse> {
+    const result = await this.usersService.verifyPhoneChangeOtp(userId, dto);
+    const profile = await this.getProfile(userId);
+
+    return {
+      message: result.message,
+      profile: profile.profile,
     };
   }
 
@@ -150,6 +222,57 @@ export class UserSettingsService {
     return { message: 'Password changed successfully.' };
   }
 
+  async deleteAccount(
+    userId: string,
+    dto: DeleteUserAccountDto,
+  ): Promise<UserSettingsMessageResponse> {
+    const user = await this.findUser(userId);
+
+    if (
+      this.normalizeFullName(dto.fullName) !==
+      this.normalizeFullName(user.fullName)
+    ) {
+      throw new BadRequestException(
+        'The entered full name does not match your account.',
+      );
+    }
+
+    const now = new Date();
+    const invalidPassword = await bcrypt.hash(randomUUID(), 10);
+
+    await this.userRepository.manager.transaction(async (manager) => {
+      await manager.getRepository(UserDevice).update(
+        { userId },
+        {
+          isActive: false,
+          fcmToken: null,
+          voipToken: null,
+          deactivatedAt: now,
+          lastActiveAt: now,
+        },
+      );
+
+      user.fullName = 'Deleted User';
+      user.name = null;
+      user.email = null;
+      user.phone = null;
+      user.password = invalidPassword;
+      user.isVerified = false;
+      user.isEmailVerified = false;
+      user.isPhoneVerified = false;
+      user.profilePhotoFileId = null;
+      user.avatarUrl = null;
+      user.hapticsEnabled = false;
+      user.isBanned = true;
+
+      await manager.getRepository(User).save(user);
+    });
+
+    return {
+      message: 'Your account has been permanently deleted.',
+    };
+  }
+
   private async findUser(userId: string): Promise<User> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
 
@@ -163,6 +286,11 @@ export class UserSettingsService {
   private async toProfilePayload(
     user: User,
   ): Promise<UserSettingsProfilePayload> {
+    const [streak, learnerProfile] = await Promise.all([
+      this.userStreakRepository.findOne({ where: { userId: user.id } }),
+      this.learnerProfileRepository.findOne({ where: { userId: user.id } }),
+    ]);
+
     let avatarUrl = user.avatarUrl;
 
     if (!avatarUrl && user.profilePhotoFileId) {
@@ -191,8 +319,14 @@ export class UserSettingsService {
       isPhoneVerified: user.isPhoneVerified,
       profilePhotoFileId: user.profilePhotoFileId,
       avatarUrl,
-      canChangeEmail: !user.isEmailVerified,
-      canChangePhone: !user.isPhoneVerified,
+      canChangeEmail: true,
+      canChangePhone: true,
+      streakFreezeCount: Math.max(0, streak?.streakFreezeCount ?? 0),
+      learnerLevel: learnerProfile?.finalLevel?.trim() || 'A1',
     };
+  }
+
+  private normalizeFullName(value: string): string {
+    return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
   }
 }

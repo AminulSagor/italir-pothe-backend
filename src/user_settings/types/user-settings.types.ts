@@ -9,6 +9,8 @@ export interface UserSettingsProfilePayload {
   avatarUrl: string | null;
   canChangeEmail: boolean;
   canChangePhone: boolean;
+  streakFreezeCount: number;
+  learnerLevel: string;
 }
 
 export interface UserSettingsProfileResponse {
@@ -28,4 +30,11 @@ export interface AvatarUploadPreparationResponse {
 
 export interface UserSettingsMessageResponse {
   message: string;
+}
+
+export interface ContactChangeOtpResponse {
+  message: string;
+  contactType: 'email' | 'phone';
+  destination: string;
+  devOtp?: string;
 }
