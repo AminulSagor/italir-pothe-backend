@@ -211,6 +211,12 @@ export class CallOrchestratorService {
       rejectedBy: userId,
     });
 
+    await this.sendCallTerminationPush({
+      userId: call.callerId,
+      callId: call.id,
+      type: 'call_rejected',
+    });
+
     return {
       call: this.presentCall(call),
     };
@@ -226,9 +232,44 @@ export class CallOrchestratorService {
       cancelledBy: userId,
     });
 
+    await this.sendCallTerminationPush({
+      userId: call.receiverId,
+      callId: call.id,
+      type: 'call_cancelled',
+    });
+
     return {
       call: this.presentCall(call),
     };
+  }
+
+  private async sendCallTerminationPush(params: {
+    userId: string;
+    callId: string;
+    type: 'call_cancelled' | 'call_rejected' | 'call_ended';
+  }): Promise<void> {
+    const devices = await this.userDeviceService.findActiveFcmDevicesByUsers([
+      params.userId,
+    ]);
+
+    const tokens = devices
+      .map((device) => device.fcmToken)
+      .filter(
+        (token): token is string =>
+          typeof token === 'string' && token.trim().length > 0,
+      );
+
+    if (tokens.length === 0) {
+      return;
+    }
+
+    await this.firebaseAdminService.sendDataToTokens({
+      tokens,
+      data: {
+        type: params.type,
+        callId: params.callId,
+      },
+    });
   }
 
   async end(userId: string, callId: string) {
@@ -241,6 +282,12 @@ export class CallOrchestratorService {
     this.callRealtimeService.emitToUser(otherUserId, 'call:ended', {
       call: this.presentCall(call),
       endedBy: userId,
+    });
+
+    await this.sendCallTerminationPush({
+      userId: otherUserId,
+      callId: call.id,
+      type: 'call_ended',
     });
 
     return {
