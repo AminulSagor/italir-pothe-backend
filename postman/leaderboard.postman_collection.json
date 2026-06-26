@@ -1,0 +1,108 @@
+{
+  "info": {
+    "_postman_id": "leaderboard-collection-0001",
+    "name": "Leaderboard API (non-admin)",
+    "description": "Postman collection for leaderboard endpoints (non-admin). Set {{baseUrl}} and {{authToken}} before sending requests.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Leaderboard",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{authToken}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/leaderboard",
+          "host": ["{{baseUrl}}"],
+          "path": ["leaderboard"],
+          "query": [
+            {"key": "scope", "value": "my_league", "description": "my_league | global"},
+            {"key": "page", "value": "1", "description": "page number (>=1)"},
+            {"key": "limit", "value": "20", "description": "page size (1-100)"},
+            {"key": "search", "value": "", "description": "optional search (displayName or username)"}
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get My Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {"key": "Authorization", "value": "Bearer {{authToken}}", "type": "text"}
+        ],
+        "url": {"raw": "{{baseUrl}}/leaderboard/me", "host": ["{{baseUrl}}"], "path": ["leaderboard", "me"]}
+      },
+      "response": []
+    },
+    {
+      "name": "Get Leagues",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "Authorization", "value": "Bearer {{authToken}}", "type": "text"}],
+        "url": {"raw": "{{baseUrl}}/leaderboard/leagues", "host": ["{{baseUrl}}"], "path": ["leaderboard", "leagues"]}
+      },
+      "response": []
+    },
+    {
+      "name": "Get Scoring Guide",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "Authorization", "value": "Bearer {{authToken}}", "type": "text"}],
+        "url": {"raw": "{{baseUrl}}/leaderboard/scoring-guide", "host": ["{{baseUrl}}"], "path": ["leaderboard", "scoring-guide"]}
+      },
+      "response": []
+    },
+    {
+      "name": "Get Pending Promotion",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "Authorization", "value": "Bearer {{authToken}}", "type": "text"}],
+        "url": {"raw": "{{baseUrl}}/leaderboard/promotions/pending", "host": ["{{baseUrl}}"], "path": ["leaderboard", "promotions", "pending"]}
+      },
+      "response": []
+    },
+    {
+      "name": "Acknowledge Promotion",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Authorization", "value": "Bearer {{authToken}}", "type": "text"}],
+        "url": {
+          "raw": "{{baseUrl}}/leaderboard/promotions/{{promotionId}}/acknowledge",
+          "host": ["{{baseUrl}}"],
+          "path": ["leaderboard", "promotions", "{{promotionId}}", "acknowledge"],
+          "variable": [{"key": "promotionId", "value": "<promotion-uuid>"}]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get User Preview",
+      "request": {
+        "method": "GET",
+        "header": [{"key": "Authorization", "value": "Bearer {{authToken}}", "type": "text"}],
+        "url": {
+          "raw": "{{baseUrl}}/leaderboard/users/{{userId}}/preview",
+          "host": ["{{baseUrl}}"],
+          "path": ["leaderboard", "users", "{{userId}}", "preview"],
+          "variable": [{"key": "userId", "value": "<user-uuid>"}]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:3000", "type": "string"},
+    {"key": "authToken", "value": "<JWT_TOKEN_HERE>", "type": "string"},
+    {"key": "promotionId", "value": "<promotion-uuid>", "type": "string"},
+    {"key": "userId", "value": "<user-uuid>", "type": "string"}
+  ],
+  "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{authToken}}", "type": "string"}]}
+}
