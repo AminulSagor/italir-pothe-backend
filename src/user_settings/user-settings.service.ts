@@ -322,6 +322,7 @@ export class UserSettingsService {
       canChangeEmail: true,
       canChangePhone: true,
       streakFreezeCount: Math.max(0, streak?.streakFreezeCount ?? 0),
+      currentStreakDays: Math.max(0, streak?.currentDays ?? 0),
       learnerLevel: learnerProfile?.finalLevel?.trim() || 'A1',
     };
   }

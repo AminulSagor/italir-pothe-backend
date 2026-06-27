@@ -10,6 +10,7 @@ export interface UserSettingsProfilePayload {
   canChangeEmail: boolean;
   canChangePhone: boolean;
   streakFreezeCount: number;
+  currentStreakDays: number;
   learnerLevel: string;
 }
 

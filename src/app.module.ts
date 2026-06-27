@@ -37,6 +37,7 @@ import { LeaderboardModule } from './module-2/leaderboard/leaderboard.module';
 import { PackageStoreModule } from './package-store/package-store.module';
 import { CallsModule } from './calls/calls.module';
 import { UserSettingsModule } from './user_settings/user-settings.module';
+import { LearningActivityModule } from './module-2/learning-activity/learning-activity.module';
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { UserSettingsModule } from './user_settings/user-settings.module';
     PackageStoreModule,
     CallsModule,
     UserSettingsModule,
+    LearningActivityModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { ScoringService } from 'src/module-2/scoring/services/scoring.service';
+import { StoreWalletService } from 'src/package-store/services/store-wallet.service';
 import { LeaderboardReward } from '../entities/leaderboard-reward.entity';
 import { LeaderboardRewardValue } from '../entities/leaderboard-reward-value.entity';
 import {
@@ -29,6 +30,7 @@ export class LeaderboardRewardApplicationService {
     private readonly scoringService: ScoringService,
     private readonly leaderboardXpService: LeaderboardXpService,
     private readonly profileService: LeaderboardProfileService,
+    private readonly storeWalletService: StoreWalletService,
   ) {}
 
   async applyReward(params: { rewardId: string; userId: string }) {
@@ -104,20 +106,33 @@ export class LeaderboardRewardApplicationService {
         scoring: scoringResult,
         leaderboard: leaderboardResult,
       };
+    } else if (reward.rewardType === LeaderboardRewardType.STREAK_FREEZE) {
+      applicationReference = `wallet:${reward.id}`;
+      applicationResult =
+        await this.storeWalletService.grantLeaderboardReward({
+          userId: reward.userId,
+          streakFreezes: value?.primaryAmount ?? 0,
+        });
+    } else if (reward.rewardType === LeaderboardRewardType.CV_CREDITS) {
+      applicationReference = `wallet:${reward.id}`;
+      applicationResult =
+        await this.storeWalletService.grantLeaderboardReward({
+          userId: reward.userId,
+          cvCredits: value?.primaryAmount ?? 0,
+        });
+    } else if (reward.rewardType === LeaderboardRewardType.AI_PACKAGE) {
+      applicationReference = `wallet:${reward.id}`;
+      applicationResult =
+        await this.storeWalletService.grantLeaderboardReward({
+          userId: reward.userId,
+          aiTextTokens: value?.primaryAmount ?? 0,
+          aiVoiceMinutes: value?.secondaryAmount ?? 0,
+        });
     } else if (this.isPhysicalReward(reward.rewardType)) {
       throw new BadRequestException(
         'Physical rewards are fulfilled through shipping.',
       );
     } else {
-      /*
-       * For Streak Freeze, CV Credits, AI Package,
-       * course access, files, certificates and badges,
-       * this value record acts as an idempotent reward
-       * entitlement.
-       *
-       * A Package Store adapter can later consume the
-       * same reward/value without changing the APIs.
-       */
       applicationReference = `entitlement:${reward.id}`;
 
       applicationResult = {
