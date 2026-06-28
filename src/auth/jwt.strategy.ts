@@ -57,6 +57,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account no longer exists');
     }
 
+    if (user.isBanned) {
+      throw new UnauthorizedException('User account is no longer active');
+    }
+
     return {
       id: user.id,
       sub: user.id,

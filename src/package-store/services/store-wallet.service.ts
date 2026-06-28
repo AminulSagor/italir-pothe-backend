@@ -38,6 +38,48 @@ export class StoreWalletService {
     });
   }
 
+  async grantLeaderboardReward(params: {
+    userId: string;
+    aiVoiceMinutes?: number;
+    aiTextTokens?: number;
+    cvCredits?: number;
+    streakFreezes?: number;
+  }) {
+    const amounts = [
+      params.aiVoiceMinutes ?? 0,
+      params.aiTextTokens ?? 0,
+      params.cvCredits ?? 0,
+      params.streakFreezes ?? 0,
+    ];
+
+    if (amounts.some((amount) => !Number.isInteger(amount) || amount < 0)) {
+      throw new BadRequestException(
+        'Leaderboard reward balances must use non-negative integers.',
+      );
+    }
+
+    if (amounts.every((amount) => amount === 0)) {
+      throw new BadRequestException(
+        'The leaderboard reward amount is invalid.',
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const wallet = await this.getOrCreateWallet(params.userId, manager, true);
+      const streak = await this.getOrCreateStreak(params.userId, manager);
+
+      wallet.aiVoiceMinutes += params.aiVoiceMinutes ?? 0;
+      wallet.aiTextTokens += params.aiTextTokens ?? 0;
+      wallet.cvCredits += params.cvCredits ?? 0;
+      streak.streakFreezeCount += params.streakFreezes ?? 0;
+
+      await manager.getRepository(UserStoreWallet).save(wallet);
+      await manager.getRepository(UserStreak).save(streak);
+
+      return this.mapBalances(params.userId, wallet, manager);
+    });
+  }
+
   /**
    * Call this only when the user performs a final
    * CV generation/download.

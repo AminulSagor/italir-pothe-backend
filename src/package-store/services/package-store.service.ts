@@ -914,12 +914,17 @@ export class PackageStoreService {
 
           enabled: true,
           demo: this.isDemoMode(),
+          demoProductId: this.isDemoMode()
+            ? (storePackage.commerce.googlePlayProductId ??
+              this.createDemoGoogleProductId(storePackage.id))
+            : null,
         },
         {
           provider: StorePaymentProvider.STRIPE,
 
           enabled: true,
           demo: this.isDemoMode(),
+          demoProductId: null,
         },
       ],
     };
@@ -1122,6 +1127,10 @@ export class PackageStoreService {
           demo: this.isDemoMode(),
 
           unavailableReason: null,
+          demoProductId: this.isDemoMode()
+            ? (order.snapshot.googlePlayProductId ??
+              this.createDemoGoogleProductId(order.packageId))
+            : null,
         },
         {
           method: 'card',
@@ -1134,6 +1143,7 @@ export class PackageStoreService {
           demo: this.isDemoMode(),
 
           unavailableReason: null,
+          demoProductId: null,
         },
         {
           method: 'paypal',

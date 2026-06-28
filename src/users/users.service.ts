@@ -191,7 +191,9 @@ export class UsersService {
     const email = this.normalizeEmail(dto.email);
 
     if (user.email === email && user.isEmailVerified) {
-      throw new BadRequestException('This email is already verified.');
+      throw new BadRequestException(
+        'This email address is already verified on your account.',
+      );
     }
 
     await this.ensureEmailIsAvailable(email, user.id);
@@ -219,6 +221,12 @@ export class UsersService {
   async verifyEmailChangeOtp(userId: string, dto: VerifyEmailChangeOtpDto) {
     const user = await this.findUserById(userId);
     const email = this.normalizeEmail(dto.email);
+
+    if (user.email === email && user.isEmailVerified) {
+      throw new BadRequestException(
+        'This email address is already verified on your account.',
+      );
+    }
 
     await this.ensureEmailIsAvailable(email, user.id);
 
@@ -251,7 +259,9 @@ export class UsersService {
     const phone = dto.phone.trim();
 
     if (user.phone === phone && user.isPhoneVerified) {
-      throw new BadRequestException('This phone number is already verified.');
+      throw new BadRequestException(
+        'This phone number is already verified on your account.',
+      );
     }
 
     await this.ensurePhoneIsAvailable(phone, user.id);
@@ -279,6 +289,12 @@ export class UsersService {
   async verifyPhoneChangeOtp(userId: string, dto: VerifyPhoneChangeOtpDto) {
     const user = await this.findUserById(userId);
     const phone = dto.phone.trim();
+
+    if (user.phone === phone && user.isPhoneVerified) {
+      throw new BadRequestException(
+        'This phone number is already verified on your account.',
+      );
+    }
 
     await this.ensurePhoneIsAvailable(phone, user.id);
 

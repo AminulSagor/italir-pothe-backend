@@ -27,6 +27,7 @@ import { LeaderboardRewardApplicationService } from './services/leaderboard-rewa
 import { LeaderboardRewardService } from './services/leaderboard-reward.service';
 import { AdminLeaderboardRewardService } from './services/admin-leaderboard-reward.service';
 import { NotificationsModule } from 'src/notifications/notifications.module';
+import { PackageStoreModule } from 'src/package-store/package-store.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     ]),
     ScoringModule,
     NotificationsModule,
+    PackageStoreModule,
   ],
   controllers: [
     LeaderboardController,
