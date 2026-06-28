@@ -68,7 +68,9 @@ export class StoreWalletService {
       const wallet = await this.getOrCreateWallet(params.userId, manager, true);
       const streak = await this.getOrCreateStreak(params.userId, manager);
 
-      wallet.aiVoiceMinutes += params.aiVoiceMinutes ?? 0;
+      const grantedVoiceMinutes = params.aiVoiceMinutes ?? 0;
+      wallet.aiVoiceSeconds += grantedVoiceMinutes * 60;
+      wallet.aiVoiceMinutes = Math.ceil(wallet.aiVoiceSeconds / 60);
       wallet.aiTextTokens += params.aiTextTokens ?? 0;
       wallet.cvCredits += params.cvCredits ?? 0;
       streak.streakFreezeCount += params.streakFreezes ?? 0;
@@ -122,27 +124,89 @@ export class StoreWalletService {
     }
 
     return this.dataSource.transaction(async (manager) => {
-      const wallet = await this.getOrCreateWallet(params.userId, manager, true);
-
-      if (
-        wallet.aiVoiceMinutes < params.voiceMinutes ||
-        wallet.aiTextTokens < params.textTokens
-      ) {
-        throw new PaymentRequiredException(
-          'Your AI bundle balance is insufficient.',
+      if (params.voiceMinutes > 0) {
+        await this.consumeAiVoiceSeconds(
+          params.userId,
+          params.voiceMinutes * 60,
+          manager,
+        );
+      }
+      if (params.textTokens > 0) {
+        await this.consumeAiTextTokens(
+          params.userId,
+          params.textTokens,
+          manager,
         );
       }
 
-      wallet.aiVoiceMinutes -= params.voiceMinutes;
-      wallet.aiTextTokens -= params.textTokens;
-
-      await manager.getRepository(UserStoreWallet).save(wallet);
-
+      const wallet = await this.getLockedWallet(params.userId, manager);
       return {
-        voiceMinutesRemaining: wallet.aiVoiceMinutes,
+        voiceMinutesRemaining: Math.ceil(wallet.aiVoiceSeconds / 60),
+        voiceSecondsRemaining: wallet.aiVoiceSeconds,
         textTokensRemaining: wallet.aiTextTokens,
       };
     });
+  }
+
+  async consumeAiTextTokens(
+    userId: string,
+    textTokens: number,
+    manager?: EntityManager,
+  ) {
+    if (!Number.isInteger(textTokens) || textTokens < 0) {
+      throw new BadRequestException(
+        'AI text token usage must use a non-negative integer.',
+      );
+    }
+
+    if (!manager) {
+      return this.dataSource.transaction((transactionManager) =>
+        this.consumeAiTextTokens(userId, textTokens, transactionManager),
+      );
+    }
+
+    const wallet = await this.getLockedWallet(userId, manager);
+    if (wallet.aiTextTokens < textTokens) {
+      throw new PaymentRequiredException(
+        'Your AI text token balance is insufficient.',
+      );
+    }
+
+    wallet.aiTextTokens -= textTokens;
+    await manager.getRepository(UserStoreWallet).save(wallet);
+
+    return this.mapBalances(userId, wallet, manager);
+  }
+
+  async consumeAiVoiceSeconds(
+    userId: string,
+    voiceSeconds: number,
+    manager?: EntityManager,
+  ) {
+    if (!Number.isInteger(voiceSeconds) || voiceSeconds < 0) {
+      throw new BadRequestException(
+        'AI voice usage must use a non-negative number of seconds.',
+      );
+    }
+
+    if (!manager) {
+      return this.dataSource.transaction((transactionManager) =>
+        this.consumeAiVoiceSeconds(userId, voiceSeconds, transactionManager),
+      );
+    }
+
+    const wallet = await this.getLockedWallet(userId, manager);
+    if (wallet.aiVoiceSeconds < voiceSeconds) {
+      throw new PaymentRequiredException(
+        'Your AI voice balance is insufficient.',
+      );
+    }
+
+    wallet.aiVoiceSeconds -= voiceSeconds;
+    wallet.aiVoiceMinutes = Math.ceil(wallet.aiVoiceSeconds / 60);
+    await manager.getRepository(UserStoreWallet).save(wallet);
+
+    return this.mapBalances(userId, wallet, manager);
   }
 
   async grantOrder(order: StoreOrder, manager: EntityManager) {
@@ -160,7 +224,8 @@ export class StoreWalletService {
     }
 
     if (snapshot.packageType === StorePackageType.AI_BUNDLE) {
-      wallet.aiVoiceMinutes += snapshot.voiceMinutes ?? 0;
+      wallet.aiVoiceSeconds += (snapshot.voiceMinutes ?? 0) * 60;
+      wallet.aiVoiceMinutes = Math.ceil(wallet.aiVoiceSeconds / 60);
 
       wallet.aiTextTokens += snapshot.textTokens ?? 0;
     }
@@ -229,7 +294,7 @@ export class StoreWalletService {
     }
 
     reversal.reversedVoiceMinutes = Math.min(
-      wallet.aiVoiceMinutes,
+      Math.floor(wallet.aiVoiceSeconds / 60),
       snapshot.voiceMinutes ?? 0,
     );
 
@@ -243,7 +308,8 @@ export class StoreWalletService {
       snapshot.cvCreditCount ?? 0,
     );
 
-    wallet.aiVoiceMinutes -= reversal.reversedVoiceMinutes;
+    wallet.aiVoiceSeconds -= reversal.reversedVoiceMinutes * 60;
+    wallet.aiVoiceMinutes = Math.ceil(wallet.aiVoiceSeconds / 60);
 
     wallet.aiTextTokens -= reversal.reversedTextTokens;
 
@@ -333,6 +399,29 @@ export class StoreWalletService {
     };
   }
 
+  private async getLockedWallet(
+    userId: string,
+    manager: EntityManager,
+  ) {
+    await this.getOrCreateWallet(userId, manager, true);
+
+    const wallet = await manager.getRepository(UserStoreWallet).findOne({
+      where: { userId },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    if (!wallet) {
+      throw new BadRequestException('AI wallet could not be initialized.');
+    }
+
+    if (wallet.aiVoiceSeconds === 0 && wallet.aiVoiceMinutes > 0) {
+      wallet.aiVoiceSeconds = wallet.aiVoiceMinutes * 60;
+      await manager.getRepository(UserStoreWallet).save(wallet);
+    }
+
+    return wallet;
+  }
+
   private async getOrCreateWallet(
     userId: string,
     manager: EntityManager,
@@ -351,6 +440,7 @@ export class StoreWalletService {
         repository.create({
           userId,
           aiVoiceMinutes: 0,
+          aiVoiceSeconds: 0,
           aiTextTokens: 0,
           cvCredits: 0,
           signupCvCreditsGrantedAt: null,
@@ -413,7 +503,8 @@ export class StoreWalletService {
 
     return {
       ai: {
-        voiceMinutes: wallet.aiVoiceMinutes,
+        voiceMinutes: wallet.aiVoiceSeconds / 60,
+        voiceSeconds: wallet.aiVoiceSeconds,
         textTokens: wallet.aiTextTokens,
       },
 

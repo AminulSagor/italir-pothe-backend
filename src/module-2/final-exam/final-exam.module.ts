@@ -24,11 +24,13 @@ import { ExamSectionRule } from './entities/exam-section-rule.entity';
 import { ExamSequenceItem } from './entities/exam-sequence-item.entity';
 import { DailyChallengesModule } from '../daily-challenges/daily-challenges.module';
 import { ProgressModule } from '../progress/progress.module';
+import { UserCourseProgress } from '../progress/entities/user-course-progress.entity';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       Course,
+      UserCourseProgress,
       ExamAcceptedAnswer,
       ExamAnswerItem,
       ExamAnswer,

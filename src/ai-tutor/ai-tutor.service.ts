@@ -16,6 +16,8 @@ import {
   TranscribeAiTutorLevelTestDto,
 } from "./dto/ai-tutor.dto";
 import { AiTutorLearnerProfile } from "./entities/ai-tutor-learner-profile.entity";
+import { StoreWalletService } from "../package-store/services/store-wallet.service";
+import { AiTutorUsageService } from "./ai-tutor-usage.service";
 
 interface AiTutorAuthenticatedUser {
   id: string;
@@ -59,38 +61,106 @@ export class AiTutorService {
     private readonly configService: ConfigService,
     @InjectRepository(AiTutorLearnerProfile)
     private readonly profileRepository: Repository<AiTutorLearnerProfile>,
+    private readonly walletService: StoreWalletService,
+    private readonly usageService: AiTutorUsageService,
   ) {}
 
   async startVoiceSession(
     user: AiTutorAuthenticatedUser,
     dto: StartAiTutorVoiceSessionDto,
   ) {
-    const learnerProfile = await this.findStoredProfile(user.id);
-    const guidedMode = this.resolveGuidedMode(dto.guidedLevel, dto.guidedMode);
-    return this.requestJson("/v1/voice/sessions", {
-      userId: user.id,
-      displayName: user.fullName ?? "Italian learner",
-      topic: dto.topic,
-      ttlSeconds: dto.ttlSeconds,
-      learnerProfile,
-      memoryFacts: dto.memoryFacts ?? [],
-      recentMistakeTags: dto.recentMistakeTags ?? [],
-      guidedMode,
-      guidedLevel: dto.guidedLevel,
-    });
+    const requestedTtlSeconds = dto.ttlSeconds ?? 900;
+    const usageSession = await this.usageService.beginVoiceSession(
+      user.id,
+      requestedTtlSeconds,
+    );
+
+    try {
+      const learnerProfile = await this.findStoredProfile(user.id);
+      const guidedMode = this.resolveGuidedMode(dto.guidedLevel, dto.guidedMode);
+      const response = await this.requestJson("/v1/voice/sessions", {
+        userId: user.id,
+        displayName: user.fullName ?? "Italian learner",
+        topic: dto.topic,
+        ttlSeconds: usageSession.allocatedSeconds,
+        learnerProfile,
+        memoryFacts: dto.memoryFacts ?? [],
+        recentMistakeTags: dto.recentMistakeTags ?? [],
+        guidedMode,
+        guidedLevel: dto.guidedLevel,
+      });
+      const body = this.asRecord(response);
+      const providerSessionId = this.readString(body?.sessionId);
+      if (!providerSessionId) {
+        throw new BadGatewayException(
+          "AI tutor returned an invalid voice session",
+        );
+      }
+
+      await this.usageService.activateVoiceSession(
+        usageSession.id,
+        providerSessionId,
+      );
+      const balances = await this.walletService.getBalances(user.id);
+
+      return {
+        ...(body ?? {}),
+        allocatedSeconds: usageSession.allocatedSeconds,
+        balances,
+      };
+    } catch (error) {
+      await this.usageService.cancelVoiceSession(usageSession.id);
+      throw error;
+    }
+  }
+
+  async heartbeatVoiceSession(userId: string, sessionId: string) {
+    const usage = await this.usageService.heartbeat(userId, sessionId);
+    if (usage.shouldEnd) {
+      try {
+        await this.requestJson("/v1/voice/sessions/end", {
+          userId,
+          sessionId,
+        });
+      } catch {
+        // Billing state remains authoritative even if the voice worker
+        // already stopped or cannot be reached during final cleanup.
+      }
+    }
+    return usage;
   }
 
   async endVoiceSession(userId: string, sessionId: string) {
-    return this.requestJson("/v1/voice/sessions/end", {
-      userId,
-      sessionId,
-    });
+    let providerResponse: unknown = {};
+    try {
+      providerResponse = await this.requestJson("/v1/voice/sessions/end", {
+        userId,
+        sessionId,
+      });
+    } finally {
+      const balances = await this.usageService.endVoiceSession(
+        userId,
+        sessionId,
+      );
+      return {
+        ...(this.asRecord(providerResponse) ?? {}),
+        balances,
+      };
+    }
   }
 
   async sendMessage(
     user: AiTutorAuthenticatedUser,
     dto: SendAiTutorMessageDto,
   ) {
+    const balancesBefore = await this.walletService.getBalances(user.id);
+    const availableTextTokens = this.readTextTokenBalance(balancesBefore);
+    if (availableTextTokens <= 0) {
+      throw new BadRequestException(
+        "No AI text tokens are available. Purchase an AI bundle first.",
+      );
+    }
+
     const learnerProfile = await this.findStoredProfile(user.id);
     const chatMode =
       dto.chatMode === "writing_help" ? "writing_help" : "general";
@@ -99,7 +169,7 @@ export class AiTutorService {
         ? (dto.sourceLanguage ?? "english")
         : undefined;
 
-    return this.requestJson("/v1/chat", {
+    const response = await this.requestJson("/v1/chat", {
       userId: user.id,
       displayName: user.fullName ?? "Italian learner",
       message: dto.message.trim(),
@@ -110,7 +180,31 @@ export class AiTutorService {
       recentMistakeTags: dto.recentMistakeTags ?? [],
       chatMode,
       sourceLanguage,
+      maxBillableTokens: availableTextTokens,
     });
+    const responseBody = this.asRecord(response);
+    const usage = this.asRecord(responseBody?.usage);
+    const totalTokens = Math.max(
+      0,
+      Math.floor(Number(usage?.totalTokens ?? 0)),
+    );
+
+    if (!Number.isFinite(totalTokens) || totalTokens <= 0) {
+      throw new BadGatewayException(
+        "AI tutor did not return billable token usage",
+      );
+    }
+
+    const balances = await this.walletService.consumeAiTextTokens(
+      user.id,
+      totalTokens,
+    );
+
+    return {
+      ...(responseBody ?? {}),
+      usage,
+      balances,
+    };
   }
 
   async getLevelTestProfile(userId: string) {
@@ -265,6 +359,13 @@ export class AiTutorService {
       focusAreas: entity.focusAreas ?? [],
       completedAt: entity.completedAt.toISOString(),
     };
+  }
+
+  private readTextTokenBalance(balances: unknown): number {
+    const root = this.asRecord(balances);
+    const ai = this.asRecord(root?.ai);
+    const value = Number(ai?.textTokens ?? 0);
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
   }
 
   private readLevel(value: unknown): string {

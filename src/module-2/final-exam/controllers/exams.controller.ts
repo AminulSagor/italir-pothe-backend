@@ -23,6 +23,13 @@ import { ExamsService } from '../services/exams.service';
 export class ExamsController {
   constructor(private readonly examsService: ExamsService) {}
 
+  @Get('my-courses/gateways')
+  async getMyCourseExamGateways(@Req() request: AuthenticatedRequest) {
+    return this.examsService.getMyCourseExamGateways(
+      this.getUserId(request),
+    );
+  }
+
   @Get('courses/:courseId/gateway')
   async getExamGateway(
     @Param('courseId') courseId: string,

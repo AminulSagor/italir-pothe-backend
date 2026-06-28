@@ -2544,16 +2544,29 @@ export class PackageStoreService {
     orderId: string,
     userId?: string,
   ) {
-    const order = await manager.getRepository(StoreOrder).findOne({
-      where: userId
-        ? {
-            id: orderId,
-            userId,
-          }
-        : {
-            id: orderId,
-          },
+    const orderRepository = manager.getRepository(StoreOrder);
+    const lockQuery = orderRepository
+      .createQueryBuilder('storeOrder')
+      .select('storeOrder.id')
+      .where('storeOrder.id = :orderId', { orderId })
+      .setLock('pessimistic_write');
 
+    if (userId) {
+      lockQuery.andWhere('storeOrder.userId = :userId', { userId });
+    }
+
+    // Lock only the root order row. PostgreSQL cannot apply FOR UPDATE to
+    // nullable rows produced by the LEFT JOIN relations below.
+    const lockedOrder = await lockQuery.getOne();
+
+    if (!lockedOrder) {
+      throw new NotFoundException('Store order not found.');
+    }
+
+    const order = await orderRepository.findOne({
+      where: userId
+        ? { id: lockedOrder.id, userId }
+        : { id: lockedOrder.id },
       relations: [
         'snapshot',
         'pricing',
@@ -2563,10 +2576,6 @@ export class PackageStoreService {
         'package',
         'user',
       ],
-
-      lock: {
-        mode: 'pessimistic_write',
-      },
     });
 
     if (!order) {
@@ -2805,7 +2814,7 @@ export class PackageStoreService {
 
   private isDemoMode() {
     return (
-      this.configService.get<string>('PACKAGE_PAYMENTS_DEMO_MODE') === 'true'
+      this.configService.get<string>('PAYMENTS_DEMO_MODE') === 'true'
     );
   }
 

@@ -76,7 +76,7 @@ export class StartAiTutorVoiceSessionDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(60)
+  @Min(1)
   @Max(3600)
   ttlSeconds?: number;
 

@@ -44,6 +44,15 @@ export class AiTutorController {
     return this.aiTutorService.startVoiceSession(user, dto);
   }
 
+  @Post('voice/sessions/:sessionId/heartbeat')
+  async heartbeatVoiceSession(
+    @Req() request: AuthenticatedRequest,
+    @Param('sessionId') sessionId: string,
+  ) {
+    const user = this.requireUser(request);
+    return this.aiTutorService.heartbeatVoiceSession(user.id, sessionId);
+  }
+
   @Post('voice/sessions/:sessionId/end')
   async endVoiceSession(
     @Req() request: AuthenticatedRequest,
