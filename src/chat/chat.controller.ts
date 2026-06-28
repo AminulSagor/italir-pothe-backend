@@ -573,6 +573,96 @@ export class ChatController {
     });
   }
 
+  @Post('conversations/:id/messages')
+  async sendMessage(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { content?: string; messageType?: string },
+  ) {
+    const me = req.user;
+
+    // Guard: caller must be a participant of this conversation.
+    const participant = await this.participantRepo.findOne({
+      where: { conversationId: id, userId: me.id },
+    });
+
+    if (!participant) {
+      return { error: 'not a participant' };
+    }
+
+    // Persist the message using the same service path as the socket handler.
+    const savedMessage = await this.chatService.createMessage({
+      conversationId: id,
+      senderId: me.id,
+      content: body.content ?? null,
+      messageType: body.messageType,
+    });
+
+    const room = `conversation:${id}`;
+
+    // Broadcast to users already viewing this conversation room.
+    (this.chatGateway.server as any).to(room).emit('message', savedMessage);
+
+    // Notify each receiver individually and update unread counts.
+    const participantIds =
+      await this.chatService.getConversationParticipantIds(id);
+
+    const receiverIds = participantIds.filter((pid) => pid !== me.id);
+
+    if (receiverIds.length > 0) {
+      await this.chatService.createDeliveryJobs({
+        messageId: savedMessage.id,
+        conversationId: id,
+        receiverIds,
+      });
+
+      for (const receiverId of receiverIds) {
+        this.chatGateway.sendToUser(
+          receiverId,
+          'receive_message',
+          savedMessage,
+        );
+        this.chatGateway.sendToUser(
+          receiverId,
+          'new_message',
+          savedMessage,
+        );
+
+        try {
+          await this.participantRepo.increment(
+            { conversationId: id, userId: receiverId },
+            'unreadCount',
+            1,
+          );
+
+          const receiverParticipant = await this.participantRepo.findOne({
+            where: { conversationId: id, userId: receiverId },
+          });
+
+          const isHighlighted = Boolean(
+            (receiverParticipant?.lastReadSequenceNo ?? 0) <
+              savedMessage.sequenceNo &&
+              savedMessage.senderId !== receiverId,
+          );
+
+          this.chatGateway.sendToUser(
+            receiverId,
+            'conversation:unread',
+            {
+              conversationId: id,
+              unreadCount: receiverParticipant?.unreadCount ?? 0,
+              isHighlighted,
+            },
+          );
+        } catch {
+          // Non-fatal: unread count update failure should not fail the request.
+        }
+      }
+    }
+
+    return savedMessage;
+  }
+
   @Post('conversations/:id/read')
   async markConversationRead(
     @Req() req: any,

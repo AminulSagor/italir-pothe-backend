@@ -18,6 +18,8 @@ import { ChatService } from './chat.service';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Conversation } from './entities/conversation.entity';
 import { DirectConversation } from './entities/direct-conversation.entity';
+import { UserDeviceService } from '../devices/services/user-device.service';
+import { FirebasePushService } from '../notifications/firebase-push.service';
 
 @WebSocketGateway({
   namespace: 'chat',
@@ -35,6 +37,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * userId -> socket IDs
    */
   private readonly connections = new Map<string, Set<string>>();
+
+  /**
+   * Tracks users actively viewing a specific conversation inbox.
+   *
+   * conversationId -> set of userIds
+   */
+  private readonly activeInboxUsers = new Map<string, Set<string>>();
 
   constructor(
     private readonly jwtService: JwtService,
@@ -54,6 +63,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly participantRepo: Repository<ConversationParticipant>,
 
     private readonly presenceService: PresenceService,
+    private readonly userDeviceService: UserDeviceService,
+    private readonly firebasePushService: FirebasePushService,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
@@ -139,6 +150,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           userId: user.id,
           isOnline: false,
         });
+      }
+    }
+
+    for (const [conversationId, userSet] of this.activeInboxUsers.entries()) {
+      if (userSet.has(user.id)) {
+        userSet.delete(user.id);
+        if (userSet.size === 0) {
+          this.activeInboxUsers.delete(conversationId);
+        }
       }
     }
 
@@ -342,6 +362,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         this.sendToUser(receiverId, 'new_message', savedMessage);
 
+        const inboxUsers = this.activeInboxUsers.get(payload.conversationId);
+        const isInInbox = inboxUsers?.has(receiverId) ?? false;
+        
+        if (!isInInbox) {
+          this.userDeviceService.findActiveFcmDevicesByUsers([receiverId]).then(async (devices) => {
+            const tokens = devices.map(d => d.fcmToken).filter(t => t) as string[];
+            if (tokens.length > 0) {
+              const senderName = user.name || user.fullName || 'Someone';
+              let bodyText = savedMessage.content;
+              if (!bodyText && payload.attachments?.length) {
+                bodyText = 'Sent an attachment';
+              }
+              await this.firebasePushService.sendChatMessagePush({
+                tokens,
+                title: senderName,
+                body: bodyText || 'New message',
+                data: {
+                  type: 'chat_message',
+                  conversationId: payload.conversationId,
+                  senderId: user.id,
+                  messageId: savedMessage.id,
+                }
+              });
+            }
+          }).catch((err) => {
+            this.logger.warn(`Failed to send FCM to ${receiverId}`, err instanceof Error ? err.message : String(err));
+          });
+        }
+
         try {
           await this.participantRepo.increment(
             {
@@ -382,6 +431,46 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ok: true,
       messageId: savedMessage.id,
     };
+  }
+
+  @SubscribeMessage('presence:enter_inbox')
+  async handleEnterInbox(
+    client: Socket,
+    payload: { conversationId: string },
+  ) {
+    const user = client.data.user as User | undefined;
+    if (!user || !payload?.conversationId) {
+      return { error: 'Unauthorized or invalid payload' };
+    }
+
+    const conversationUsers = this.activeInboxUsers.get(payload.conversationId) ?? new Set<string>();
+    conversationUsers.add(user.id);
+    this.activeInboxUsers.set(payload.conversationId, conversationUsers);
+
+    this.logger.log(`User ${user.id} entered inbox for conversation ${payload.conversationId}`);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('presence:leave_inbox')
+  async handleLeaveInbox(
+    client: Socket,
+    payload: { conversationId: string },
+  ) {
+    const user = client.data.user as User | undefined;
+    if (!user || !payload?.conversationId) {
+      return { error: 'Unauthorized or invalid payload' };
+    }
+
+    const conversationUsers = this.activeInboxUsers.get(payload.conversationId);
+    if (conversationUsers) {
+      conversationUsers.delete(user.id);
+      if (conversationUsers.size === 0) {
+        this.activeInboxUsers.delete(payload.conversationId);
+      }
+    }
+
+    this.logger.log(`User ${user.id} left inbox for conversation ${payload.conversationId}`);
+    return { ok: true };
   }
 
   @SubscribeMessage('presence:heartbeat')
