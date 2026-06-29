@@ -34,9 +34,14 @@ export class WebinarChatMessage {
   @JoinColumn({ name: 'webinarId' })
   webinar: Webinar;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'senderUserId' })
-  sender: User;
+  @ManyToOne(() => User, {
+    nullable: true,
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'senderId',
+  })
+  sender: User | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

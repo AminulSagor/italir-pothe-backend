@@ -240,6 +240,13 @@ export class CreateCoreQuizQuestionDto {
   questionType: QuizQuestionFormat;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  points?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(180)
   title?: string;
@@ -309,6 +316,13 @@ export class UpdateCoreQuizQuestionDto {
   questionType?: QuizQuestionFormat;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  points?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(180)
   title?: string | null;
@@ -376,6 +390,13 @@ export class CreateListeningMiniMcqQuestionDto {
   @IsString()
   @MaxLength(180)
   questionTitle: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  points?: number;
 
   @IsOptional()
   @IsEnum(ExamAudioSourceType)

@@ -31,9 +31,13 @@ export class MessageReceipt {
   @Column({ type: 'uuid' })
   userId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;

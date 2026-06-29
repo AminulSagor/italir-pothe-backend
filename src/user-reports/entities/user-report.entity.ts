@@ -21,16 +21,16 @@ export class UserReport {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => User, { nullable: false })
+  @ManyToOne(() => User, { nullable: true, createForeignKeyConstraints: false })
   @JoinColumn({ name: 'reporterId' })
-  reporter: User;
+  reporter: User | null;
 
   @Column({ type: 'uuid' })
   reporterId: string;
 
-  @ManyToOne(() => User, { nullable: false })
+  @ManyToOne(() => User, { nullable: true, createForeignKeyConstraints: false })
   @JoinColumn({ name: 'reportedUserId' })
-  reportedUser: User;
+  reportedUser: User | null;
 
   @Column({ type: 'uuid' })
   reportedUserId: string;

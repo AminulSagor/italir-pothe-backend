@@ -10,10 +10,7 @@ import {
   Unique,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-import {
-  DeliveryJobStatus,
-  DeliveryType,
-} from '../enums/chat.enums';
+import { DeliveryJobStatus, DeliveryType } from '../enums/chat.enums';
 import { Conversation } from './conversation.entity';
 import { Message } from './message.entity';
 
@@ -50,9 +47,9 @@ export class MessageDeliveryJob {
   @Column({ type: 'uuid' })
   receiverId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
   @JoinColumn({ name: 'receiverId' })
-  receiver: User;
+  receiver: User | null;
 
   @Column({
     type: 'enum',

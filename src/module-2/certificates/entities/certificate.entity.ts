@@ -20,26 +20,90 @@ export enum CertificateStatus {
 }
 
 @Entity('certificates')
-@Index(['certificateNumber'], { unique: true })
-@Index(['examAttemptId'], { unique: true })
+@Index(['certificateNumber'], {
+  unique: true,
+})
+@Index(['examAttemptId'], {
+  unique: true,
+})
 export class Certificate {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'uuid' })
+  @Column({
+    type: 'uuid',
+  })
   userId: string;
 
-  @Column({ type: 'uuid' })
+  @Column({
+    type: 'uuid',
+  })
   courseId: string;
 
-  @Column({ type: 'uuid' })
+  @Column({
+    type: 'uuid',
+  })
   examAttemptId: string;
 
-  @Column({ type: 'varchar', length: 80 })
+  @Column({
+    type: 'varchar',
+    length: 80,
+  })
   certificateNumber: string;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({
+    type: 'uuid',
+    nullable: true,
+  })
   pdfFileId: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
+  recipientNameSnapshot: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  courseTitleSnapshot: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  courseLevelSnapshot: string | null;
+
+  @Column({
+    type: 'numeric',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+  })
+  scorePercentSnapshot: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 700,
+    nullable: true,
+  })
+  verificationUrl: string | null;
+
+  @Column({
+    type: 'uuid',
+    nullable: true,
+  })
+  issuedByAdminId: string | null;
+
+  @Column({
+    type: 'text',
+    nullable: true,
+  })
+  revocationReason: string | null;
 
   @Column({
     type: 'enum',
@@ -48,31 +112,58 @@ export class Certificate {
   })
   status: CertificateStatus;
 
-  @Column({ type: 'timestamptz' })
+  @Column({
+    type: 'timestamptz',
+  })
   issuedAt: Date;
 
-  @Column({ type: 'timestamptz', nullable: true })
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
   revokedAt: Date | null;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @CreateDateColumn({
+    type: 'timestamptz',
+  })
   createdAt: Date;
 
-  @UpdateDateColumn({ type: 'timestamptz' })
+  @UpdateDateColumn({
+    type: 'timestamptz',
+  })
   updatedAt: Date;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    nullable: true,
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
-  @ManyToOne(() => Course, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'courseId' })
+  @ManyToOne(() => Course, {
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({
+    name: 'courseId',
+  })
   course: Course;
 
-  @ManyToOne(() => ExamAttempt, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'examAttemptId' })
+  @ManyToOne(() => ExamAttempt, {
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({
+    name: 'examAttemptId',
+  })
   examAttempt: ExamAttempt;
 
-  @ManyToOne(() => File, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'pdfFileId' })
+  @ManyToOne(() => File, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({
+    name: 'pdfFileId',
+  })
   pdfFile: File | null;
 }

@@ -30,6 +30,8 @@ import { PresenceStatus } from '../chat/enums/chat.enums';
 import { PresenceService } from '../presence/presence.service';
 import { FilesService } from 'src/files/services/files.service';
 import { FilePurpose } from 'src/files/entities/file.entity';
+import { UserAccountDeletionService } from './user-account-deletion.service';
+import { UserDeletionSource } from './entities/deleted-user-audit.entity';
 
 @Injectable()
 export class UsersService {
@@ -41,6 +43,7 @@ export class UsersService {
     private userRepository: Repository<User>,
     @InjectRepository(Otp)
     private otpRepository: Repository<Otp>,
+    private readonly userAccountDeletionService: UserAccountDeletionService,
     private presenceService: PresenceService,
     private smsService: SmsService,
     private emailService: EmailService,
@@ -407,57 +410,40 @@ export class UsersService {
       );
     }
 
-    await this.userRepository.remove(user);
+    return this.userAccountDeletionService.deleteAccount({
+      targetUserId: user.id,
+      deletedByUserId: user.id,
 
-    return {
-      message: 'Account deleted successfully.',
-    };
-  }
+      source: UserDeletionSource.SELF_SERVICE,
 
-  async deleteUser(id: string) {
-    const user = await this.userRepository.findOne({ where: { id } });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (user.role !== UserRole.USER) {
-      throw new BadRequestException(
-        'This ID does not belong to a standard user',
-      );
-    }
-
-    await this.userRepository.remove(user);
-
-    return {
-      message: 'User deleted successfully',
-    };
-  }
-
-  async deleteAdmin(id: string) {
-    const admin = await this.userRepository.findOne({ where: { id } });
-
-    if (!admin) {
-      throw new NotFoundException('Admin not found');
-    }
-
-    if (admin.role !== UserRole.ADMIN) {
-      throw new BadRequestException('This ID does not belong to an admin');
-    }
-
-    const adminCount = await this.userRepository.count({
-      where: { role: UserRole.ADMIN },
+      expectedRole: user.role,
     });
+  }
 
-    if (adminCount <= 1) {
-      throw new BadRequestException('Cannot delete the last remaining admin');
-    }
+  async deleteUser(id: string, deletedByAdminId: string) {
+    return this.userAccountDeletionService.deleteAccount({
+      targetUserId: id,
 
-    await this.userRepository.remove(admin);
+      deletedByUserId: deletedByAdminId,
 
-    return {
-      message: 'Admin deleted successfully',
-    };
+      source: UserDeletionSource.ADMIN_USER_DELETE,
+
+      expectedRole: UserRole.USER,
+    });
+  }
+
+  async deleteAdmin(id: string, deletedByAdminId: string) {
+    return this.userAccountDeletionService.deleteAccount({
+      targetUserId: id,
+
+      deletedByUserId: deletedByAdminId,
+
+      source: UserDeletionSource.ADMIN_ACCOUNT_DELETE,
+
+      expectedRole: UserRole.ADMIN,
+
+      preventLastAdminDeletion: true,
+    });
   }
 
   private async findUserById(userId: string): Promise<User> {

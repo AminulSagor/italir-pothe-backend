@@ -53,10 +53,12 @@ export class WebinarSpeakerRequest {
   webinar: Webinar;
 
   @ManyToOne(() => User, {
-    onDelete: 'CASCADE',
+    createForeignKeyConstraints: false,
   })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

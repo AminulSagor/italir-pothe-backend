@@ -147,10 +147,12 @@ export class CoursePurchaseOrder {
   updatedAt: Date;
 
   @ManyToOne(() => User, {
-    onDelete: 'RESTRICT',
+    createForeignKeyConstraints: false,
   })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @ManyToOne(() => Course, {
     onDelete: 'RESTRICT',

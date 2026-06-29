@@ -6,15 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 
 import { AiTutorLearnerProfile } from '../ai-tutor/entities/ai-tutor-learner-profile.entity';
-import { UserDevice } from '../devices/entities/user-device.entity';
-import {
-  FilePurpose,
-  FileVisibility,
-} from '../files/entities/file.entity';
+import { FilePurpose, FileVisibility } from '../files/entities/file.entity';
 import { FilesService } from '../files/services/files.service';
 import { S3Service } from '../files/services/s3.service';
 import { UserStreak } from '../module-2/scoring/entities/user-streak.entity';
@@ -24,7 +19,7 @@ import {
   VerifyEmailChangeOtpDto,
   VerifyPhoneChangeOtpDto,
 } from '../users/dto/user-profile.dto';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { ChangeUserPasswordDto } from './dto/change-user-password.dto';
 import { ConfirmAvatarUploadDto } from './dto/confirm-avatar-upload.dto';
@@ -38,6 +33,8 @@ import {
   UserSettingsProfilePayload,
   UserSettingsProfileResponse,
 } from './types/user-settings.types';
+import { UserAccountDeletionService } from 'src/users/user-account-deletion.service';
+import { UserDeletionSource } from 'src/users/entities/deleted-user-audit.entity';
 
 @Injectable()
 export class UserSettingsService {
@@ -48,6 +45,7 @@ export class UserSettingsService {
     private readonly userStreakRepository: Repository<UserStreak>,
     @InjectRepository(AiTutorLearnerProfile)
     private readonly learnerProfileRepository: Repository<AiTutorLearnerProfile>,
+    private readonly userAccountDeletionService: UserAccountDeletionService,
     private readonly usersService: UsersService,
     private readonly filesService: FilesService,
     private readonly s3Service: S3Service,
@@ -163,7 +161,9 @@ export class UserSettingsService {
     const file = confirmed.file;
 
     if (file.ownerUserId !== userId) {
-      throw new ForbiddenException('The uploaded avatar does not belong to you.');
+      throw new ForbiddenException(
+        'The uploaded avatar does not belong to you.',
+      );
     }
 
     if (file.filePurpose !== FilePurpose.PROFILE_AVATAR) {
@@ -237,40 +237,21 @@ export class UserSettingsService {
       );
     }
 
-    const now = new Date();
-    const invalidPassword = await bcrypt.hash(randomUUID(), 10);
-
-    await this.userRepository.manager.transaction(async (manager) => {
-      await manager.getRepository(UserDevice).update(
-        { userId },
-        {
-          isActive: false,
-          fcmToken: null,
-          voipToken: null,
-          deactivatedAt: now,
-          lastActiveAt: now,
-        },
+    if (user.role === UserRole.ADMIN) {
+      throw new BadRequestException(
+        'Admin accounts cannot be deleted from user settings.',
       );
+    }
 
-      user.fullName = 'Deleted User';
-      user.name = null;
-      user.email = null;
-      user.phone = null;
-      user.password = invalidPassword;
-      user.isVerified = false;
-      user.isEmailVerified = false;
-      user.isPhoneVerified = false;
-      user.profilePhotoFileId = null;
-      user.avatarUrl = null;
-      user.hapticsEnabled = false;
-      user.isBanned = true;
+    return this.userAccountDeletionService.deleteAccount({
+      targetUserId: user.id,
 
-      await manager.getRepository(User).save(user);
+      deletedByUserId: user.id,
+
+      source: UserDeletionSource.SELF_SERVICE,
+
+      expectedRole: user.role,
     });
-
-    return {
-      message: 'Your account has been permanently deleted.',
-    };
   }
 
   private async findUser(userId: string): Promise<User> {

@@ -54,6 +54,7 @@ interface PreparedQuestionPayload {
   mediaFileId?: string | null;
   generatedAudioText?: string | null;
   correctBoolean?: boolean | null;
+  points?: number;
   sortOrder?: number;
   status?: ExamQuestionStatus;
   options?: FinalExamQuestionOptionDto[];
@@ -386,6 +387,7 @@ export class AdminExamsService {
         audioSourceType: payload.generatedAudioText
           ? ExamAudioSourceType.AI_VOICE
           : ExamAudioSourceType.MANUAL_UPLOAD,
+        points: payload.points ?? 1,
         sortOrder: payload.sortOrder ?? existingCount + 1,
         status: payload.status ?? ExamQuestionStatus.DRAFT,
       });
@@ -426,6 +428,7 @@ export class AdminExamsService {
       promptText: dto.questionPrompt,
       mediaFileId: dto.audioFileId ?? null,
       generatedAudioText: dto.generatedAudioText ?? null,
+      points: dto.points ?? 1,
       sortOrder: dto.sortOrder ?? existingCount + 1,
       status: ExamQuestionStatus.DRAFT,
       options: dto.options,
@@ -772,6 +775,7 @@ export class AdminExamsService {
         dto.correctBoolean !== undefined
           ? dto.correctBoolean
           : question.correctBoolean,
+      points: dto.points !== undefined ? dto.points : question.points,
       sortOrder: dto.sortOrder ?? question.sortOrder,
       status: dto.status ?? question.status,
       options: dto.options ?? this.mapOptionsToDto(question.options ?? []),
@@ -801,6 +805,7 @@ export class AdminExamsService {
         audioSourceType: payload.generatedAudioText
           ? ExamAudioSourceType.AI_VOICE
           : question.audioSourceType,
+        points: payload.points ?? question.points,
         sortOrder: payload.sortOrder ?? question.sortOrder,
         status: payload.status ?? question.status,
       });
@@ -1516,6 +1521,7 @@ export class AdminExamsService {
       generatedAudioText: question.generatedAudioText,
       correctBoolean: question.correctBoolean,
       audioSourceType: question.audioSourceType,
+      points: question.points,
       sortOrder: question.sortOrder,
       status: question.status,
       options,
@@ -1758,6 +1764,7 @@ export class AdminExamsService {
         dto.generatedAudioText !== undefined
           ? dto.generatedAudioText
           : question.generatedAudioText,
+      points: dto.points !== undefined ? dto.points : question.points,
       sortOrder: dto.sortOrder ?? question.sortOrder,
       status: question.status,
       options: dto.options ?? this.mapOptionsToDto(question.options ?? []),
@@ -1784,6 +1791,7 @@ export class AdminExamsService {
           (payload.generatedAudioText
             ? ExamAudioSourceType.AI_VOICE
             : question.audioSourceType),
+        points: payload.points ?? question.points,
         sortOrder: payload.sortOrder ?? question.sortOrder,
         status: question.status,
       });

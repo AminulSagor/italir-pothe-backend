@@ -20,7 +20,10 @@ import { Message } from './message.entity';
 ])
 @Index('IDX_conversation_participants_conversationId', ['conversationId'])
 @Index('IDX_conversation_participants_userId', ['userId'])
-@Index('IDX_conversation_participants_user_archivedAt', ['userId', 'archivedAt'])
+@Index('IDX_conversation_participants_user_archivedAt', [
+  'userId',
+  'archivedAt',
+])
 export class ConversationParticipant {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -35,9 +38,13 @@ export class ConversationParticipant {
   @Column({ type: 'uuid' })
   userId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @Column({ type: 'uuid', nullable: true })
   lastReadMessageId: string | null;

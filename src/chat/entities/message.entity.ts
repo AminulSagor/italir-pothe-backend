@@ -13,9 +13,13 @@ import { MessageType } from '../enums/chat.enums';
 import { Conversation } from './conversation.entity';
 
 @Entity('messages')
-@Index('UQ_messages_conversation_sequenceNo', ['conversationId', 'sequenceNo'], {
-  unique: true,
-})
+@Index(
+  'UQ_messages_conversation_sequenceNo',
+  ['conversationId', 'sequenceNo'],
+  {
+    unique: true,
+  },
+)
 @Index('UQ_messages_sender_clientMessageId', ['senderId', 'clientMessageId'], {
   unique: true,
 })
@@ -35,8 +39,13 @@ export class Message {
   @Column({ type: 'uuid', nullable: true })
   senderId: string | null;
 
-  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'senderId' })
+  @ManyToOne(() => User, {
+    nullable: true,
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'senderId',
+  })
   sender: User | null;
 
   @Column({ type: 'varchar', length: 120, nullable: true })
