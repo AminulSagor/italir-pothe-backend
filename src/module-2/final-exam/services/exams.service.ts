@@ -51,6 +51,7 @@ interface UserSafeQuestion {
   promptBn: string | null;
   audioFileId: string | null;
   imageFileId: string | null;
+  points: number;
   sortOrder: number;
   options: UserSafeOption[];
   pairs: {
@@ -407,6 +408,7 @@ export class ExamsService {
   }
 
   private gradeAnswer(question: ExamQuestion, dto: SubmitExamAnswerDto) {
+    const awardedPoints = Math.max(1, question.points ?? 1);
     const sectionReviewMode = question.section?.reviewMode;
 
     if (sectionReviewMode === ExamReviewMode.MANUAL) {
@@ -433,7 +435,7 @@ export class ExamsService {
         isManual: false,
         isCorrect,
         correctAnswer: correctOption?.optionText ?? null,
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -447,7 +449,7 @@ export class ExamsService {
           question.correctBoolean === null
             ? null
             : String(question.correctBoolean),
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -464,7 +466,7 @@ export class ExamsService {
         isManual: false,
         isCorrect: Boolean(correctAnswer),
         correctAnswer: question.acceptedAnswers[0]?.answerText ?? null,
-        score: correctAnswer ? 1 : 0,
+        score: correctAnswer ? awardedPoints : 0,
       };
     }
 
@@ -489,7 +491,7 @@ export class ExamsService {
         isManual: false,
         isCorrect,
         correctAnswer: expected.join(' '),
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -514,7 +516,7 @@ export class ExamsService {
         correctAnswer: question.pairs
           .map((pair) => `${pair.leftText} → ${pair.rightText}`)
           .join(', '),
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -537,6 +539,7 @@ export class ExamsService {
       promptBn: question.promptBn,
       audioFileId: question.audioFileId,
       imageFileId: question.imageFileId,
+      points: question.points,
       sortOrder: question.sortOrder,
       options: question.options.map((option) => ({
         id: option.id,

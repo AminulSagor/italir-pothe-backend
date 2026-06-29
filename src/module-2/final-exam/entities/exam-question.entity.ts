@@ -38,6 +38,12 @@ export class ExamQuestion {
   @Column({ type: 'varchar', length: 50 })
   questionFormat: FinalExamQuestionFormat;
 
+  @Column({
+    type: 'integer',
+    default: 1,
+  })
+  points: number;
+
   @Column({ type: 'varchar', length: 180, nullable: true })
   title: string | null;
 

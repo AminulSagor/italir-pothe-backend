@@ -72,12 +72,12 @@ export class StoreOrder {
   updatedAt: Date;
 
   @ManyToOne(() => User, {
-    onDelete: 'RESTRICT',
+    createForeignKeyConstraints: false,
   })
   @JoinColumn({
     name: 'userId',
   })
-  user: User;
+  user: User | null;
 
   @ManyToOne(() => StorePackage, {
     onDelete: 'RESTRICT',

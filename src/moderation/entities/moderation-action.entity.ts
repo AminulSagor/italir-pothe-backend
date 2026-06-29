@@ -1,4 +1,11 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { ModerationReport } from './moderation-report.entity';
 import { User } from '../../users/entities/user.entity';
 
@@ -14,9 +21,9 @@ export class ModerationAction {
   @Column({ type: 'uuid' })
   reportId: string;
 
-  @ManyToOne(() => User, { nullable: false })
+  @ManyToOne(() => User, { nullable: true, createForeignKeyConstraints: false })
   @JoinColumn({ name: 'moderatorId' })
-  moderator: User;
+  moderator: User | null;
 
   @Column({ type: 'uuid' })
   moderatorId: string;

@@ -55,14 +55,6 @@ export class UsersController {
     return this.usersService.getMyProfile(this.getCurrentUserId(request));
   }
 
-  @Get(':id')
-  async getUserProfileById(
-    @Req() request: AuthenticatedRequest,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.usersService.getUserProfileById(id);
-  }
-
   @Get('all')
   async getAllUsers() {
     return this.usersService.findAllUsersWithPresence();
@@ -101,6 +93,14 @@ export class UsersController {
     );
 
     return result;
+  }
+
+  @Get(':id')
+  async getUserProfileById(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.usersService.getUserProfileById(id);
   }
 
   @Patch('me/name')
@@ -195,14 +195,32 @@ export class UsersController {
 
   @Delete('user/:id')
   @Roles(UserRole.ADMIN)
-  async deleteUser(@Param('id') id: string) {
-    return this.usersService.deleteUser(id);
+  async deleteUser(
+    @Param(
+      'id',
+      new ParseUUIDPipe({
+        version: '4',
+      }),
+    )
+    id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.usersService.deleteUser(id, this.getCurrentUserId(request));
   }
 
   @Delete('admin/:id')
   @Roles(UserRole.ADMIN)
-  async deleteAdmin(@Param('id') id: string) {
-    return this.usersService.deleteAdmin(id);
+  async deleteAdmin(
+    @Param(
+      'id',
+      new ParseUUIDPipe({
+        version: '4',
+      }),
+    )
+    id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.usersService.deleteAdmin(id, this.getCurrentUserId(request));
   }
 
   private getCurrentUserId(request: AuthenticatedRequest): string {

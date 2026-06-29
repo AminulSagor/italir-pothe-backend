@@ -61,9 +61,13 @@ export class ExamAttempt {
   @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @ManyToOne(() => Course, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'courseId' })
