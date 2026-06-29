@@ -77,18 +77,25 @@ export class AiTutorService {
 
     try {
       const learnerProfile = await this.findStoredProfile(user.id);
-      const guidedMode = this.resolveGuidedMode(dto.guidedLevel, dto.guidedMode);
-      const response = await this.requestJson("/v1/voice/sessions", {
-        userId: user.id,
-        displayName: user.fullName ?? "Italian learner",
-        topic: dto.topic,
-        ttlSeconds: usageSession.allocatedSeconds,
-        learnerProfile,
-        memoryFacts: dto.memoryFacts ?? [],
-        recentMistakeTags: dto.recentMistakeTags ?? [],
-        guidedMode,
-        guidedLevel: dto.guidedLevel,
-      });
+      const guidedMode = this.resolveGuidedMode(
+        dto.guidedLevel,
+        dto.guidedMode,
+      );
+      const response = await this.requestJsonWithRetry(
+        "/v1/voice/sessions",
+        {
+          userId: user.id,
+          displayName: user.fullName ?? "Italian learner",
+          topic: dto.topic,
+          ttlSeconds: usageSession.allocatedSeconds,
+          learnerProfile,
+          memoryFacts: dto.memoryFacts ?? [],
+          recentMistakeTags: dto.recentMistakeTags ?? [],
+          guidedMode,
+          guidedLevel: dto.guidedLevel,
+        },
+        2,
+      );
       const body = this.asRecord(response);
       const providerSessionId = this.readString(body?.sessionId);
       if (!providerSessionId) {
@@ -392,6 +399,34 @@ export class AiTutorService {
     return value && typeof value === "object"
       ? (value as Record<string, unknown>)
       : null;
+  }
+
+  private async requestJsonWithRetry(
+    path: string,
+    body: Record<string, unknown>,
+    maxAttempts: number,
+  ): Promise<unknown> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= Math.max(1, maxAttempts); attempt++) {
+      try {
+        return await this.requestJson(path, body);
+      } catch (error) {
+        lastError = error;
+        const retryable =
+          error instanceof BadGatewayException ||
+          error instanceof GatewayTimeoutException ||
+          error instanceof ServiceUnavailableException;
+        if (!retryable || attempt >= maxAttempts) {
+          throw error;
+        }
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, attempt * 450),
+        );
+      }
+    }
+
+    throw lastError;
   }
 
   private requestJson(
