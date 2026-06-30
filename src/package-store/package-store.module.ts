@@ -17,12 +17,15 @@ import { CvEconomyConfig } from './entities/cv-economy-config.entity';
 import { StoreOrder } from './entities/store-order.entity';
 import { StoreOrderPackageSnapshot } from './entities/store-order-package-snapshot.entity';
 import { StoreOrderPayment } from './entities/store-order-payment.entity';
+import { StoreOrderProviderSnapshot } from './entities/store-order-provider-snapshot.entity';
+import { StoreOrderProviderTransaction } from './entities/store-order-provider-transaction.entity';
 import { StoreOrderPricing } from './entities/store-order-pricing.entity';
 import { StoreOrderReversal } from './entities/store-order-reversal.entity';
 import { StoreOrderTimelineEvent } from './entities/store-order-timeline-event.entity';
 import { StorePackage } from './entities/store-package.entity';
 import { StorePackageCommerce } from './entities/store-package-commerce.entity';
 import { StorePackageEntitlement } from './entities/store-package-entitlement.entity';
+import { StorePackageProviderProduct } from './entities/store-package-provider-product.entity';
 import { UserStoreWallet } from './entities/user-store-wallet.entity';
 
 import { PackageStoreService } from './services/package-store.service';
@@ -64,11 +67,14 @@ const packageStoreForexRateProvider: Provider = {
       StorePackage,
       StorePackageCommerce,
       StorePackageEntitlement,
+      StorePackageProviderProduct,
 
       StoreOrder,
       StoreOrderPackageSnapshot,
       StoreOrderPricing,
       StoreOrderPayment,
+      StoreOrderProviderSnapshot,
+      StoreOrderProviderTransaction,
       StoreOrderReversal,
       StoreOrderTimelineEvent,
 

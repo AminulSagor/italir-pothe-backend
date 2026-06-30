@@ -16,6 +16,8 @@ import { StoreOrderStatus } from '../types/package-store.type';
 import { StorePackage } from './store-package.entity';
 import { StoreOrderPackageSnapshot } from './store-order-package-snapshot.entity';
 import { StoreOrderPayment } from './store-order-payment.entity';
+import { StoreOrderProviderSnapshot } from './store-order-provider-snapshot.entity';
+import { StoreOrderProviderTransaction } from './store-order-provider-transaction.entity';
 import { StoreOrderPricing } from './store-order-pricing.entity';
 import { StoreOrderReversal } from './store-order-reversal.entity';
 import { StoreOrderTimelineEvent } from './store-order-timeline-event.entity';
@@ -91,6 +93,24 @@ export class StoreOrder {
     cascade: true,
   })
   snapshot: StoreOrderPackageSnapshot;
+
+  @OneToOne(
+    () => StoreOrderProviderSnapshot,
+    (providerSnapshot) => providerSnapshot.order,
+    {
+      cascade: true,
+    },
+  )
+  providerSnapshot: StoreOrderProviderSnapshot;
+
+  @OneToOne(
+    () => StoreOrderProviderTransaction,
+    (providerTransaction) => providerTransaction.order,
+    {
+      cascade: true,
+    },
+  )
+  providerTransaction: StoreOrderProviderTransaction;
 
   @OneToOne(() => StoreOrderPricing, (pricing) => pricing.order, {
     cascade: true,

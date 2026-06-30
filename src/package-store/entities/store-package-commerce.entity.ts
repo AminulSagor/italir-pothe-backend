@@ -62,20 +62,6 @@ export class StorePackageCommerce {
   })
   couponCode: string | null;
 
-  @Column({
-    type: 'varchar',
-    length: 255,
-    nullable: true,
-  })
-  googlePlayProductId: string | null;
-
-  @Column({
-    type: 'varchar',
-    length: 255,
-    nullable: true,
-  })
-  stripePriceId: string | null;
-
   @CreateDateColumn({
     type: 'timestamptz',
   })

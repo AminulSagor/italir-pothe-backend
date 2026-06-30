@@ -25,11 +25,13 @@ import { UserRole } from 'src/users/entities/user.entity';
 import {
   AdminStoreOrderQueryDto,
   CreateStorePackageDto,
+  CreateStoreProviderProductDto,
   RefundStoreOrderDto,
   ReorderStorePackagesDto,
   StorePackageQueryDto,
   UpdateCvEconomyConfigDto,
   UpdateStorePackageDto,
+  UpdateStoreProviderProductDto,
 } from '../dto/package-store.dto';
 import { PackageStoreService } from '../services/package-store.service';
 
@@ -77,12 +79,7 @@ export class AdminPackageStoreController {
 
   @Get('packages/:packageId')
   async findPackageById(
-    @Param(
-      'packageId',
-      new ParseUUIDPipe({
-        version: '4',
-      }),
-    )
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
     packageId: string,
   ) {
     return this.packageStoreService.findPackageById(packageId);
@@ -90,12 +87,7 @@ export class AdminPackageStoreController {
 
   @Patch('packages/:packageId')
   async updatePackage(
-    @Param(
-      'packageId',
-      new ParseUUIDPipe({
-        version: '4',
-      }),
-    )
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
     packageId: string,
     @Body() dto: UpdateStorePackageDto,
   ) {
@@ -104,12 +96,7 @@ export class AdminPackageStoreController {
 
   @Delete('packages/:packageId')
   async archivePackage(
-    @Param(
-      'packageId',
-      new ParseUUIDPipe({
-        version: '4',
-      }),
-    )
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
     packageId: string,
   ) {
     return this.packageStoreService.archivePackage(packageId);
@@ -117,15 +104,60 @@ export class AdminPackageStoreController {
 
   @Patch('packages/:packageId/restore')
   async restorePackage(
-    @Param(
-      'packageId',
-      new ParseUUIDPipe({
-        version: '4',
-      }),
-    )
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
     packageId: string,
   ) {
     return this.packageStoreService.restorePackage(packageId);
+  }
+
+  /**
+   * Provider mappings are managed independently from package benefits.
+   * This lets products be added, versioned or archived without changing
+   * Flutter code or destroying historical order snapshots.
+   */
+  @Post('packages/:packageId/provider-products')
+  async createProviderProduct(
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
+    packageId: string,
+    @Body() dto: CreateStoreProviderProductDto,
+  ) {
+    return this.packageStoreService.createProviderProduct(packageId, dto);
+  }
+
+  @Get('packages/:packageId/provider-products')
+  async findProviderProducts(
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
+    packageId: string,
+  ) {
+    return this.packageStoreService.findProviderProducts(packageId);
+  }
+
+  @Patch('packages/:packageId/provider-products/:providerProductId')
+  async updateProviderProduct(
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
+    packageId: string,
+    @Param('providerProductId', new ParseUUIDPipe({ version: '4' }))
+    providerProductId: string,
+    @Body() dto: UpdateStoreProviderProductDto,
+  ) {
+    return this.packageStoreService.updateProviderProduct(
+      packageId,
+      providerProductId,
+      dto,
+    );
+  }
+
+  @Delete('packages/:packageId/provider-products/:providerProductId')
+  async deactivateProviderProduct(
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
+    packageId: string,
+    @Param('providerProductId', new ParseUUIDPipe({ version: '4' }))
+    providerProductId: string,
+  ) {
+    return this.packageStoreService.deactivateProviderProduct(
+      packageId,
+      providerProductId,
+    );
   }
 
   @Get('orders/export')
@@ -145,35 +177,23 @@ export class AdminPackageStoreController {
 
   @Get('orders/:orderId/invoice')
   async downloadInvoice(
-    @Param(
-      'orderId',
-      new ParseUUIDPipe({
-        version: '4',
-      }),
-    )
+    @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
     @Res() response: Response,
   ) {
     const invoice = await this.packageStoreService.getAdminInvoice(orderId);
 
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
-
     response.setHeader(
       'Content-Disposition',
       `attachment; filename="${invoice.fileName}"`,
     );
-
     response.send(invoice.html);
   }
 
   @Post('orders/:orderId/demo-refund')
   async refundOrder(
-    @Param(
-      'orderId',
-      new ParseUUIDPipe({
-        version: '4',
-      }),
-    )
+    @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
     @Body() dto: RefundStoreOrderDto,
   ) {
@@ -182,12 +202,7 @@ export class AdminPackageStoreController {
 
   @Get('orders/:orderId')
   async findOrderById(
-    @Param(
-      'orderId',
-      new ParseUUIDPipe({
-        version: '4',
-      }),
-    )
+    @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
   ) {
     return this.packageStoreService.findAdminOrderById(orderId);

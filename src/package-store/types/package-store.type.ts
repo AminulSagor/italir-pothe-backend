@@ -30,7 +30,25 @@ export enum StreakProtectionMode {
 
 export enum StorePaymentProvider {
   GOOGLE_PLAY = 'google_play',
-  STRIPE = 'stripe',
+  APP_STORE = 'app_store',
+}
+
+export enum StoreProviderProductType {
+  CONSUMABLE = 'consumable',
+  NON_CONSUMABLE = 'non_consumable',
+  SUBSCRIPTION = 'subscription',
+}
+
+export enum StoreProviderEnvironment {
+  DEVELOPMENT = 'development',
+  SANDBOX = 'sandbox',
+  PRODUCTION = 'production',
+}
+
+export enum StoreProviderVerificationStatus {
+  PENDING = 'pending',
+  VERIFIED = 'verified',
+  FAILED = 'failed',
 }
 
 export enum StoreOrderStatus {
@@ -76,10 +94,7 @@ export enum PurchaseHistorySortBy {
 
 export enum CheckoutPaymentMethod {
   GOOGLE_PLAY = 'google_play',
-  CARD = 'card',
-  PAYPAL = 'paypal',
-  APPLE_PAY = 'apple_pay',
-  BKASH = 'bkash',
+  APP_STORE = 'app_store',
 }
 
 export interface StoreTimelineItem {
@@ -105,6 +120,16 @@ export interface StoreQuote {
   totalAmount: string;
 }
 
+export interface StoreProviderProductResponse {
+  id: string;
+  provider: StorePaymentProvider;
+  productId: string;
+  productType: StoreProviderProductType;
+  basePlanId: string | null;
+  offerId: string | null;
+  isActive: boolean;
+}
+
 export interface StorePackageResponse {
   id: string;
   type: StorePackageType;
@@ -127,4 +152,11 @@ export interface StorePackageResponse {
   couponCode: string | null;
 
   sortOrder: number;
+
+  /**
+   * Public catalog responses return the active mapping selected by
+   * the requested provider. Admin responses also return providerProducts.
+   */
+  storeProduct: StoreProviderProductResponse | null;
+  providerProducts?: StoreProviderProductResponse[];
 }
