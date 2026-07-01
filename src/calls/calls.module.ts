@@ -9,6 +9,7 @@ import { FirebaseModule } from '../firebase/firebase.module';
 import { UserBlocksModule } from '../user-blocks/user-blocks.module';
 import { User } from '../users/entities/user.entity';
 
+import { CallsController } from './controllers/calls.controller';
 import { Call } from './entities/call.entity';
 import { CallsGateway } from './gateways/calls.gateway';
 import { CallAgoraTokenService } from './services/call-agora-token.service';
@@ -37,6 +38,8 @@ import { CallService } from './services/call.service';
       }),
     }),
   ],
+
+  controllers: [CallsController],
 
   providers: [
     CallsGateway,

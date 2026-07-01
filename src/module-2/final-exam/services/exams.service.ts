@@ -33,6 +33,7 @@ import {
 import { QuizQuestionFormat } from 'src/module-2/quizzes/types/quiz-question-format.type';
 import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
 import { ProgressService } from 'src/module-2/progress/services/progress.service';
+import { UserCourseProgress } from 'src/module-2/progress/entities/user-course-progress.entity';
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 
 interface UserSafeOption {
@@ -90,9 +91,34 @@ export class ExamsService {
     @InjectRepository(ExamAnswerItem)
     private readonly examAnswerItemRepository: Repository<ExamAnswerItem>,
 
+    @InjectRepository(UserCourseProgress)
+    private readonly courseProgressRepository: Repository<UserCourseProgress>,
+
     private readonly dailyChallengesService: DailyChallengesService,
     private readonly progressService: ProgressService,
   ) {}
+
+  async getMyCourseExamGateways(userId: string) {
+    const progressRows = await this.courseProgressRepository.find({
+      where: { userId },
+      order: { lastActivityAt: 'DESC', updatedAt: 'DESC' },
+    });
+
+    const items: unknown[] = [];
+    for (const progress of progressRows) {
+      try {
+        const gateway = await this.getExamGateway(progress.courseId, userId);
+        items.push(gateway);
+      } catch (error) {
+        if (error instanceof NotFoundException) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return { items };
+  }
 
   async getExamGateway(courseId: string, userId: string) {
     const course = await this.getCourseById(courseId);

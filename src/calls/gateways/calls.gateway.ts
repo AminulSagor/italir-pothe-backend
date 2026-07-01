@@ -284,6 +284,41 @@ export class CallsGateway
     }
   }
 
+  @SubscribeMessage('call:timeout')
+  async timeoutCall(
+    @ConnectedSocket()
+    client: Socket,
+
+    @MessageBody()
+    payload: CallIdPayload,
+  ) {
+    const userId = client.data.userId as string | undefined;
+
+    if (!userId) {
+      return this.unauthorizedResponse();
+    }
+
+    if (!this.isValidCallId(payload?.callId)) {
+      return this.invalidCallIdResponse();
+    }
+
+    try {
+      const data = await this.callOrchestratorService.timeout(
+        userId,
+        payload.callId,
+      );
+
+      this.logger.log(`Call timed out call=${payload.callId} user=${userId}`);
+
+      return {
+        ok: true,
+        data,
+      };
+    } catch (error) {
+      return this.errorResponse(error);
+    }
+  }
+
   @SubscribeMessage('call:end')
   async endCall(
     @ConnectedSocket()

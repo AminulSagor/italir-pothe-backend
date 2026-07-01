@@ -30,6 +30,12 @@ export class UserStoreWallet {
     type: 'integer',
     default: 0,
   })
+  aiVoiceSeconds: number;
+
+  @Column({
+    type: 'integer',
+    default: 0,
+  })
   aiTextTokens: number;
 
   @Column({

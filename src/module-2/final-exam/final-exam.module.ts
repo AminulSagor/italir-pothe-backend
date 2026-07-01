@@ -33,6 +33,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
   imports: [
     TypeOrmModule.forFeature([
       Course,
+      UserCourseProgress,
       ExamAcceptedAnswer,
       ExamAnswerItem,
       ExamAnswer,
