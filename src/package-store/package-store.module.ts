@@ -30,6 +30,8 @@ import { UserStoreWallet } from './entities/user-store-wallet.entity';
 
 import { PackageStoreService } from './services/package-store.service';
 import { StoreWalletService } from './services/store-wallet.service';
+import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
+import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
 
 const packageStoreForexRateProvider: Provider = {
   provide: FOREX_RATE_PROVIDER,
@@ -82,6 +84,8 @@ const packageStoreForexRateProvider: Provider = {
       CvEconomyConfig,
 
       CoursePurchaseOrder,
+      CourseProviderProduct,
+      CourseOrderProviderTransaction,
     ]),
   ],
 

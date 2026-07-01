@@ -10,6 +10,7 @@ import {
 
 import { CourseChapter } from 'src/module-2/syllabus/entities/course-chapter.entity';
 import { Lesson } from '../../lessons/entities/lesson.entity';
+import { CourseProviderProduct } from '../../course-commerce/entities/course-provider-product.entity';
 
 export enum CourseStatus {
   DRAFT = 'draft',
@@ -69,4 +70,10 @@ export class Course {
 
   @OneToMany(() => Lesson, (lesson) => lesson.course)
   lessons: Lesson[];
+
+  @OneToMany(
+    () => CourseProviderProduct,
+    (providerProduct) => providerProduct.course,
+  )
+  providerProducts: CourseProviderProduct[];
 }

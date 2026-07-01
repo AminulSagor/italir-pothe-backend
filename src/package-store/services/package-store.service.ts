@@ -72,6 +72,8 @@ import {
   type StoreQuote,
 } from '../types/package-store.type';
 import { StoreWalletService } from './store-wallet.service';
+import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
+import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -176,6 +178,12 @@ export class PackageStoreService {
 
     @InjectRepository(CoursePurchaseOrder)
     private readonly courseOrderRepository: Repository<CoursePurchaseOrder>,
+
+    @InjectRepository(CourseProviderProduct)
+    private readonly courseProviderProductRepository: Repository<CourseProviderProduct>,
+
+    @InjectRepository(CourseOrderProviderTransaction)
+    private readonly courseProviderTransactionRepository: Repository<CourseOrderProviderTransaction>,
 
     @Inject(FOREX_RATE_PROVIDER)
     private readonly forexRateProvider: ForexRateProvider,
@@ -566,39 +574,60 @@ export class PackageStoreService {
   ) {
     const storePackage = await this.getPackageById(packageId);
 
+    const productId = dto.productId.trim();
+    const basePlanId = dto.basePlanId?.trim() || null;
+    const offerId = dto.offerId?.trim() || null;
+
     this.validateProviderProductConfiguration(storePackage, {
       provider: dto.provider,
       productType: dto.productType,
-      basePlanId: dto.basePlanId?.trim() || null,
+      basePlanId,
     });
-
-    const productId = dto.productId.trim();
-
-    const duplicate = await this.providerProductRepository.findOne({
-      where: {
-        provider: dto.provider,
-        productId,
-      },
-    });
-
-    if (duplicate) {
-      throw new ConflictException(
-        'This provider product ID is already mapped to another package version.',
-      );
-    }
 
     const providerProductId = await this.dataSource.transaction(
       async (manager) => {
+        await this.lockProviderProductIdentity(
+          manager,
+          dto.provider,
+          productId,
+        );
+
         const repository = manager.getRepository(StorePackageProviderProduct);
+
+        const duplicatePackageProduct = await repository.findOne({
+          where: {
+            provider: dto.provider,
+            productId,
+          },
+        });
+
+        if (duplicatePackageProduct) {
+          throw new ConflictException(
+            'This provider product ID is already mapped to another package version.',
+          );
+        }
+
+        await this.assertProductNotMappedToCourse(
+          dto.provider,
+          productId,
+          manager,
+        );
+
         const isActive = dto.isActive ?? true;
 
         if (isActive) {
           await repository
             .createQueryBuilder()
             .update(StorePackageProviderProduct)
-            .set({ isActive: false })
-            .where('"packageId" = :packageId', { packageId })
-            .andWhere('provider = :provider', { provider: dto.provider })
+            .set({
+              isActive: false,
+            })
+            .where('"packageId" = :packageId', {
+              packageId,
+            })
+            .andWhere('provider = :provider', {
+              provider: dto.provider,
+            })
             .andWhere('"isActive" = true')
             .execute();
         }
@@ -609,8 +638,8 @@ export class PackageStoreService {
             provider: dto.provider,
             productId,
             productType: dto.productType,
-            basePlanId: dto.basePlanId?.trim() || null,
-            offerId: dto.offerId?.trim() || null,
+            basePlanId,
+            offerId,
             isActive,
           }),
         );
@@ -709,16 +738,55 @@ export class PackageStoreService {
     }
 
     await this.dataSource.transaction(async (manager) => {
+      await this.lockProviderProductIdentity(
+        manager,
+        current.provider,
+        productId,
+      );
+
       const repository = manager.getRepository(StorePackageProviderProduct);
+
+      const duplicatePackageProduct = await repository
+        .createQueryBuilder('providerProduct')
+        .where('providerProduct.provider = :provider', {
+          provider: current.provider,
+        })
+        .andWhere('providerProduct.productId = :productId', {
+          productId,
+        })
+        .andWhere('providerProduct.id != :providerProductId', {
+          providerProductId,
+        })
+        .getOne();
+
+      if (duplicatePackageProduct) {
+        throw new ConflictException(
+          'This provider product ID is already mapped to another package version.',
+        );
+      }
+
+      await this.assertProductNotMappedToCourse(
+        current.provider,
+        productId,
+        manager,
+      );
 
       if (isActive) {
         await repository
           .createQueryBuilder()
           .update(StorePackageProviderProduct)
-          .set({ isActive: false })
-          .where('"packageId" = :packageId', { packageId })
-          .andWhere('provider = :provider', { provider: current.provider })
-          .andWhere('id != :providerProductId', { providerProductId })
+          .set({
+            isActive: false,
+          })
+          .where('"packageId" = :packageId', {
+            packageId,
+          })
+          .andWhere('provider = :provider', {
+            provider: current.provider,
+          })
+          .andWhere('id != :providerProductId', {
+            providerProductId,
+          })
           .andWhere('"isActive" = true')
           .execute();
       }
@@ -1123,6 +1191,11 @@ export class PackageStoreService {
       storePackage,
       dto.paymentProvider,
       dto.productId,
+    );
+
+    await this.assertProductNotMappedToCourse(
+      dto.paymentProvider,
+      providerProduct.productId,
     );
 
     const quote = await this.calculateStoreQuote(
@@ -1891,6 +1964,20 @@ export class PackageStoreService {
         );
       }
 
+      await this.lockProviderTransactionIdentity(
+        manager,
+        transaction.provider,
+        params.providerTransactionId,
+        params.tokenHash,
+      );
+
+      await this.assertTransactionNotUsedByCourse(
+        transaction.provider,
+        params.providerTransactionId,
+        params.tokenHash,
+        manager,
+      );
+
       const duplicateQuery = repository
         .createQueryBuilder('providerTransaction')
         .where('providerTransaction.provider = :provider', {
@@ -1901,12 +1988,16 @@ export class PackageStoreService {
         })
         .andWhere(
           `(
-            providerTransaction.providerTransactionId = :providerTransactionId
-            ${params.tokenHash ? 'OR providerTransaction.tokenHash = :tokenHash' : ''}
-          )`,
+      providerTransaction.providerTransactionId = :providerTransactionId
+      ${params.tokenHash ? 'OR providerTransaction.tokenHash = :tokenHash' : ''}
+    )`,
           {
             providerTransactionId: params.providerTransactionId,
-            ...(params.tokenHash ? { tokenHash: params.tokenHash } : {}),
+            ...(params.tokenHash
+              ? {
+                  tokenHash: params.tokenHash,
+                }
+              : {}),
           },
         );
 
@@ -1952,9 +2043,9 @@ export class PackageStoreService {
       );
 
       if (order.status === StoreOrderStatus.COMPLETED) {
-        const balances = await this.walletService.getBalances(params.userId);
-
-        return this.buildCompletionResponse(order, balances);
+        throw new ConflictException(
+          'This package order has already been completed.',
+        );
       }
 
       if (order.status !== StoreOrderStatus.PENDING) {
@@ -2196,6 +2287,12 @@ export class PackageStoreService {
         'The supplied store product ID does not match the active package mapping.',
       );
     }
+
+    this.validateProviderProductConfiguration(storePackage, {
+      provider: providerProduct.provider,
+      productType: providerProduct.productType,
+      basePlanId: providerProduct.basePlanId,
+    });
 
     return providerProduct;
   }
@@ -3246,5 +3343,100 @@ export class PackageStoreService {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  private async lockProviderProductIdentity(
+    manager: EntityManager,
+    provider: StorePaymentProvider,
+    productId: string,
+  ): Promise<void> {
+    const lockKey = `billing-product:${provider}:${productId}`;
+
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [
+      lockKey,
+    ]);
+  }
+
+  private async lockProviderTransactionIdentity(
+    manager: EntityManager,
+    provider: StorePaymentProvider,
+    providerTransactionId: string,
+    tokenHash: string | null,
+  ): Promise<void> {
+    const lockKeys = [
+      `billing-transaction:${provider}:reference:${providerTransactionId}`,
+    ];
+
+    if (tokenHash) {
+      lockKeys.push(`billing-transaction:${provider}:token:${tokenHash}`);
+    }
+
+    lockKeys.sort();
+
+    for (const lockKey of lockKeys) {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [lockKey],
+      );
+    }
+  }
+
+  private async assertProductNotMappedToCourse(
+    provider: StorePaymentProvider,
+    productId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = manager
+      ? manager.getRepository(CourseProviderProduct)
+      : this.courseProviderProductRepository;
+
+    const conflictingCourseProduct = await repository
+      .createQueryBuilder('courseProviderProduct')
+      .where('courseProviderProduct.provider = :provider', {
+        provider,
+      })
+      .andWhere('courseProviderProduct.productId = :productId', {
+        productId,
+      })
+      .getOne();
+
+    if (conflictingCourseProduct) {
+      throw new ConflictException(
+        'This store product ID is already mapped to a course and cannot be used for an AI, CV, or streak package.',
+      );
+    }
+  }
+
+  private async assertTransactionNotUsedByCourse(
+    provider: StorePaymentProvider,
+    providerTransactionId: string,
+    tokenHash: string | null,
+    manager: EntityManager,
+  ): Promise<void> {
+    const repository = manager.getRepository(CourseOrderProviderTransaction);
+
+    const queryBuilder = repository
+      .createQueryBuilder('courseTransaction')
+      .where('courseTransaction.provider = :provider', {
+        provider,
+      })
+      .andWhere(
+        `(
+        courseTransaction.providerTransactionId = :providerTransactionId
+        ${tokenHash ? 'OR courseTransaction.tokenHash = :tokenHash' : ''}
+      )`,
+        {
+          providerTransactionId,
+          ...(tokenHash ? { tokenHash } : {}),
+        },
+      );
+
+    const duplicate = await queryBuilder.getOne();
+
+    if (duplicate) {
+      throw new ConflictException(
+        'This store purchase token or transaction ID has already been used for a course purchase.',
+      );
+    }
   }
 }
