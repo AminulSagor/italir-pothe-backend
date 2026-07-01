@@ -5,7 +5,23 @@ export enum CommerceCurrency {
 
 export enum CoursePaymentProvider {
   GOOGLE_PLAY = 'google_play',
-  STRIPE = 'stripe',
+  APP_STORE = 'app_store',
+}
+
+export enum CourseProviderProductType {
+  NON_CONSUMABLE = 'non_consumable',
+}
+
+export enum CourseProviderEnvironment {
+  DEVELOPMENT = 'development',
+  SANDBOX = 'sandbox',
+  PRODUCTION = 'production',
+}
+
+export enum CourseProviderVerificationStatus {
+  PENDING = 'pending',
+  VERIFIED = 'verified',
+  FAILED = 'failed',
 }
 
 export enum CoursePurchaseStatus {
@@ -38,4 +54,14 @@ export enum CourseAccessType {
 export enum CommerceSortOrder {
   ASC = 'ASC',
   DESC = 'DESC',
+}
+
+export interface CourseProviderProductResponse {
+  id: string;
+  provider: CoursePaymentProvider;
+  productId: string;
+  productType: CourseProviderProductType;
+  basePlanId: string | null;
+  offerId: string | null;
+  isActive: boolean;
 }

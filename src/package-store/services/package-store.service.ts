@@ -23,8 +23,10 @@ import { CommerceCurrency } from 'src/module-2/course-commerce/types/course-comm
 
 import {
   AdminStoreOrderQueryDto,
-  ConfirmStoreGooglePlayDemoDto,
-  ConfirmStoreStripeDemoDto,
+  CreateStoreProviderProductDto,
+  UpdateStoreProviderProductDto,
+  VerifyStoreAppStorePurchaseDto,
+  VerifyStoreGooglePlayPurchaseDto,
   CreateStoreOrderDto,
   CreateStorePackageDto,
   PublicStorePackageQueryDto,
@@ -40,12 +42,15 @@ import { CvEconomyConfig } from '../entities/cv-economy-config.entity';
 import { StoreOrder } from '../entities/store-order.entity';
 import { StoreOrderPackageSnapshot } from '../entities/store-order-package-snapshot.entity';
 import { StoreOrderPayment } from '../entities/store-order-payment.entity';
+import { StoreOrderProviderSnapshot } from '../entities/store-order-provider-snapshot.entity';
+import { StoreOrderProviderTransaction } from '../entities/store-order-provider-transaction.entity';
 import { StoreOrderPricing } from '../entities/store-order-pricing.entity';
 import { StoreOrderReversal } from '../entities/store-order-reversal.entity';
 import { StoreOrderTimelineEvent } from '../entities/store-order-timeline-event.entity';
 import { StorePackage } from '../entities/store-package.entity';
 import { StorePackageCommerce } from '../entities/store-package-commerce.entity';
 import { StorePackageEntitlement } from '../entities/store-package-entitlement.entity';
+import { StorePackageProviderProduct } from '../entities/store-package-provider-product.entity';
 import {
   PurchaseHistoryCategory,
   PurchaseHistorySortBy,
@@ -55,14 +60,20 @@ import {
   StorePackageStatus,
   StorePackageType,
   StorePaymentProvider,
+  StoreProviderEnvironment,
+  StoreProviderProductType,
+  StoreProviderVerificationStatus,
   StorePublicPackageSortBy,
   StoreSortOrder,
   StoreTimelineEventType,
   StreakProtectionMode,
   type StorePackageResponse,
+  type StoreProviderProductResponse,
   type StoreQuote,
 } from '../types/package-store.type';
 import { StoreWalletService } from './store-wallet.service';
+import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
+import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -75,9 +86,6 @@ interface NormalizedPackageValues {
   marketingBadge: StoreMarketingBadge;
   couponsEnabled: boolean;
   couponCode: string | null;
-  googlePlayProductId: string | null;
-  stripePriceId: string | null;
-
   voiceMinutes: number | null;
   textTokens: number | null;
   freezeCount: number | null;
@@ -102,9 +110,6 @@ interface PackageNormalizationInput {
 
   couponsEnabled?: boolean;
   couponCode?: string | null;
-
-  googlePlayProductId?: string | null;
-  stripePriceId?: string | null;
 }
 
 interface CourseHistoryRecord {
@@ -141,6 +146,9 @@ export class PackageStoreService {
     @InjectRepository(StorePackageEntitlement)
     private readonly packageEntitlementRepository: Repository<StorePackageEntitlement>,
 
+    @InjectRepository(StorePackageProviderProduct)
+    private readonly providerProductRepository: Repository<StorePackageProviderProduct>,
+
     @InjectRepository(StoreOrder)
     private readonly orderRepository: Repository<StoreOrder>,
 
@@ -153,6 +161,12 @@ export class PackageStoreService {
     @InjectRepository(StoreOrderPayment)
     private readonly orderPaymentRepository: Repository<StoreOrderPayment>,
 
+    @InjectRepository(StoreOrderProviderSnapshot)
+    private readonly orderProviderSnapshotRepository: Repository<StoreOrderProviderSnapshot>,
+
+    @InjectRepository(StoreOrderProviderTransaction)
+    private readonly orderProviderTransactionRepository: Repository<StoreOrderProviderTransaction>,
+
     @InjectRepository(StoreOrderReversal)
     private readonly orderReversalRepository: Repository<StoreOrderReversal>,
 
@@ -164,6 +178,12 @@ export class PackageStoreService {
 
     @InjectRepository(CoursePurchaseOrder)
     private readonly courseOrderRepository: Repository<CoursePurchaseOrder>,
+
+    @InjectRepository(CourseProviderProduct)
+    private readonly courseProviderProductRepository: Repository<CourseProviderProduct>,
+
+    @InjectRepository(CourseOrderProviderTransaction)
+    private readonly courseProviderTransactionRepository: Repository<CourseOrderProviderTransaction>,
 
     @Inject(FOREX_RATE_PROVIDER)
     private readonly forexRateProvider: ForexRateProvider,
@@ -183,7 +203,7 @@ export class PackageStoreService {
         relations: ['snapshot', 'pricing', 'payment'],
       }),
       this.packageRepository.find({
-        relations: ['commerce', 'entitlement'],
+        relations: ['commerce', 'entitlement', 'providerProducts'],
       }),
     ]);
 
@@ -325,10 +345,6 @@ export class PackageStoreService {
       marketingBadge: dto.marketingBadge,
       couponsEnabled: dto.couponsEnabled,
       couponCode: dto.couponCode,
-
-      googlePlayProductId: dto.googlePlayProductId,
-
-      stripePriceId: dto.stripePriceId,
     });
 
     const packageId = await this.dataSource.transaction(async (manager) => {
@@ -370,10 +386,6 @@ export class PackageStoreService {
           couponsEnabled: normalized.couponsEnabled,
 
           couponCode: normalized.couponCode,
-
-          googlePlayProductId: normalized.googlePlayProductId,
-
-          stripePriceId: normalized.stripePriceId,
         }),
       );
 
@@ -409,6 +421,7 @@ export class PackageStoreService {
       .createQueryBuilder('storePackage')
       .leftJoinAndSelect('storePackage.commerce', 'commerce')
       .leftJoinAndSelect('storePackage.entitlement', 'entitlement')
+      .leftJoinAndSelect('storePackage.providerProducts', 'providerProducts')
       .orderBy('storePackage.sortOrder', 'ASC')
       .addOrderBy('storePackage.createdAt', 'DESC')
       .skip((page - 1) * limit)
@@ -423,6 +436,12 @@ export class PackageStoreService {
     if (query.status) {
       queryBuilder.andWhere('storePackage.status = :status', {
         status: query.status,
+      });
+    }
+
+    if (query.provider) {
+      queryBuilder.andWhere('providerProducts.provider = :provider', {
+        provider: query.provider,
       });
     }
 
@@ -492,16 +511,6 @@ export class PackageStoreService {
         dto.couponCode !== undefined
           ? dto.couponCode
           : current.commerce.couponCode,
-
-      googlePlayProductId:
-        dto.googlePlayProductId !== undefined
-          ? dto.googlePlayProductId
-          : current.commerce.googlePlayProductId,
-
-      stripePriceId:
-        dto.stripePriceId !== undefined
-          ? dto.stripePriceId
-          : current.commerce.stripePriceId,
     });
 
     await this.dataSource.transaction(async (manager) => {
@@ -535,10 +544,6 @@ export class PackageStoreService {
 
       current.commerce.couponCode = normalized.couponCode;
 
-      current.commerce.googlePlayProductId = normalized.googlePlayProductId;
-
-      current.commerce.stripePriceId = normalized.stripePriceId;
-
       current.entitlement.voiceMinutes = normalized.voiceMinutes;
 
       current.entitlement.textTokens = normalized.textTokens;
@@ -561,6 +566,259 @@ export class PackageStoreService {
     });
 
     return this.findPackageById(packageId);
+  }
+
+  async createProviderProduct(
+    packageId: string,
+    dto: CreateStoreProviderProductDto,
+  ) {
+    const storePackage = await this.getPackageById(packageId);
+
+    const productId = dto.productId.trim();
+    const basePlanId = dto.basePlanId?.trim() || null;
+    const offerId = dto.offerId?.trim() || null;
+
+    this.validateProviderProductConfiguration(storePackage, {
+      provider: dto.provider,
+      productType: dto.productType,
+      basePlanId,
+    });
+
+    const providerProductId = await this.dataSource.transaction(
+      async (manager) => {
+        await this.lockProviderProductIdentity(
+          manager,
+          dto.provider,
+          productId,
+        );
+
+        const repository = manager.getRepository(StorePackageProviderProduct);
+
+        const duplicatePackageProduct = await repository.findOne({
+          where: {
+            provider: dto.provider,
+            productId,
+          },
+        });
+
+        if (duplicatePackageProduct) {
+          throw new ConflictException(
+            'This provider product ID is already mapped to another package version.',
+          );
+        }
+
+        await this.assertProductNotMappedToCourse(
+          dto.provider,
+          productId,
+          manager,
+        );
+
+        const isActive = dto.isActive ?? true;
+
+        if (isActive) {
+          await repository
+            .createQueryBuilder()
+            .update(StorePackageProviderProduct)
+            .set({
+              isActive: false,
+            })
+            .where('"packageId" = :packageId', {
+              packageId,
+            })
+            .andWhere('provider = :provider', {
+              provider: dto.provider,
+            })
+            .andWhere('"isActive" = true')
+            .execute();
+        }
+
+        const saved = await repository.save(
+          repository.create({
+            packageId,
+            provider: dto.provider,
+            productId,
+            productType: dto.productType,
+            basePlanId,
+            offerId,
+            isActive,
+          }),
+        );
+
+        return saved.id;
+      },
+    );
+
+    return this.getProviderProductById(packageId, providerProductId);
+  }
+
+  async findProviderProducts(packageId: string) {
+    await this.getPackageById(packageId);
+
+    const items = await this.providerProductRepository.find({
+      where: { packageId },
+      order: {
+        provider: 'ASC',
+        isActive: 'DESC',
+        createdAt: 'DESC',
+      },
+    });
+
+    return {
+      items: items.map((item) => this.mapProviderProduct(item)),
+    };
+  }
+
+  async updateProviderProduct(
+    packageId: string,
+    providerProductId: string,
+    dto: UpdateStoreProviderProductDto,
+  ) {
+    const storePackage = await this.getPackageById(packageId);
+    const current = await this.getProviderProductEntity(
+      packageId,
+      providerProductId,
+    );
+
+    const identityIsChanging =
+      (dto.productId !== undefined &&
+        dto.productId.trim() !== current.productId) ||
+      (dto.productType !== undefined &&
+        dto.productType !== current.productType) ||
+      (dto.basePlanId !== undefined &&
+        (dto.basePlanId?.trim() || null) !== current.basePlanId) ||
+      (dto.offerId !== undefined &&
+        (dto.offerId?.trim() || null) !== current.offerId);
+
+    if (identityIsChanging) {
+      const referencedOrderCount =
+        await this.orderProviderSnapshotRepository.count({
+          where: {
+            providerProductId: current.id,
+          },
+        });
+
+      if (referencedOrderCount > 0) {
+        throw new ConflictException(
+          'A provider mapping used by an order is immutable. Deactivate it and create a new mapping version.',
+        );
+      }
+    }
+
+    const productId = dto.productId?.trim() ?? current.productId;
+    const productType = dto.productType ?? current.productType;
+    const basePlanId =
+      dto.basePlanId !== undefined
+        ? dto.basePlanId?.trim() || null
+        : current.basePlanId;
+    const offerId =
+      dto.offerId !== undefined ? dto.offerId?.trim() || null : current.offerId;
+    const isActive = dto.isActive ?? current.isActive;
+
+    this.validateProviderProductConfiguration(storePackage, {
+      provider: current.provider,
+      productType,
+      basePlanId,
+    });
+
+    const duplicate = await this.providerProductRepository
+      .createQueryBuilder('providerProduct')
+      .where('providerProduct.provider = :provider', {
+        provider: current.provider,
+      })
+      .andWhere('providerProduct.productId = :productId', { productId })
+      .andWhere('providerProduct.id != :providerProductId', {
+        providerProductId,
+      })
+      .getOne();
+
+    if (duplicate) {
+      throw new ConflictException(
+        'This provider product ID is already mapped to another package version.',
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await this.lockProviderProductIdentity(
+        manager,
+        current.provider,
+        productId,
+      );
+
+      const repository = manager.getRepository(StorePackageProviderProduct);
+
+      const duplicatePackageProduct = await repository
+        .createQueryBuilder('providerProduct')
+        .where('providerProduct.provider = :provider', {
+          provider: current.provider,
+        })
+        .andWhere('providerProduct.productId = :productId', {
+          productId,
+        })
+        .andWhere('providerProduct.id != :providerProductId', {
+          providerProductId,
+        })
+        .getOne();
+
+      if (duplicatePackageProduct) {
+        throw new ConflictException(
+          'This provider product ID is already mapped to another package version.',
+        );
+      }
+
+      await this.assertProductNotMappedToCourse(
+        current.provider,
+        productId,
+        manager,
+      );
+
+      if (isActive) {
+        await repository
+          .createQueryBuilder()
+          .update(StorePackageProviderProduct)
+          .set({
+            isActive: false,
+          })
+          .where('"packageId" = :packageId', {
+            packageId,
+          })
+          .andWhere('provider = :provider', {
+            provider: current.provider,
+          })
+          .andWhere('id != :providerProductId', {
+            providerProductId,
+          })
+          .andWhere('"isActive" = true')
+          .execute();
+      }
+
+      current.productId = productId;
+      current.productType = productType;
+      current.basePlanId = basePlanId;
+      current.offerId = offerId;
+      current.isActive = isActive;
+
+      await repository.save(current);
+    });
+
+    return this.getProviderProductById(packageId, providerProductId);
+  }
+
+  async deactivateProviderProduct(
+    packageId: string,
+    providerProductId: string,
+  ) {
+    const providerProduct = await this.getProviderProductEntity(
+      packageId,
+      providerProductId,
+    );
+
+    providerProduct.isActive = false;
+    await this.providerProductRepository.save(providerProduct);
+
+    return {
+      message: 'Provider product mapping deactivated successfully.',
+      providerProduct: this.mapProviderProduct(providerProduct),
+    };
   }
 
   async archivePackage(packageId: string) {
@@ -663,16 +921,26 @@ export class PackageStoreService {
   // User shop
   // =========================================================
 
-  async getShop(userId: string) {
+  async getShop(userId: string, provider: StorePaymentProvider) {
     const [balances, packages, latestOrder] = await Promise.all([
       this.walletService.getBalances(userId),
 
-      this.packageRepository.find({
-        where: {
+      this.packageRepository
+        .createQueryBuilder('storePackage')
+        .leftJoinAndSelect('storePackage.commerce', 'commerce')
+        .leftJoinAndSelect('storePackage.entitlement', 'entitlement')
+        .innerJoinAndSelect(
+          'storePackage.providerProducts',
+          'providerProducts',
+          'providerProducts.provider = :provider AND providerProducts.isActive = true',
+          { provider },
+        )
+        .where('storePackage.status = :status', {
           status: StorePackageStatus.PUBLISHED,
-        },
-        relations: ['commerce', 'entitlement'],
-      }),
+        })
+        .orderBy('storePackage.sortOrder', 'ASC')
+        .addOrderBy('storePackage.createdAt', 'DESC')
+        .getMany(),
 
       this.orderRepository.findOne({
         where: {
@@ -727,15 +995,14 @@ export class PackageStoreService {
     });
 
     return {
+      provider,
       balances,
       sections,
 
       orderHistory: {
         hasOrders: Boolean(latestOrder),
         latestOrderId: latestOrder?.id ?? null,
-
         latestOrderNumber: latestOrder?.orderNumber ?? null,
-
         latestOrderStatus: latestOrder?.status ?? null,
       },
     };
@@ -745,52 +1012,16 @@ export class PackageStoreService {
     return this.walletService.getBalances(userId);
   }
 
-  async findPublicPackages(query: PublicStorePackageQueryDto): Promise<{
-    items: StorePackageResponse[];
-    meta: {
-      page: number;
-      limit: number;
-      total: number;
-      totalPages: number;
-    };
-  }>;
-
-  async findPublicPackages(
-    userId: string,
-    query: PublicStorePackageQueryDto,
-  ): Promise<{
-    balances: Awaited<ReturnType<StoreWalletService['getBalances']>>;
-    items: StorePackageResponse[];
-    meta: {
-      page: number;
-      limit: number;
-      total: number;
-      totalPages: number;
-    };
-  }>;
-
-  async findPublicPackages(
-    first: string | PublicStorePackageQueryDto,
-    second?: PublicStorePackageQueryDto,
-  ) {
-    const userId = typeof first === 'string' ? first : null;
-
-    const query = typeof first === 'string' ? (second ?? {}) : first;
-
+  async findPublicPackages(userId: string, query: PublicStorePackageQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-
     const sortBy = query.sortBy ?? StorePublicPackageSortBy.SORT_ORDER;
-
     const sortOrder = query.sortOrder ?? StoreSortOrder.ASC;
 
     const sortMap: Record<StorePublicPackageSortBy, string> = {
       [StorePublicPackageSortBy.SORT_ORDER]: 'storePackage.sortOrder',
-
       [StorePublicPackageSortBy.PRICE]: 'commerce.priceEur',
-
       [StorePublicPackageSortBy.NAME]: 'storePackage.name',
-
       [StorePublicPackageSortBy.CREATED_AT]: 'storePackage.createdAt',
     };
 
@@ -798,6 +1029,12 @@ export class PackageStoreService {
       .createQueryBuilder('storePackage')
       .leftJoinAndSelect('storePackage.commerce', 'commerce')
       .leftJoinAndSelect('storePackage.entitlement', 'entitlement')
+      .innerJoinAndSelect(
+        'storePackage.providerProducts',
+        'providerProducts',
+        'providerProducts.provider = :provider AND providerProducts.isActive = true',
+        { provider: query.provider },
+      )
       .where('storePackage.status = :status', {
         status: StorePackageStatus.PUBLISHED,
       })
@@ -832,9 +1069,10 @@ export class PackageStoreService {
 
     const [items, total] = await queryBuilder.getManyAndCount();
 
-    const result = {
-      items: items.map((item) => this.mapPackage(item, false)),
-
+    return {
+      provider: query.provider,
+      balances: await this.walletService.getBalances(userId),
+      items: items.map((item) => this.mapPackage(item, false, query.provider)),
       meta: {
         page,
         limit,
@@ -842,22 +1080,25 @@ export class PackageStoreService {
         totalPages: Math.ceil(total / limit),
       },
     };
-
-    if (!userId) {
-      return result;
-    }
-
-    return {
-      balances: await this.walletService.getBalances(userId),
-
-      ...result,
-    };
   }
 
-  async findPublicPackageById(packageId: string) {
+  async findPublicPackageById(
+    packageId: string,
+    provider: StorePaymentProvider,
+  ) {
     const storePackage = await this.getPublishedPackage(packageId);
+    const providerProduct = this.getActiveProviderProduct(
+      storePackage,
+      provider,
+    );
 
-    return this.mapPackage(storePackage, false);
+    if (!providerProduct) {
+      throw new NotFoundException(
+        'This package is not available for the selected store provider.',
+      );
+    }
+
+    return this.mapPackage(storePackage, false, provider);
   }
 
   // =========================================================
@@ -870,7 +1111,10 @@ export class PackageStoreService {
     query: StorePackageQuoteQueryDto,
   ) {
     const storePackage = await this.getPublishedPackage(packageId);
-
+    const providerProduct = this.requireActiveProviderProduct(
+      storePackage,
+      query.provider,
+    );
     const currency = query.currency ?? CommerceCurrency.EUR;
 
     const quote = await this.calculateStoreQuote(
@@ -880,53 +1124,26 @@ export class PackageStoreService {
     );
 
     return {
-      package: this.mapPackage(storePackage, false),
-
+      package: this.mapPackage(storePackage, false, query.provider),
+      storeProduct: this.mapProviderProduct(providerProduct),
       pricing: {
         baseCurrency: CommerceCurrency.EUR,
-
         selectedCurrency: quote.selectedCurrency,
-
         basePriceEur: quote.basePriceEur,
-
         originalAmount: quote.originalAmount,
-
         couponCode: quote.couponCode,
-
         discountPercentage: quote.discountPercentage,
-
         discountAmount: quote.discountAmount,
-
         payableAmount: quote.totalAmount,
-
         discountAmountEur: quote.discountAmountEur,
-
         payableAmountEur: quote.totalAmountEur,
-
         forexRate: quote.forexRate,
       },
-
       balances: await this.walletService.getBalances(userId),
-
-      supportedProviders: [
-        {
-          provider: StorePaymentProvider.GOOGLE_PLAY,
-
-          enabled: true,
-          demo: this.isDemoMode(),
-          demoProductId: this.isDemoMode()
-            ? (storePackage.commerce.googlePlayProductId ??
-              this.createDemoGoogleProductId(storePackage.id))
-            : null,
-        },
-        {
-          provider: StorePaymentProvider.STRIPE,
-
-          enabled: true,
-          demo: this.isDemoMode(),
-          demoProductId: null,
-        },
-      ],
+      payment: {
+        provider: query.provider,
+        developmentVerification: this.isDevelopmentPaymentMode(),
+      },
     };
   }
 
@@ -940,7 +1157,15 @@ export class PackageStoreService {
         userId,
         idempotencyKey: dto.idempotencyKey,
       },
-      relations: ['snapshot', 'pricing', 'payment', 'reversal', 'timeline'],
+      relations: [
+        'snapshot',
+        'providerSnapshot',
+        'providerTransaction',
+        'pricing',
+        'payment',
+        'reversal',
+        'timeline',
+      ],
     });
 
     const selectedCurrency = dto.currency ?? CommerceCurrency.EUR;
@@ -949,6 +1174,7 @@ export class PackageStoreService {
       if (
         existingOrder.packageId !== dto.packageId ||
         existingOrder.payment?.provider !== dto.paymentProvider ||
+        existingOrder.providerSnapshot?.productId !== dto.productId ||
         existingOrder.pricing?.paymentCurrency !== selectedCurrency
       ) {
         throw new ConflictException(
@@ -956,10 +1182,21 @@ export class PackageStoreService {
         );
       }
 
+      this.assertOrderRelations(existingOrder);
       return this.mapOrder(existingOrder);
     }
 
     const storePackage = await this.getPublishedPackage(dto.packageId);
+    const providerProduct = this.requireActiveProviderProduct(
+      storePackage,
+      dto.paymentProvider,
+      dto.productId,
+    );
+
+    await this.assertProductNotMappedToCourse(
+      dto.paymentProvider,
+      providerProduct.productId,
+    );
 
     const quote = await this.calculateStoreQuote(
       storePackage,
@@ -969,26 +1206,25 @@ export class PackageStoreService {
 
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepository = manager.getRepository(StoreOrder);
-
       const snapshotRepository = manager.getRepository(
         StoreOrderPackageSnapshot,
       );
-
+      const providerSnapshotRepository = manager.getRepository(
+        StoreOrderProviderSnapshot,
+      );
+      const providerTransactionRepository = manager.getRepository(
+        StoreOrderProviderTransaction,
+      );
       const pricingRepository = manager.getRepository(StoreOrderPricing);
-
       const paymentRepository = manager.getRepository(StoreOrderPayment);
-
       const reversalRepository = manager.getRepository(StoreOrderReversal);
 
       const order = await orderRepository.save(
         orderRepository.create({
           orderNumber: this.generateOrderNumber(),
-
           userId,
           packageId: storePackage.id,
-
           idempotencyKey: dto.idempotencyKey,
-
           status: StoreOrderStatus.PENDING,
         }),
       );
@@ -996,54 +1232,57 @@ export class PackageStoreService {
       await snapshotRepository.save(
         snapshotRepository.create({
           orderId: order.id,
-
           packageType: storePackage.packageType,
-
           packageName: storePackage.name,
-
           packageDescription: storePackage.description,
-
           billingModel: storePackage.commerce.billingModel,
-
           marketingBadge: storePackage.commerce.marketingBadge,
-
           voiceMinutes: storePackage.entitlement.voiceMinutes,
-
           textTokens: storePackage.entitlement.textTokens,
-
           freezeCount: storePackage.entitlement.freezeCount,
-
           cvCreditCount: storePackage.entitlement.cvCreditCount,
-
           streakProtectionMode: storePackage.entitlement.streakProtectionMode,
-
           protectionDurationDays:
             storePackage.entitlement.protectionDurationDays,
+        }),
+      );
 
-          googlePlayProductId: storePackage.commerce.googlePlayProductId,
+      await providerSnapshotRepository.save(
+        providerSnapshotRepository.create({
+          orderId: order.id,
+          providerProductId: providerProduct.id,
+          provider: providerProduct.provider,
+          productId: providerProduct.productId,
+          productType: providerProduct.productType,
+          basePlanId: providerProduct.basePlanId,
+          offerId: providerProduct.offerId,
+        }),
+      );
 
-          stripePriceId: storePackage.commerce.stripePriceId,
+      await providerTransactionRepository.save(
+        providerTransactionRepository.create({
+          orderId: order.id,
+          provider: providerProduct.provider,
+          productId: providerProduct.productId,
+          tokenHash: null,
+          providerTransactionId: null,
+          environment: StoreProviderEnvironment.DEVELOPMENT,
+          verificationStatus: StoreProviderVerificationStatus.PENDING,
+          verifiedAt: null,
+          verificationPayload: null,
         }),
       );
 
       await pricingRepository.save(
         pricingRepository.create({
           orderId: order.id,
-
           basePriceEur: quote.basePriceEur,
-
           couponCode: quote.couponCode,
-
           discountPercentage: quote.discountPercentage,
-
           discountAmountEur: quote.discountAmountEur,
-
           totalAmountEur: quote.totalAmountEur,
-
           paymentCurrency: quote.selectedCurrency,
-
           forexRate: quote.forexRate,
-
           paymentAmount: quote.totalAmount,
         }),
       );
@@ -1051,14 +1290,10 @@ export class PackageStoreService {
       await paymentRepository.save(
         paymentRepository.create({
           orderId: order.id,
-
           provider: dto.paymentProvider,
-
           providerReference: null,
-
           failureCode: null,
           failureMessage: null,
-
           paidAt: null,
           refundedAt: null,
           refundReason: null,
@@ -1068,14 +1303,11 @@ export class PackageStoreService {
       await reversalRepository.save(
         reversalRepository.create({
           orderId: order.id,
-
           reversedVoiceMinutes: 0,
           reversedTextTokens: 0,
           reversedFreezeCount: 0,
           reversedCvCredits: 0,
-
           unlimitedProtectionPreviousUntil: null,
-
           unlimitedProtectionGrantedUntil: null,
         }),
       );
@@ -1088,11 +1320,10 @@ export class PackageStoreService {
         'The package checkout order was created.',
         {
           packageId: storePackage.id,
-
           paymentProvider: dto.paymentProvider,
-
+          productId: providerProduct.productId,
+          providerProductId: providerProduct.id,
           currency: quote.selectedCurrency,
-
           paymentAmount: quote.totalAmount,
         },
       );
@@ -1114,107 +1345,56 @@ export class PackageStoreService {
 
     return {
       order: this.mapOrder(order),
-
-      paymentMethods: [
-        {
-          method: 'google_play',
-
-          provider: StorePaymentProvider.GOOGLE_PLAY,
-
-          label: 'Google Play',
-
-          enabled: true,
-          demo: this.isDemoMode(),
-
-          unavailableReason: null,
-          demoProductId: this.isDemoMode()
-            ? (order.snapshot.googlePlayProductId ??
-              this.createDemoGoogleProductId(order.packageId))
-            : null,
-        },
-        {
-          method: 'card',
-
-          provider: StorePaymentProvider.STRIPE,
-
-          label: 'Card',
-
-          enabled: true,
-          demo: this.isDemoMode(),
-
-          unavailableReason: null,
-          demoProductId: null,
-        },
-        {
-          method: 'paypal',
-          provider: null,
-
-          label: 'PayPal',
-
-          enabled: false,
-          demo: false,
-
-          unavailableReason: 'PayPal is not configured.',
-        },
-        {
-          method: 'apple_pay',
-          provider: null,
-
-          label: 'Apple Pay',
-
-          enabled: false,
-          demo: false,
-
-          unavailableReason: 'Apple Pay is not configured.',
-        },
-        {
-          method: 'bkash',
-          provider: null,
-
-          label: 'Bkash',
-
-          enabled: false,
-          demo: false,
-
-          unavailableReason: 'Bkash is not configured.',
-        },
-      ],
+      paymentMethod: {
+        provider: order.providerSnapshot.provider,
+        label:
+          order.providerSnapshot.provider === StorePaymentProvider.GOOGLE_PLAY
+            ? 'Google Play'
+            : 'App Store',
+        productId: order.providerSnapshot.productId,
+        productType: order.providerSnapshot.productType,
+        basePlanId: order.providerSnapshot.basePlanId,
+        offerId: order.providerSnapshot.offerId,
+        developmentVerification: this.isDevelopmentPaymentMode(),
+      },
     };
   }
 
-  // =========================================================
-  // Demo payment confirmation
-  // =========================================================
-
-  async confirmGooglePlayDemo(params: {
+  async verifyGooglePlayPurchase(params: {
     userId: string;
     orderId: string;
-    dto: ConfirmStoreGooglePlayDemoDto;
+    dto: VerifyStoreGooglePlayPurchaseDto;
   }) {
-    this.assertDemoMode();
+    this.assertDevelopmentPaymentMode();
 
     const order = await this.getOwnedOrderGraph(params.userId, params.orderId);
 
-    if (order.payment.provider !== StorePaymentProvider.GOOGLE_PLAY) {
+    if (order.providerSnapshot.provider !== StorePaymentProvider.GOOGLE_PLAY) {
       throw new BadRequestException(
         'This order was not created for Google Play.',
       );
     }
 
-    const configuredProductId = order.snapshot.googlePlayProductId;
-
-    const expectedProductId =
-      configuredProductId || this.createDemoGoogleProductId(order.packageId);
-
-    if (params.dto.productId !== expectedProductId) {
+    if (params.dto.productId !== order.providerSnapshot.productId) {
       throw new BadRequestException(
         'Google Play product ID does not match the ordered package.',
       );
     }
 
-    const providerReference = `google-play:${createHash('sha256')
+    const tokenHash = createHash('sha256')
       .update(params.dto.purchaseToken)
-      .digest('hex')}`;
+      .digest('hex');
+    const providerReference =
+      params.dto.transactionId?.trim() || `google-play:${tokenHash}`;
+
+    await this.markDevelopmentTransactionVerified({
+      order,
+      tokenHash,
+      providerTransactionId: providerReference,
+      payload: {
+        source: 'development_google_play_verifier',
+      },
+    });
 
     return this.completeOrder({
       userId: params.userId,
@@ -1224,39 +1404,49 @@ export class PackageStoreService {
     });
   }
 
-  async confirmStripeDemo(params: {
+  async verifyAppStorePurchase(params: {
     userId: string;
     orderId: string;
-    dto: ConfirmStoreStripeDemoDto;
+    dto: VerifyStoreAppStorePurchaseDto;
   }) {
-    this.assertDemoMode();
+    this.assertDevelopmentPaymentMode();
 
     const order = await this.getOwnedOrderGraph(params.userId, params.orderId);
 
-    if (order.payment.provider !== StorePaymentProvider.STRIPE) {
-      throw new BadRequestException('This order was not created for Stripe.');
+    if (order.providerSnapshot.provider !== StorePaymentProvider.APP_STORE) {
+      throw new BadRequestException(
+        'This order was not created for the App Store.',
+      );
     }
 
-    if (params.dto.demoResult === 'failed') {
-      return this.failOrder({
-        userId: params.userId,
-        orderId: params.orderId,
-
-        providerReference: params.dto.paymentIntentId,
-
-        failureCode: 'demo_payment_failed',
-
-        failureMessage: 'The demo Stripe payment was configured to fail.',
-      });
+    if (params.dto.productId !== order.providerSnapshot.productId) {
+      throw new BadRequestException(
+        'App Store product ID does not match the ordered package.',
+      );
     }
+
+    const providerReference = params.dto.transactionId.trim();
+    const tokenHash = params.dto.signedTransactionInfo
+      ? createHash('sha256')
+          .update(params.dto.signedTransactionInfo)
+          .digest('hex')
+      : null;
+
+    await this.markDevelopmentTransactionVerified({
+      order,
+      tokenHash,
+      providerTransactionId: providerReference,
+      payload: {
+        source: 'development_storekit_verifier',
+        signedTransactionProvided: Boolean(params.dto.signedTransactionInfo),
+      },
+    });
 
     return this.completeOrder({
       userId: params.userId,
       orderId: params.orderId,
-
-      provider: StorePaymentProvider.STRIPE,
-
-      providerReference: params.dto.paymentIntentId,
+      provider: StorePaymentProvider.APP_STORE,
+      providerReference,
     });
   }
 
@@ -1592,6 +1782,11 @@ export class PackageStoreService {
     const queryBuilder = this.orderRepository
       .createQueryBuilder('storeOrder')
       .leftJoinAndSelect('storeOrder.snapshot', 'snapshot')
+      .leftJoinAndSelect('storeOrder.providerSnapshot', 'providerSnapshot')
+      .leftJoinAndSelect(
+        'storeOrder.providerTransaction',
+        'providerTransaction',
+      )
       .leftJoinAndSelect('storeOrder.pricing', 'pricing')
       .leftJoinAndSelect('storeOrder.payment', 'payment')
       .leftJoinAndSelect('storeOrder.reversal', 'reversal')
@@ -1740,6 +1935,100 @@ export class PackageStoreService {
   // Internal order processing
   // =========================================================
 
+  private async markDevelopmentTransactionVerified(params: {
+    order: StoreOrder;
+    tokenHash: string | null;
+    providerTransactionId: string;
+    payload: Record<string, unknown>;
+  }) {
+    await this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(StoreOrderProviderTransaction);
+      const transaction = await repository.findOne({
+        where: {
+          orderId: params.order.id,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!transaction) {
+        throw new ConflictException(
+          'The store order is missing its provider transaction record.',
+        );
+      }
+
+      if (transaction.provider !== params.order.providerSnapshot.provider) {
+        throw new ConflictException(
+          'The provider transaction does not match the order provider.',
+        );
+      }
+
+      await this.lockProviderTransactionIdentity(
+        manager,
+        transaction.provider,
+        params.providerTransactionId,
+        params.tokenHash,
+      );
+
+      await this.assertTransactionNotUsedByCourse(
+        transaction.provider,
+        params.providerTransactionId,
+        params.tokenHash,
+        manager,
+      );
+
+      const duplicateQuery = repository
+        .createQueryBuilder('providerTransaction')
+        .where('providerTransaction.provider = :provider', {
+          provider: transaction.provider,
+        })
+        .andWhere('providerTransaction.id != :transactionId', {
+          transactionId: transaction.id,
+        })
+        .andWhere(
+          `(
+      providerTransaction.providerTransactionId = :providerTransactionId
+      ${params.tokenHash ? 'OR providerTransaction.tokenHash = :tokenHash' : ''}
+    )`,
+          {
+            providerTransactionId: params.providerTransactionId,
+            ...(params.tokenHash
+              ? {
+                  tokenHash: params.tokenHash,
+                }
+              : {}),
+          },
+        );
+
+      const duplicate = await duplicateQuery.getOne();
+
+      if (duplicate) {
+        throw new ConflictException(
+          'This store transaction has already been assigned to another order.',
+        );
+      }
+
+      if (
+        transaction.verificationStatus ===
+          StoreProviderVerificationStatus.VERIFIED &&
+        transaction.providerTransactionId === params.providerTransactionId &&
+        transaction.tokenHash === params.tokenHash
+      ) {
+        return;
+      }
+
+      transaction.tokenHash = params.tokenHash;
+      transaction.providerTransactionId = params.providerTransactionId;
+      transaction.environment = StoreProviderEnvironment.DEVELOPMENT;
+      transaction.verificationStatus = StoreProviderVerificationStatus.VERIFIED;
+      transaction.verifiedAt = new Date();
+      transaction.verificationPayload = params.payload;
+
+      await repository.save(transaction);
+    });
+  }
+
   private async completeOrder(params: {
     userId: string;
     orderId: string;
@@ -1754,9 +2043,9 @@ export class PackageStoreService {
       );
 
       if (order.status === StoreOrderStatus.COMPLETED) {
-        const balances = await this.walletService.getBalances(params.userId);
-
-        return this.buildCompletionResponse(order, balances);
+        throw new ConflictException(
+          'This package order has already been completed.',
+        );
       }
 
       if (order.status !== StoreOrderStatus.PENDING) {
@@ -1768,6 +2057,30 @@ export class PackageStoreService {
       if (order.payment.provider !== params.provider) {
         throw new BadRequestException(
           'Payment provider does not match the order.',
+        );
+      }
+
+      if (order.providerSnapshot.provider !== params.provider) {
+        throw new BadRequestException(
+          'The provider product snapshot does not match the order.',
+        );
+      }
+
+      if (
+        order.providerTransaction.verificationStatus !==
+        StoreProviderVerificationStatus.VERIFIED
+      ) {
+        throw new BadRequestException(
+          'The store transaction has not been verified.',
+        );
+      }
+
+      if (
+        order.providerTransaction.providerTransactionId !==
+        params.providerReference
+      ) {
+        throw new BadRequestException(
+          'The verified transaction reference does not match the payment.',
         );
       }
 
@@ -1811,6 +2124,8 @@ export class PackageStoreService {
 
         {
           provider: params.provider,
+
+          productId: order.providerSnapshot.productId,
 
           providerReference: params.providerReference,
         },
@@ -1896,6 +2211,120 @@ export class PackageStoreService {
     });
 
     return this.findOwnedOrderById(params.userId, params.orderId);
+  }
+
+  // =========================================================
+  // Provider product mapping
+  // =========================================================
+
+  private validateProviderProductConfiguration(
+    storePackage: StorePackage,
+    input: {
+      provider: StorePaymentProvider;
+      productType: StoreProviderProductType;
+      basePlanId: string | null;
+    },
+  ) {
+    if (storePackage.commerce.billingModel === StoreBillingModel.MONTHLY) {
+      if (input.productType !== StoreProviderProductType.SUBSCRIPTION) {
+        throw new BadRequestException(
+          'Monthly packages must map to a subscription product.',
+        );
+      }
+
+      if (
+        input.provider === StorePaymentProvider.GOOGLE_PLAY &&
+        !input.basePlanId
+      ) {
+        throw new BadRequestException(
+          'Google Play subscriptions require a basePlanId.',
+        );
+      }
+
+      return;
+    }
+
+    if (input.productType !== StoreProviderProductType.CONSUMABLE) {
+      throw new BadRequestException(
+        'One-time AI, CV-credit and finite streak-freeze packages must use consumable store products.',
+      );
+    }
+
+    if (input.basePlanId) {
+      throw new BadRequestException(
+        'A one-time consumable product cannot have a basePlanId.',
+      );
+    }
+  }
+
+  private getActiveProviderProduct(
+    storePackage: StorePackage,
+    provider: StorePaymentProvider,
+  ) {
+    return (storePackage.providerProducts ?? []).find(
+      (item) => item.provider === provider && item.isActive,
+    );
+  }
+
+  private requireActiveProviderProduct(
+    storePackage: StorePackage,
+    provider: StorePaymentProvider,
+    productId?: string,
+  ) {
+    const providerProduct = this.getActiveProviderProduct(
+      storePackage,
+      provider,
+    );
+
+    if (!providerProduct) {
+      throw new BadRequestException(
+        'This package has no active product mapping for the selected provider.',
+      );
+    }
+
+    if (productId && providerProduct.productId !== productId.trim()) {
+      throw new BadRequestException(
+        'The supplied store product ID does not match the active package mapping.',
+      );
+    }
+
+    this.validateProviderProductConfiguration(storePackage, {
+      provider: providerProduct.provider,
+      productType: providerProduct.productType,
+      basePlanId: providerProduct.basePlanId,
+    });
+
+    return providerProduct;
+  }
+
+  private async getProviderProductEntity(
+    packageId: string,
+    providerProductId: string,
+  ) {
+    const providerProduct = await this.providerProductRepository.findOne({
+      where: {
+        id: providerProductId,
+        packageId,
+      },
+    });
+
+    if (!providerProduct) {
+      throw new NotFoundException('Provider product mapping not found.');
+    }
+
+    return providerProduct;
+  }
+
+  private async getProviderProductById(
+    packageId: string,
+    providerProductId: string,
+  ) {
+    const providerProduct = await this.getProviderProductEntity(
+      packageId,
+      providerProductId,
+    );
+
+    return this.mapProviderProduct(providerProduct);
   }
 
   // =========================================================
@@ -2009,10 +2438,6 @@ export class PackageStoreService {
       marketingBadge,
       couponsEnabled,
       couponCode,
-
-      googlePlayProductId: input.googlePlayProductId?.trim() || null,
-
-      stripePriceId: input.stripePriceId?.trim() || null,
 
       voiceMinutes,
       textTokens,
@@ -2185,51 +2610,42 @@ export class PackageStoreService {
   private mapPackage(
     storePackage: StorePackage,
     includePrivateFields: boolean,
+    selectedProvider?: StorePaymentProvider,
   ): StorePackageResponse & {
     status?: StorePackageStatus;
     publishedAt?: Date | null;
     archivedAt?: Date | null;
     createdAt?: Date;
     updatedAt?: Date;
-    googlePlayProductId?: string | null;
-    stripePriceId?: string | null;
   } {
-    const result = {
+    const selectedProduct = selectedProvider
+      ? this.getActiveProviderProduct(storePackage, selectedProvider)
+      : null;
+
+    const result: StorePackageResponse = {
       id: storePackage.id,
-
       type: storePackage.packageType,
-
       name: storePackage.name,
-
       description: storePackage.description,
-
       priceEur: this.formatMoney(
         this.parseMoney(storePackage.commerce.priceEur, 'Package price'),
       ),
-
       billingModel: storePackage.commerce.billingModel,
-
       marketingBadge: storePackage.commerce.marketingBadge,
-
       aiVoiceMinutes: storePackage.entitlement.voiceMinutes ?? 0,
-
       aiTextTokens: storePackage.entitlement.textTokens ?? 0,
-
       cvCredits: storePackage.entitlement.cvCreditCount ?? 0,
-
       streakFreezeCount: storePackage.entitlement.freezeCount ?? 0,
-
       streakProtectionMode: storePackage.entitlement.streakProtectionMode,
-
       protectionDurationDays: storePackage.entitlement.protectionDurationDays,
-
       couponEnabled: storePackage.commerce.couponsEnabled,
-
       couponCode: includePrivateFields
         ? storePackage.commerce.couponCode
         : null,
-
       sortOrder: storePackage.sortOrder,
+      storeProduct: selectedProduct
+        ? this.mapProviderProduct(selectedProduct)
+        : null,
     };
 
     if (!includePrivateFields) {
@@ -2238,20 +2654,38 @@ export class PackageStoreService {
 
     return {
       ...result,
+      providerProducts: [...(storePackage.providerProducts ?? [])]
+        .sort((left, right) => {
+          if (left.provider !== right.provider) {
+            return left.provider.localeCompare(right.provider);
+          }
 
+          if (left.isActive !== right.isActive) {
+            return left.isActive ? -1 : 1;
+          }
+
+          return right.createdAt.getTime() - left.createdAt.getTime();
+        })
+        .map((item) => this.mapProviderProduct(item)),
       status: storePackage.status,
-
       publishedAt: storePackage.publishedAt,
-
       archivedAt: storePackage.archivedAt,
-
       createdAt: storePackage.createdAt,
-
       updatedAt: storePackage.updatedAt,
+    };
+  }
 
-      googlePlayProductId: storePackage.commerce.googlePlayProductId,
-
-      stripePriceId: storePackage.commerce.stripePriceId,
+  private mapProviderProduct(
+    providerProduct: StorePackageProviderProduct,
+  ): StoreProviderProductResponse {
+    return {
+      id: providerProduct.id,
+      provider: providerProduct.provider,
+      productId: providerProduct.productId,
+      productType: providerProduct.productType,
+      basePlanId: providerProduct.basePlanId,
+      offerId: providerProduct.offerId,
+      isActive: providerProduct.isActive,
     };
   }
 
@@ -2319,6 +2753,22 @@ export class PackageStoreService {
 
           protectionDurationDays: order.snapshot.protectionDurationDays,
         },
+      },
+
+      storeProduct: {
+        providerProductId: order.providerSnapshot.providerProductId,
+        provider: order.providerSnapshot.provider,
+        productId: order.providerSnapshot.productId,
+        productType: order.providerSnapshot.productType,
+        basePlanId: order.providerSnapshot.basePlanId,
+        offerId: order.providerSnapshot.offerId,
+      },
+
+      verification: {
+        environment: order.providerTransaction.environment,
+        status: order.providerTransaction.verificationStatus,
+        providerTransactionId: order.providerTransaction.providerTransactionId,
+        verifiedAt: order.providerTransaction.verifiedAt,
       },
 
       pricing: {
@@ -2418,6 +2868,14 @@ export class PackageStoreService {
           billingModel: order.snapshot.billingModel,
         },
 
+        storeProduct: {
+          provider: order.providerSnapshot.provider,
+          productId: order.providerSnapshot.productId,
+          productType: order.providerSnapshot.productType,
+          basePlanId: order.providerSnapshot.basePlanId,
+          offerId: order.providerSnapshot.offerId,
+        },
+
         payment: {
           provider: order.payment.provider,
 
@@ -2461,7 +2919,7 @@ export class PackageStoreService {
       where: {
         id: packageId,
       },
-      relations: ['commerce', 'entitlement'],
+      relations: ['commerce', 'entitlement', 'providerProducts'],
     });
 
     if (!storePackage || !storePackage.commerce || !storePackage.entitlement) {
@@ -2478,7 +2936,7 @@ export class PackageStoreService {
 
         status: StorePackageStatus.PUBLISHED,
       },
-      relations: ['commerce', 'entitlement'],
+      relations: ['commerce', 'entitlement', 'providerProducts'],
     });
 
     if (!storePackage || !storePackage.commerce || !storePackage.entitlement) {
@@ -2496,6 +2954,8 @@ export class PackageStoreService {
       },
       relations: [
         'snapshot',
+        'providerSnapshot',
+        'providerTransaction',
         'pricing',
         'payment',
         'reversal',
@@ -2521,6 +2981,8 @@ export class PackageStoreService {
       },
       relations: [
         'snapshot',
+        'providerSnapshot',
+        'providerTransaction',
         'pricing',
         'payment',
         'reversal',
@@ -2556,6 +3018,8 @@ export class PackageStoreService {
 
       relations: [
         'snapshot',
+        'providerSnapshot',
+        'providerTransaction',
         'pricing',
         'payment',
         'reversal',
@@ -2581,6 +3045,8 @@ export class PackageStoreService {
   private assertOrderRelations(order: StoreOrder): void {
     if (
       !order.snapshot ||
+      !order.providerSnapshot ||
+      !order.providerTransaction ||
       !order.pricing ||
       !order.payment ||
       !order.reversal
@@ -2795,26 +3261,24 @@ export class PackageStoreService {
     return `IT-SHK-${timePart}-${randomPart}`;
   }
 
-  private createDemoGoogleProductId(packageId: string) {
-    const prefix =
-      this.configService.get<string>('PACKAGE_GOOGLE_PLAY_PRODUCT_PREFIX') ??
-      'demo_store';
-
-    return `${prefix}_${packageId.replace(/-/g, '')}`;
+  private isDevelopmentPaymentMode() {
+    return this.configService.get<string>('PAYMENTS_DEMO_MODE') === 'true';
   }
 
-  private isDemoMode() {
-    return (
-      this.configService.get<string>('PACKAGE_PAYMENTS_DEMO_MODE') === 'true'
-    );
-  }
-
-  private assertDemoMode() {
-    if (!this.isDemoMode()) {
+  private assertDevelopmentPaymentMode() {
+    if (
+      !this.isDevelopmentPaymentMode() ||
+      this.configService.get<string>('NODE_ENV') === 'production'
+    ) {
       throw new ServiceUnavailableException(
-        'Demo payment confirmation is disabled.',
+        'Development store verification is disabled.',
       );
     }
+  }
+
+  // Kept only for the existing admin demo-refund endpoint.
+  private assertDemoMode() {
+    this.assertDevelopmentPaymentMode();
   }
 
   private parseMoney(value: string, fieldName: string): number {
@@ -2879,5 +3343,100 @@ export class PackageStoreService {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  private async lockProviderProductIdentity(
+    manager: EntityManager,
+    provider: StorePaymentProvider,
+    productId: string,
+  ): Promise<void> {
+    const lockKey = `billing-product:${provider}:${productId}`;
+
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [
+      lockKey,
+    ]);
+  }
+
+  private async lockProviderTransactionIdentity(
+    manager: EntityManager,
+    provider: StorePaymentProvider,
+    providerTransactionId: string,
+    tokenHash: string | null,
+  ): Promise<void> {
+    const lockKeys = [
+      `billing-transaction:${provider}:reference:${providerTransactionId}`,
+    ];
+
+    if (tokenHash) {
+      lockKeys.push(`billing-transaction:${provider}:token:${tokenHash}`);
+    }
+
+    lockKeys.sort();
+
+    for (const lockKey of lockKeys) {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [lockKey],
+      );
+    }
+  }
+
+  private async assertProductNotMappedToCourse(
+    provider: StorePaymentProvider,
+    productId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = manager
+      ? manager.getRepository(CourseProviderProduct)
+      : this.courseProviderProductRepository;
+
+    const conflictingCourseProduct = await repository
+      .createQueryBuilder('courseProviderProduct')
+      .where('courseProviderProduct.provider = :provider', {
+        provider,
+      })
+      .andWhere('courseProviderProduct.productId = :productId', {
+        productId,
+      })
+      .getOne();
+
+    if (conflictingCourseProduct) {
+      throw new ConflictException(
+        'This store product ID is already mapped to a course and cannot be used for an AI, CV, or streak package.',
+      );
+    }
+  }
+
+  private async assertTransactionNotUsedByCourse(
+    provider: StorePaymentProvider,
+    providerTransactionId: string,
+    tokenHash: string | null,
+    manager: EntityManager,
+  ): Promise<void> {
+    const repository = manager.getRepository(CourseOrderProviderTransaction);
+
+    const queryBuilder = repository
+      .createQueryBuilder('courseTransaction')
+      .where('courseTransaction.provider = :provider', {
+        provider,
+      })
+      .andWhere(
+        `(
+        courseTransaction.providerTransactionId = :providerTransactionId
+        ${tokenHash ? 'OR courseTransaction.tokenHash = :tokenHash' : ''}
+      )`,
+        {
+          providerTransactionId,
+          ...(tokenHash ? { tokenHash } : {}),
+        },
+      );
+
+    const duplicate = await queryBuilder.getOne();
+
+    if (duplicate) {
+      throw new ConflictException(
+        'This store purchase token or transaction ID has already been used for a course purchase.',
+      );
+    }
   }
 }

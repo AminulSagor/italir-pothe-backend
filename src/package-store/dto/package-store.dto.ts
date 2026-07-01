@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+import { CommerceCurrency } from 'src/module-2/course-commerce/types/course-commerce.type';
 import {
   PurchaseHistoryCategory,
   PurchaseHistorySortBy,
@@ -26,17 +27,19 @@ import {
   StorePackageStatus,
   StorePackageType,
   StorePaymentProvider,
+  StoreProviderProductType,
   StorePublicPackageSortBy,
   StoreSortOrder,
   StreakProtectionMode,
 } from '../types/package-store.type';
-import { CommerceCurrency } from 'src/module-2/course-commerce/types/course-commerce.type';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 
 const upper = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
+
+const productIdPattern = /^[A-Za-z0-9._-]+$/;
 
 export class CreateStorePackageDto {
   @IsEnum(StorePackageType)
@@ -53,6 +56,10 @@ export class CreateStorePackageDto {
   @MaxLength(1000)
   description?: string;
 
+  /**
+   * Internal reference price only. Google Play / App Store return the
+   * customer-facing localized price to the mobile application.
+   */
   @Transform(trim)
   @IsString()
   @Matches(/^\d{1,8}(?:\.\d{1,2})?$/)
@@ -110,18 +117,6 @@ export class CreateStorePackageDto {
   @IsString()
   @MaxLength(80)
   couponCode?: string;
-
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(255)
-  googlePlayProductId?: string;
-
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(255)
-  stripePriceId?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -203,22 +198,80 @@ export class UpdateStorePackageDto {
   couponCode?: string | null;
 
   @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(255)
-  googlePlayProductId?: string | null;
-
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(255)
-  stripePriceId?: string | null;
-
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   sortOrder?: number;
+}
+
+export class CreateStoreProviderProductDto {
+  @IsEnum(StorePaymentProvider)
+  provider: StorePaymentProvider;
+
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  @Matches(productIdPattern, {
+    message:
+      'productId may contain only letters, numbers, dots, underscores and hyphens.',
+  })
+  productId: string;
+
+  @IsEnum(StoreProviderProductType)
+  productType: StoreProviderProductType;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  basePlanId?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  offerId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class UpdateStoreProviderProductDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  @Matches(productIdPattern, {
+    message:
+      'productId may contain only letters, numbers, dots, underscores and hyphens.',
+  })
+  productId?: string;
+
+  @IsOptional()
+  @IsEnum(StoreProviderProductType)
+  productType?: StoreProviderProductType;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  basePlanId?: string | null;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  offerId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class StoreProviderQueryDto {
+  @IsEnum(StorePaymentProvider)
+  provider: StorePaymentProvider;
 }
 
 export class StorePackageQueryDto {
@@ -229,6 +282,10 @@ export class StorePackageQueryDto {
   @IsOptional()
   @IsEnum(StorePackageStatus)
   status?: StorePackageStatus;
+
+  @IsOptional()
+  @IsEnum(StorePaymentProvider)
+  provider?: StorePaymentProvider;
 
   @IsOptional()
   @Transform(trim)
@@ -339,6 +396,9 @@ export class RefundStoreOrderDto {
 }
 
 export class PublicStorePackageQueryDto {
+  @IsEnum(StorePaymentProvider)
+  provider: StorePaymentProvider;
+
   @IsOptional()
   @IsEnum(StorePackageType)
   packageType?: StorePackageType;
@@ -376,6 +436,9 @@ export class PublicStorePackageQueryDto {
 }
 
 export class StorePackageQuoteQueryDto {
+  @IsEnum(StorePaymentProvider)
+  provider: StorePaymentProvider;
+
   @IsOptional()
   @Transform(upper)
   @IsEnum(CommerceCurrency)
@@ -392,13 +455,22 @@ export class CreateStoreOrderDto {
   @IsUUID()
   packageId: string;
 
+  @IsEnum(StorePaymentProvider)
+  paymentProvider: StorePaymentProvider;
+
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  @Matches(productIdPattern, {
+    message:
+      'productId may contain only letters, numbers, dots, underscores and hyphens.',
+  })
+  productId: string;
+
   @IsOptional()
   @Transform(upper)
   @IsEnum(CommerceCurrency)
   currency?: CommerceCurrency;
-
-  @IsEnum(StorePaymentProvider)
-  paymentProvider: StorePaymentProvider;
 
   @IsUUID()
   idempotencyKey: string;
@@ -410,7 +482,7 @@ export class CreateStoreOrderDto {
   couponCode?: string;
 }
 
-export class ConfirmStoreGooglePlayDemoDto {
+export class VerifyStoreGooglePlayPurchaseDto {
   @Transform(trim)
   @IsString()
   @MaxLength(255)
@@ -418,18 +490,32 @@ export class ConfirmStoreGooglePlayDemoDto {
 
   @Transform(trim)
   @IsString()
-  @MaxLength(1000)
+  @MaxLength(4000)
   purchaseToken: string;
-}
 
-export class ConfirmStoreStripeDemoDto {
+  @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(255)
-  paymentIntentId: string;
+  transactionId?: string;
+}
 
-  @IsIn(['succeeded', 'failed'])
-  demoResult: 'succeeded' | 'failed';
+export class VerifyStoreAppStorePurchaseDto {
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  productId: string;
+
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  transactionId: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(12000)
+  signedTransactionInfo?: string;
 }
 
 export class StoreOrderHistoryQueryDto {

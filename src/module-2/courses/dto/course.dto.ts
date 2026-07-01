@@ -15,6 +15,7 @@ import {
   Min,
 } from 'class-validator';
 
+import { CoursePaymentProvider } from '../../course-commerce/types/course-commerce.type';
 import { CourseStatus } from '../entities/course.entity';
 
 export class CreateCourseDto {
@@ -155,4 +156,10 @@ export class AdminCourseQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+export class PublicCourseQueryDto {
+  @IsOptional()
+  @IsEnum(CoursePaymentProvider)
+  provider?: CoursePaymentProvider;
 }
