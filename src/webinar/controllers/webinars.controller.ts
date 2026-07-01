@@ -23,13 +23,25 @@ export class WebinarsController {
   constructor(private readonly webinarsService: WebinarsService) {}
 
   @Get('upcoming')
-  async getUpcomingWebinarsList(@Query() query: PaginationQueryDto) {
-    return this.webinarsService.getUpcomingWebinarsList(query);
+  async getUpcomingWebinarsList(
+    @Query() query: PaginationQueryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.webinarsService.getUpcomingWebinarsList(
+      this.getCurrentUserId(request),
+      query,
+    );
   }
 
   @Get('live')
-  async getLiveWebinarsList(@Query() query: PaginationQueryDto) {
-    return this.webinarsService.getLiveWebinarsList(query);
+  async getLiveWebinarsList(
+    @Query() query: PaginationQueryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.webinarsService.getLiveWebinarsList(
+      this.getCurrentUserId(request),
+      query,
+    );
   }
 
   @Get(':id/chat-messages')
