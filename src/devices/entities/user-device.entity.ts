@@ -26,10 +26,12 @@ export class UserDevice {
   userId: string;
 
   @ManyToOne(() => User, {
-    onDelete: 'CASCADE',
+    createForeignKeyConstraints: false,
   })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @Column({
     type: 'varchar',

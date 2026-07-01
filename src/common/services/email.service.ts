@@ -1,38 +1,38 @@
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import {
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as nodemailer from 'nodemailer';
+import { Transporter } from 'nodemailer';
 
 import { OtpPurpose } from '../../users/entities/otp.entity';
 
 @Injectable()
 export class EmailService {
-  private readonly sesClient: SESClient;
+  private readonly transporter: Transporter | null;
   private readonly logger = new Logger(EmailService.name);
 
   constructor(private readonly configService: ConfigService) {
-    const accessKeyId =
-      this.configService.get<string>('AWS_ACCESS_KEY_ID') ??
-      this.configService.get<string>('AWS_ACCESS_KEY_ID');
+    const host = this.configService.get<string>('ZOHO_SMTP_HOST');
+    const port = Number(this.configService.get<string>('ZOHO_SMTP_PORT') ?? '587');
+    const secure = this.configService.get<string>('ZOHO_SMTP_SECURE') === 'true';
+    const user = this.configService.get<string>('ZOHO_SMTP_USER');
+    const pass = this.configService.get<string>('ZOHO_SMTP_PASS');
 
-    const secretAccessKey =
-      this.configService.get<string>('AWS_SECRET_ACCESS_KEY') ??
-      this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
-
-    this.sesClient = new SESClient({
-      region:
-        this.configService.get<string>('AWS_SES_REGION') ?? 'eu-central-1',
-      credentials:
-        accessKeyId && secretAccessKey
-          ? {
-              accessKeyId,
-              secretAccessKey,
-            }
-          : undefined,
-    });
+    this.transporter =
+      host && user && pass
+        ? nodemailer.createTransport({
+            host,
+            port: Number.isFinite(port) ? port : 587,
+            secure,
+            auth: {
+              user,
+              pass,
+            },
+          })
+        : null;
   }
 
   async sendOtpEmail(
@@ -45,10 +45,18 @@ export class EmailService {
       return;
     }
 
-    const fromEmail = this.configService.get<string>('SES_FROM_EMAIL');
+    const fromEmail =
+      this.configService.get<string>('ZOHO_FROM_EMAIL') ??
+      this.configService.get<string>('SES_FROM_EMAIL');
 
     if (!fromEmail) {
-      throw new ServiceUnavailableException('SES_FROM_EMAIL is not configured');
+      throw new ServiceUnavailableException(
+        'Zoho Mail sender address is not configured',
+      );
+    }
+
+    if (!this.transporter) {
+      throw new ServiceUnavailableException('Zoho Mail SMTP is not configured');
     }
 
     const isPasswordReset = purpose === OtpPurpose.PASSWORD_RESET;
@@ -61,31 +69,14 @@ export class EmailService {
       ? `Your Italir Pothe password reset code is: ${otp}. This code will expire in 10 minutes.`
       : `Your Italir Pothe verification code is: ${otp}. This code will expire in 10 minutes.`;
 
-    const command = new SendEmailCommand({
-      Destination: {
-        ToAddresses: [email],
-      },
-      Message: {
-        Body: {
-          Text: {
-            Data: textBody,
-            Charset: 'UTF-8',
-          },
-          Html: {
-            Data: `<p>${textBody}</p><p>If you did not request this code, you can ignore this email.</p>`,
-            Charset: 'UTF-8',
-          },
-        },
-        Subject: {
-          Data: subject,
-          Charset: 'UTF-8',
-        },
-      },
-      Source: fromEmail,
-    });
-
     try {
-      await this.sesClient.send(command);
+      await this.transporter.sendMail({
+        from: fromEmail,
+        to: email,
+        subject,
+        text: textBody,
+        html: `<p>${textBody}</p><p>If you did not request this code, you can ignore this email.</p>`,
+      });
     } catch (error) {
       this.logger.error('Failed to send OTP email', error);
       throw new ServiceUnavailableException(

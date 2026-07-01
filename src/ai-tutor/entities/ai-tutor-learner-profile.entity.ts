@@ -20,9 +20,13 @@ export class AiTutorLearnerProfile {
   @Column({ type: 'uuid', unique: true })
   userId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @Column({ type: 'varchar', length: 8, default: 'A1' })
   speakingLevel: string;

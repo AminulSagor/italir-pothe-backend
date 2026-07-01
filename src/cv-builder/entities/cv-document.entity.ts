@@ -49,9 +49,13 @@ export class CvDocument {
   @Column({ type: 'varchar', length: 30, default: CvDocumentStatus.DRAFT })
   status: CvDocumentStatus;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @ManyToOne(() => CvTemplate, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'templateId' })

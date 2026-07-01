@@ -72,9 +72,13 @@ export class QuizSession {
   @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @ManyToOne(() => Quiz, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'quizId' })

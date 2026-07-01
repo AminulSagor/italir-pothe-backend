@@ -14,12 +14,12 @@ import {
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 import {
-  ConfirmGooglePlayDemoDto,
-  ConfirmStripeDemoDto,
   CourseQuoteQueryDto,
   CreateCoursePurchaseOrderDto,
   MyEnrollmentQueryDto,
   PurchaseHistoryQueryDto,
+  VerifyCourseAppStorePurchaseDto,
+  VerifyCourseGooglePlayPurchaseDto,
 } from '../dto/course-commerce.dto';
 import { CourseCommerceService } from '../services/course-commerce.service';
 
@@ -42,7 +42,7 @@ export class CourseCommerceController {
     );
   }
 
-  @Post('course-purchases/orders')
+  @Post(['course-commerce/orders', 'course-purchases/orders'])
   async createOrder(
     @Body() dto: CreateCoursePurchaseOrderDto,
     @Req() request: AuthenticatedRequest,
@@ -50,35 +50,35 @@ export class CourseCommerceController {
     return this.courseCommerceService.createOrder(this.getUserId(request), dto);
   }
 
-  @Post('course-purchases/orders/:orderId/google-play/demo-confirm')
-  async confirmGooglePlayDemo(
+  @Post('course-commerce/orders/:orderId/google-play/verify')
+  async verifyGooglePlayPurchase(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
-    @Body() dto: ConfirmGooglePlayDemoDto,
+    @Body() dto: VerifyCourseGooglePlayPurchaseDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.courseCommerceService.confirmGooglePlayDemo({
+    return this.courseCommerceService.verifyGooglePlayPurchase({
       userId: this.getUserId(request),
       orderId,
       dto,
     });
   }
 
-  @Post('course-purchases/orders/:orderId/stripe/demo-confirm')
-  async confirmStripeDemo(
+  @Post('course-commerce/orders/:orderId/app-store/verify')
+  async verifyAppStorePurchase(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
-    @Body() dto: ConfirmStripeDemoDto,
+    @Body() dto: VerifyCourseAppStorePurchaseDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.courseCommerceService.confirmStripeDemo({
+    return this.courseCommerceService.verifyAppStorePurchase({
       userId: this.getUserId(request),
       orderId,
       dto,
     });
   }
 
-  @Get('course-purchases/orders/:orderId')
+  @Get(['course-commerce/orders/:orderId', 'course-purchases/orders/:orderId'])
   async findOrderById(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,

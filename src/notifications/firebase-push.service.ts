@@ -138,6 +138,45 @@ export class FirebasePushService implements OnModuleInit {
     });
   }
 
+  async sendChatMessagePush(params: {
+    tokens: string[];
+    title: string;
+    body: string;
+    data: Record<string, string>;
+  }): Promise<BatchResponse | null> {
+    const validTokens = [...new Set(params.tokens.filter((token) => token?.trim()))];
+
+    if (validTokens.length === 0) {
+      return null;
+    }
+
+    this.ensureFirebaseInitialized();
+
+    return getMessaging().sendEachForMulticast({
+      tokens: validTokens,
+      notification: {
+        title: params.title,
+        body: params.body,
+      },
+      data: params.data,
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'chat_messages',
+          sound: 'default',
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+    });
+  }
+
   async sendCallStatusPush(params: {
     tokens: string[];
     type: 'call_accepted' | 'call_rejected' | 'call_ended' | 'missed_call';

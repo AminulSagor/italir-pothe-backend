@@ -33,7 +33,8 @@ export class ModerationService {
   ) {}
 
   async listReports(page = 1, limit = 10, status?: string, reason?: string) {
-    const qb = this.reportRepo.createQueryBuilder('r')
+    const qb = this.reportRepo
+      .createQueryBuilder('r')
       .leftJoinAndSelect('r.subject', 'subject')
       .leftJoinAndSelect('r.reporter', 'reporter')
       .orderBy('r.submittedAt', 'DESC');
@@ -43,7 +44,10 @@ export class ModerationService {
 
     const total = await qb.getCount();
 
-    const items = await qb.skip((page - 1) * limit).take(limit).getMany();
+    const items = await qb
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getMany();
 
     const rows = items.map((r) => ({
       id: r.id,
@@ -61,20 +65,44 @@ export class ModerationService {
 
   async getReportByCaseNumber(caseNumber: string) {
     const report = await this.reportRepo.findOne({
-      where: { caseNumber },
-      relations: ['reporter', 'subject'],
+      where: {
+        caseNumber,
+      },
+      relations: {
+        reporter: true,
+        subject: true,
+      },
     });
 
-    if (!report) throw new NotFoundException('Report not found');
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
 
+    /*
+     * Do not use report.subject.id here.
+     *
+     * report.subject can be null after the user account is deleted,
+     * but report.subjectId remains stored for audits and analytics.
+     */
+    const [subjectCourses, visualEvidence] = await Promise.all([
+      this.enrollmentRepo.find({
+        where: {
+          userId: report.subjectId,
+        },
+        relations: {
+          course: true,
+        },
+      }),
+
+      this.evidenceRepo.find({
+        where: {
+          reportId: report.id,
+        },
+      }),
+    ]);
+
+    const reporter = report.reporter;
     const subject = report.subject;
-
-    const subjectCourses = await this.enrollmentRepo.find({
-      where: { userId: subject.id },
-      relations: ['course'],
-    });
-
-    const visualEvidence = await this.evidenceRepo.find({ where: { reportId: report.id } });
 
     return {
       report_overview: {
@@ -82,35 +110,70 @@ export class ModerationService {
         status: report.status,
         submittedAt: report.submittedAt,
         reportReason: report.reportReason,
+        contentType: report.contentType,
+        contentEntityId: report.contentEntityId,
       },
+
       reporter_details: {
-        name: report.reporter?.fullName ?? null,
-        phone: report.reporter?.phone ?? null,
-        email: report.reporter?.email ?? null,
+        id: report.reporterId,
+
+        name: reporter?.fullName ?? 'Deleted User',
+
+        phone: reporter?.phone ?? null,
+
+        email: reporter?.email ?? null,
+
         reporterNote: report.reporterNote ?? null,
+
+        isDeleted: reporter === null,
       },
+
       subject_stats: {
-        name: subject?.fullName ?? null,
+        id: report.subjectId,
+
+        name: subject?.fullName ?? 'Deleted User',
+
         joinedAt: subject?.joinedAt ?? subject?.createdAt ?? null,
+
         current_streak_days: subject?.currentStreakDays ?? 0,
+
         total_xp: subject?.totalXp ?? 0,
+
         purchase_value_eur: subject?.purchaseValueEur ?? '0.00',
+
+        isDeleted: subject === null,
       },
-      subject_courses: subjectCourses.map((e) => ({
-        title: e.course?.title ?? null,
-        status: e.status,
+
+      subject_courses: subjectCourses.map((enrollment) => ({
+        courseId: enrollment.courseId,
+
+        title: enrollment.course?.title ?? null,
+
+        status: enrollment.status,
       })),
-      visual_evidence: visualEvidence.map((v) => ({ url: v.mediaUrl, description: v.descriptionText })),
+
+      visual_evidence: visualEvidence.map((evidence) => ({
+        id: evidence.id,
+        url: evidence.mediaUrl,
+
+        description: evidence.descriptionText ?? null,
+      })),
     };
   }
 
-  async performAction(reportId: string, payload: { action_type: string; action_reason: string }, moderatorId: string) {
+  async performAction(
+    reportId: string,
+    payload: { action_type: string; action_reason: string },
+    moderatorId: string,
+  ) {
     if (!payload.action_reason || !payload.action_reason.trim()) {
       throw new Error('action_reason is required');
     }
 
     return this.dataSource.transaction(async (manager) => {
-      const report = await manager.findOne(ModerationReport, { where: { id: reportId } });
+      const report = await manager.findOne(ModerationReport, {
+        where: { id: reportId },
+      });
       if (!report) throw new NotFoundException('Report not found');
 
       const action = manager.create(ModerationAction, {
@@ -126,10 +189,18 @@ export class ModerationService {
       if (payload.action_type === 'permanent_ban') newStatus = 'banned';
       if (payload.action_type === 'dismiss') newStatus = 'resolved';
 
-      await manager.update(ModerationReport, { id: report.id }, { status: newStatus, assignedModeratorId: moderatorId });
+      await manager.update(
+        ModerationReport,
+        { id: report.id },
+        { status: newStatus, assignedModeratorId: moderatorId },
+      );
 
       if (payload.action_type === 'permanent_ban') {
-        await manager.update(User, { id: report.subjectId }, { isBanned: true });
+        await manager.update(
+          User,
+          { id: report.subjectId },
+          { isBanned: true },
+        );
       }
 
       return { ok: true };

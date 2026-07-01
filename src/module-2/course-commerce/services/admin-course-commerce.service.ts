@@ -5,11 +5,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { Course } from '../../courses/entities/course.entity';
-import { AdminEnrollmentQueryDto } from '../dto/admin-course-commerce.dto';
+import {
+  AdminEnrollmentQueryDto,
+  CreateCourseProviderProductDto,
+  UpdateCourseProviderProductDto,
+} from '../dto/admin-course-commerce.dto';
 import { CourseEnrollment } from '../entities/course-enrollment.entity';
+import { CourseOrderProviderSnapshot } from '../entities/course-order-provider-snapshot.entity';
+import { CourseProviderProduct } from '../entities/course-provider-product.entity';
 import { CoursePaymentAttempt } from '../entities/course-payment-attempt.entity';
 import { CoursePurchaseOrder } from '../entities/course-purchase-order.entity';
 import { DemoPaymentGatewayService } from '../providers/demo-payment-gateway.service';
@@ -18,8 +24,10 @@ import {
   CommerceSortOrder,
   CourseEnrollmentStatus,
   CoursePaymentAttemptStatus,
+  CourseProviderProductType,
   CoursePurchaseStatus,
 } from '../types/course-commerce.type';
+import { StorePackageProviderProduct } from 'src/package-store/entities/store-package-provider-product.entity';
 
 @Injectable()
 export class AdminCourseCommerceService {
@@ -33,10 +41,253 @@ export class AdminCourseCommerceService {
     @InjectRepository(CourseEnrollment)
     private readonly enrollmentRepository: Repository<CourseEnrollment>,
 
+    @InjectRepository(CourseProviderProduct)
+    private readonly providerProductRepository: Repository<CourseProviderProduct>,
+
+    @InjectRepository(CourseOrderProviderSnapshot)
+    private readonly providerSnapshotRepository: Repository<CourseOrderProviderSnapshot>,
+
+    @InjectRepository(StorePackageProviderProduct)
+    private readonly storePackageProviderProductRepository: Repository<StorePackageProviderProduct>,
+
     private readonly dataSource: DataSource,
 
     private readonly demoPaymentGateway: DemoPaymentGatewayService,
   ) {}
+
+  async createProviderProduct(
+    courseId: string,
+    dto: CreateCourseProviderProductDto,
+  ) {
+    await this.getCourse(courseId);
+
+    const productId = dto.productId.trim();
+    const productType =
+      dto.productType ?? CourseProviderProductType.NON_CONSUMABLE;
+    const basePlanId = dto.basePlanId?.trim() || null;
+    const offerId = dto.offerId?.trim() || null;
+
+    this.validateProviderProductConfiguration({
+      productType,
+      basePlanId,
+    });
+
+    const mappingId = await this.dataSource.transaction(async (manager) => {
+      await this.lockProviderProductIdentity(manager, dto.provider, productId);
+
+      const repository = manager.getRepository(CourseProviderProduct);
+
+      const duplicateCourseProduct = await repository.findOne({
+        where: {
+          provider: dto.provider,
+          productId,
+        },
+      });
+
+      if (duplicateCourseProduct) {
+        throw new ConflictException(
+          'This provider product ID is already mapped to another course version.',
+        );
+      }
+
+      await this.assertProductNotMappedToPackage(
+        dto.provider,
+        productId,
+        manager,
+      );
+
+      const isActive = dto.isActive ?? true;
+
+      if (isActive) {
+        await repository
+          .createQueryBuilder()
+          .update(CourseProviderProduct)
+          .set({
+            isActive: false,
+          })
+          .where('"courseId" = :courseId', {
+            courseId,
+          })
+          .andWhere('provider = :provider', {
+            provider: dto.provider,
+          })
+          .andWhere('"isActive" = true')
+          .execute();
+      }
+
+      const saved = await repository.save(
+        repository.create({
+          courseId,
+          provider: dto.provider,
+          productId,
+          productType,
+          basePlanId,
+          offerId,
+          isActive,
+        }),
+      );
+
+      return saved.id;
+    });
+
+    return this.getProviderProductById(courseId, mappingId);
+  }
+
+  async findProviderProducts(courseId: string) {
+    await this.getCourse(courseId);
+
+    const items = await this.providerProductRepository.find({
+      where: { courseId },
+      order: {
+        provider: 'ASC',
+        isActive: 'DESC',
+        createdAt: 'DESC',
+      },
+    });
+
+    return {
+      items: items.map((item) => this.mapProviderProduct(item)),
+    };
+  }
+
+  async updateProviderProduct(
+    courseId: string,
+    mappingId: string,
+    dto: UpdateCourseProviderProductDto,
+  ) {
+    await this.getCourse(courseId);
+    const current = await this.getProviderProductEntity(courseId, mappingId);
+
+    const productId = dto.productId?.trim() ?? current.productId;
+    const productType = dto.productType ?? current.productType;
+    const basePlanId =
+      dto.basePlanId !== undefined
+        ? dto.basePlanId?.trim() || null
+        : current.basePlanId;
+    const offerId =
+      dto.offerId !== undefined ? dto.offerId?.trim() || null : current.offerId;
+    const isActive = dto.isActive ?? current.isActive;
+
+    this.validateProviderProductConfiguration({
+      productType,
+      basePlanId,
+    });
+
+    const identityIsChanging =
+      productId !== current.productId ||
+      productType !== current.productType ||
+      basePlanId !== current.basePlanId ||
+      offerId !== current.offerId;
+
+    if (identityIsChanging) {
+      const referencedOrderCount = await this.providerSnapshotRepository.count({
+        where: {
+          providerProductId: current.id,
+        },
+      });
+
+      if (referencedOrderCount > 0) {
+        throw new ConflictException(
+          'A provider mapping used by an order is immutable. Deactivate it and create a new mapping version.',
+        );
+      }
+    }
+
+    const duplicate = await this.providerProductRepository
+      .createQueryBuilder('providerProduct')
+      .where('providerProduct.provider = :provider', {
+        provider: current.provider,
+      })
+      .andWhere('providerProduct.productId = :productId', { productId })
+      .andWhere('providerProduct.id != :mappingId', { mappingId })
+      .getOne();
+
+    if (duplicate) {
+      throw new ConflictException(
+        'This provider product ID is already mapped to another course version.',
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await this.lockProviderProductIdentity(
+        manager,
+        current.provider,
+        productId,
+      );
+
+      const repository = manager.getRepository(CourseProviderProduct);
+
+      const duplicateCourseProduct = await repository
+        .createQueryBuilder('providerProduct')
+        .where('providerProduct.provider = :provider', {
+          provider: current.provider,
+        })
+        .andWhere('providerProduct.productId = :productId', {
+          productId,
+        })
+        .andWhere('providerProduct.id != :mappingId', {
+          mappingId,
+        })
+        .getOne();
+
+      if (duplicateCourseProduct) {
+        throw new ConflictException(
+          'This provider product ID is already mapped to another course version.',
+        );
+      }
+
+      await this.assertProductNotMappedToPackage(
+        current.provider,
+        productId,
+        manager,
+      );
+
+      if (isActive) {
+        await repository
+          .createQueryBuilder()
+          .update(CourseProviderProduct)
+          .set({
+            isActive: false,
+          })
+          .where('"courseId" = :courseId', {
+            courseId,
+          })
+          .andWhere('provider = :provider', {
+            provider: current.provider,
+          })
+          .andWhere('id != :mappingId', {
+            mappingId,
+          })
+          .andWhere('"isActive" = true')
+          .execute();
+      }
+
+      current.productId = productId;
+      current.productType = productType;
+      current.basePlanId = basePlanId;
+      current.offerId = offerId;
+      current.isActive = isActive;
+
+      await repository.save(current);
+    });
+
+    return this.getProviderProductById(courseId, mappingId);
+  }
+
+  async deactivateProviderProduct(courseId: string, mappingId: string) {
+    const providerProduct = await this.getProviderProductEntity(
+      courseId,
+      mappingId,
+    );
+
+    providerProduct.isActive = false;
+    await this.providerProductRepository.save(providerProduct);
+
+    return {
+      message: 'Course provider product mapping deactivated successfully.',
+      providerProduct: this.mapProviderProduct(providerProduct),
+    };
+  }
 
   async getEnrollmentSummary(courseId: string) {
     await this.getCourse(courseId);
@@ -324,6 +575,61 @@ export class AdminCourseCommerceService {
     });
   }
 
+  private validateProviderProductConfiguration(input: {
+    productType: CourseProviderProductType;
+    basePlanId: string | null;
+  }) {
+    if (input.productType !== CourseProviderProductType.NON_CONSUMABLE) {
+      throw new BadRequestException(
+        'Lifetime courses must use non-consumable store products.',
+      );
+    }
+
+    if (input.basePlanId) {
+      throw new BadRequestException(
+        'A non-consumable course product cannot have a basePlanId.',
+      );
+    }
+  }
+
+  private async getProviderProductEntity(courseId: string, mappingId: string) {
+    const providerProduct = await this.providerProductRepository.findOne({
+      where: {
+        id: mappingId,
+        courseId,
+      },
+    });
+
+    if (!providerProduct) {
+      throw new NotFoundException('Course provider product mapping not found.');
+    }
+
+    return providerProduct;
+  }
+
+  private async getProviderProductById(courseId: string, mappingId: string) {
+    const providerProduct = await this.getProviderProductEntity(
+      courseId,
+      mappingId,
+    );
+
+    return this.mapProviderProduct(providerProduct);
+  }
+
+  private mapProviderProduct(providerProduct: CourseProviderProduct) {
+    return {
+      id: providerProduct.id,
+      provider: providerProduct.provider,
+      productId: providerProduct.productId,
+      productType: providerProduct.productType,
+      basePlanId: providerProduct.basePlanId,
+      offerId: providerProduct.offerId,
+      isActive: providerProduct.isActive,
+      createdAt: providerProduct.createdAt,
+      updatedAt: providerProduct.updatedAt,
+    };
+  }
+
   private async getCourse(courseId: string): Promise<Course> {
     const course = await this.courseRepository.findOne({
       where: {
@@ -378,5 +684,43 @@ export class AdminCourseCommerceService {
     }
 
     return null;
+  }
+
+  private async lockProviderProductIdentity(
+    manager: EntityManager,
+    provider: string,
+    productId: string,
+  ): Promise<void> {
+    const lockKey = `billing-product:${provider}:${productId}`;
+
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [
+      lockKey,
+    ]);
+  }
+
+  private async assertProductNotMappedToPackage(
+    provider: string,
+    productId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repository = manager
+      ? manager.getRepository(StorePackageProviderProduct)
+      : this.storePackageProviderProductRepository;
+
+    const packageProduct = await repository
+      .createQueryBuilder('packageProviderProduct')
+      .where('packageProviderProduct.provider = :provider', {
+        provider,
+      })
+      .andWhere('packageProviderProduct.productId = :productId', {
+        productId,
+      })
+      .getOne();
+
+    if (packageProduct) {
+      throw new ConflictException(
+        'This store product ID is already mapped to an AI, CV, or streak package and cannot be used for a course.',
+      );
+    }
   }
 }

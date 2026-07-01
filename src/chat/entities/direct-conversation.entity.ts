@@ -30,16 +30,16 @@ export class DirectConversation {
   @Column({ type: 'uuid' })
   userOneId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
   @JoinColumn({ name: 'userOneId' })
-  userOne: User;
+  userOne: User | null;
 
   @Column({ type: 'uuid' })
   userTwoId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
   @JoinColumn({ name: 'userTwoId' })
-  userTwo: User;
+  userTwo: User | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

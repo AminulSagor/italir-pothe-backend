@@ -15,12 +15,23 @@ import { CertificatesService } from '../services/certificates.service';
 export class CertificatesController {
   constructor(private readonly certificatesService: CertificatesService) {}
 
-  @Get('verify/:certificateNumber')
-  async verifyCertificate(
-    @Param('certificateNumber') certificateNumber: string,
+  @Get('public/verify/:identifier')
+  async verifyPublic(
+    @Param('identifier')
+    identifier: string,
   ) {
-    return this.certificatesService.verifyCertificate(certificateNumber);
+    return this.certificatesService.verifyCertificate(identifier);
   }
+
+  @Get('verify/:identifier')
+  async verifyCertificate(
+    @Param('identifier')
+    identifier: string,
+  ) {
+    return this.certificatesService.verifyCertificate(identifier);
+  }
+
+  // The QR code should encode: https://your-api-domain.com/certificates/public/verify/{certificateUuid}
 
   @Get('my')
   @UseGuards(JwtAuthGuard)

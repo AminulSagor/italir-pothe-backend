@@ -25,6 +25,9 @@ import { ExamSequenceItem } from './entities/exam-sequence-item.entity';
 import { DailyChallengesModule } from '../daily-challenges/daily-challenges.module';
 import { ProgressModule } from '../progress/progress.module';
 import { UserCourseProgress } from '../progress/entities/user-course-progress.entity';
+import { UserLearningActivityTimeEntry } from '../learning-activity/entities/user-learning-activity-time-entry.entity';
+import { FilesModule } from 'src/files/files.module';
+import { NotificationsModule } from 'src/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -44,10 +47,14 @@ import { UserCourseProgress } from '../progress/entities/user-course-progress.en
       ExamSection,
       ExamSequenceItem,
       ExamTemplate,
+      UserCourseProgress,
+      UserLearningActivityTimeEntry,
     ]),
     CertificatesModule,
     DailyChallengesModule,
     ProgressModule,
+    FilesModule,
+    NotificationsModule,
   ],
   controllers: [
     AdminExamsController,
