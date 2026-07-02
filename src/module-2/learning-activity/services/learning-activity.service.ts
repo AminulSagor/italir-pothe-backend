@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, Repository } from 'typeorm';
 
 import { RecordLearningTimeDto } from '../dto/learning-activity.dto';
 import { UserLearningActivityTimeEntry } from '../entities/user-learning-activity-time-entry.entity';
@@ -132,27 +132,28 @@ export class LearningActivityService {
     const startDate = this.toDateOnly(weekStart);
     const endDate = this.toDateOnly(weekEnd);
 
-    const rows = await this.activityRepository
-      .createQueryBuilder('activity')
-      .select('activity.activityDate', 'activityDate')
-      .addSelect('SUM(activity.durationSeconds)', 'durationSeconds')
-      .where('activity.userId = :userId', {
+    // Aggregate loaded entities instead of relying on PostgreSQL raw alias
+    // casing/date parsing. This keeps the weekly response correct across pg and
+    // TypeORM versions and with either camelCase or snake_case naming strategies.
+    const entries = await this.activityRepository.find({
+      where: {
         userId,
-      })
-      .andWhere('activity.activityDate BETWEEN :startDate AND :endDate', {
-        startDate,
-        endDate,
-      })
-      .groupBy('activity.activityDate')
-      .orderBy('activity.activityDate', 'ASC')
-      .getRawMany<{
-        activityDate: string;
-        durationSeconds: string;
-      }>();
+        activityDate: Between(startDate, endDate),
+      },
+      select: {
+        activityDate: true,
+        durationSeconds: true,
+      },
+    });
 
-    const secondsByDate = new Map<string, number>(
-      rows.map((row) => [row.activityDate, Number(row.durationSeconds) || 0]),
-    );
+    const secondsByDate = new Map<string, number>();
+    for (const entry of entries) {
+      const dateKey = this.normalizeDateOnly(entry.activityDate);
+      secondsByDate.set(
+        dateKey,
+        (secondsByDate.get(dateKey) ?? 0) + entry.durationSeconds,
+      );
+    }
 
     const days = Array.from(
       {
@@ -346,6 +347,23 @@ export class LearningActivityService {
     }
 
     return date;
+  }
+
+  private normalizeDateOnly(value: string | Date): string {
+    if (value instanceof Date) {
+      return this.toDateOnly(value);
+    }
+
+    const text = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return text;
+    }
+
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Invalid activity date');
+    }
+    return this.toDateOnly(parsed);
   }
 
   private addDays(date: Date, days: number): Date {
