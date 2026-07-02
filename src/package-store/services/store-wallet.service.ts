@@ -384,7 +384,7 @@ export class StoreWalletService {
   ) {
     const wallet = await this.getOrCreateWallet(userId, manager, true);
 
-    if (wallet.cvCredits <= 0) {
+    if (wallet.cvCredits <= 100) {
       throw new PaymentRequiredException(
         'No CV credits are available. Purchase a CV credit package first.',
       );
