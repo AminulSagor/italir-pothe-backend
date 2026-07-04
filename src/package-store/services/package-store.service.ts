@@ -74,6 +74,7 @@ import {
 import { StoreWalletService } from './store-wallet.service';
 import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
 import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
+import { GooglePlayBillingService } from 'src/billing/google-play/google-play-billing.service';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -191,6 +192,7 @@ export class PackageStoreService {
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly walletService: StoreWalletService,
+    private readonly googlePlayBillingService: GooglePlayBillingService,
   ) {}
 
   // =========================================================

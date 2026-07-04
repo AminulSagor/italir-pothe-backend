@@ -90,11 +90,33 @@ export class CourseCommerceService {
 
   async getQuote(userId: string, courseId: string, query: CourseQuoteQueryDto) {
     const course = await this.getPublishedCourse(courseId);
-    const providerProduct = course.isFree
-      ? null
-      : this.requireActiveProviderProduct(course, query.provider);
+
+    let providerProduct = null;
+
+    /*
+     * A paid course must identify which store will process the purchase.
+     * Free courses do not require Google Play or App Store mapping.
+     */
+    if (!course.isFree) {
+      if (!query.provider) {
+        throw new BadRequestException(
+          'Payment provider is required for a paid course. ' +
+            'Use provider=google_play on Android or provider=app_store on iOS.',
+        );
+      }
+
+      providerProduct = this.requireActiveProviderProduct(
+        course,
+        query.provider,
+      );
+    }
+
     const currency = query.currency ?? CommerceCurrency.EUR;
 
+    /*
+     * Existing coupon configuration remains in the database,
+     * but Google Play/App Store purchases cannot use backend coupons.
+     */
     this.assertStoreCouponNotUsed(query.couponCode);
 
     const quote = await this.calculateQuote(course, currency);
@@ -107,6 +129,10 @@ export class CourseCommerceService {
       },
     });
 
+    const supportedProviders = (course.providerProducts ?? [])
+      .filter((item) => item.isActive)
+      .map((item) => this.mapProviderProduct(item));
+
     return {
       course: {
         id: course.id,
@@ -114,25 +140,33 @@ export class CourseCommerceService {
         subtitle: course.subtitle,
         isFree: course.isFree,
       },
+
       storeProduct: providerProduct
         ? this.mapProviderProduct(providerProduct)
         : null,
+
       baseCurrency: CommerceCurrency.EUR,
       selectedCurrency: quote.selectedCurrency,
+
       basePriceEur: quote.basePriceEur,
       originalAmount: quote.originalAmount,
+
       couponCode: quote.couponCode,
       discountPercentage: quote.discountPercentage,
       discountAmount: quote.discountAmount,
       payableAmount: quote.payableAmount,
+
       discountAmountEur: quote.discountAmountEur,
       payableAmountEur: quote.payableAmountEur,
+
       forexRate: quote.forexRate,
+
       alreadyEnrolled: Boolean(enrollment),
-      supportedProviders: (course.providerProducts ?? [])
-        .filter((item) => item.isActive)
-        .map((item) => this.mapProviderProduct(item)),
+
+      supportedProviders,
+
       developmentVerification: this.demoPaymentGateway.isDemoModeEnabled(),
+
       pricingNote:
         'Google Play or App Store controls the final localized amount charged.',
     };
