@@ -91,12 +91,8 @@ export class CourseCommerceService {
   async getQuote(userId: string, courseId: string, query: CourseQuoteQueryDto) {
     const course = await this.getPublishedCourse(courseId);
 
-    let providerProduct = null;
+    let providerProduct: CourseProviderProduct | null = null;
 
-    /*
-     * A paid course must identify which store will process the purchase.
-     * Free courses do not require Google Play or App Store mapping.
-     */
     if (!course.isFree) {
       if (!query.provider) {
         throw new BadRequestException(
@@ -113,10 +109,6 @@ export class CourseCommerceService {
 
     const currency = query.currency ?? CommerceCurrency.EUR;
 
-    /*
-     * Existing coupon configuration remains in the database,
-     * but Google Play/App Store purchases cannot use backend coupons.
-     */
     this.assertStoreCouponNotUsed(query.couponCode);
 
     const quote = await this.calculateQuote(course, currency);
@@ -128,10 +120,6 @@ export class CourseCommerceService {
         status: CourseEnrollmentStatus.ACTIVE,
       },
     });
-
-    const supportedProviders = (course.providerProducts ?? [])
-      .filter((item) => item.isActive)
-      .map((item) => this.mapProviderProduct(item));
 
     return {
       course: {
@@ -147,23 +135,20 @@ export class CourseCommerceService {
 
       baseCurrency: CommerceCurrency.EUR,
       selectedCurrency: quote.selectedCurrency,
-
       basePriceEur: quote.basePriceEur,
       originalAmount: quote.originalAmount,
-
       couponCode: quote.couponCode,
       discountPercentage: quote.discountPercentage,
       discountAmount: quote.discountAmount,
       payableAmount: quote.payableAmount,
-
       discountAmountEur: quote.discountAmountEur,
       payableAmountEur: quote.payableAmountEur,
-
       forexRate: quote.forexRate,
-
       alreadyEnrolled: Boolean(enrollment),
 
-      supportedProviders,
+      supportedProviders: (course.providerProducts ?? [])
+        .filter((item) => item.isActive)
+        .map((item) => this.mapProviderProduct(item)),
 
       developmentVerification: this.demoPaymentGateway.isDemoModeEnabled(),
 

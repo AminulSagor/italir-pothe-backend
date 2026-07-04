@@ -32,6 +32,7 @@ import { PackageStoreService } from './services/package-store.service';
 import { StoreWalletService } from './services/store-wallet.service';
 import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
 import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
+import { GooglePlayBillingModule } from 'src/billing/google-play/google-play-billing.module';
 
 const packageStoreForexRateProvider: Provider = {
   provide: FOREX_RATE_PROVIDER,
@@ -61,6 +62,7 @@ const packageStoreForexRateProvider: Provider = {
   imports: [
     ConfigModule,
     FilesModule,
+    GooglePlayBillingModule,
 
     TypeOrmModule.forFeature([
       User,
