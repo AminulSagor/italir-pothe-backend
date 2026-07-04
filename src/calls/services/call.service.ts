@@ -3,9 +3,10 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 
 import { DirectConversation } from '../../chat/entities/direct-conversation.entity';
 import { User } from '../../users/entities/user.entity';
@@ -30,7 +31,7 @@ export interface TimeoutRingingCallResult {
 }
 
 @Injectable()
-export class CallService {
+export class CallService implements OnModuleInit {
   private static readonly RINGING_TIMEOUT_MS = 60_000;
 
   constructor(
@@ -44,7 +45,19 @@ export class CallService {
     private readonly userRepository: Repository<User>,
 
     private readonly callAgoraTokenService: CallAgoraTokenService,
+    private readonly dataSource: DataSource,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.dataSource.query(`
+      ALTER TABLE "calls"
+      ADD COLUMN IF NOT EXISTS "answeredAt" timestamptz NULL
+    `);
+    await this.dataSource.query(`
+      ALTER TABLE "calls"
+      ADD COLUMN IF NOT EXISTS "endedAt" timestamptz NULL
+    `);
+  }
 
   async resolveUsers(
     directConversationId: string,
@@ -196,6 +209,8 @@ export class CallService {
     }
 
     call.status = CallStatus.ACTIVE;
+    call.answeredAt = call.answeredAt ?? new Date();
+    call.endedAt = null;
 
     return this.callRepository.save(call);
   }
@@ -222,6 +237,7 @@ export class CallService {
     }
 
     call.status = CallStatus.REJECTED;
+    call.endedAt = call.endedAt ?? new Date();
 
     return this.callRepository.save(call);
   }
@@ -255,6 +271,7 @@ export class CallService {
     }
 
     call.status = CallStatus.CANCELLED;
+    call.endedAt = call.endedAt ?? new Date();
 
     return this.callRepository.save(call);
   }
@@ -282,6 +299,7 @@ export class CallService {
     }
 
     call.status = CallStatus.ENDED;
+    call.endedAt = call.endedAt ?? new Date();
 
     return this.callRepository.save(call);
   }
@@ -307,6 +325,7 @@ export class CallService {
     }
 
     call.status = CallStatus.MISSED;
+    call.endedAt = call.endedAt ?? new Date();
 
     return {
       call: await this.callRepository.save(call),
@@ -365,6 +384,7 @@ export class CallService {
       .update(Call)
       .set({
         status: CallStatus.MISSED,
+        endedAt: () => 'CURRENT_TIMESTAMP',
       })
       .where('"status" = :status', {
         status: CallStatus.RINGING,

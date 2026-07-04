@@ -32,6 +32,8 @@ import { FilesService } from 'src/files/services/files.service';
 import { FilePurpose } from 'src/files/entities/file.entity';
 import { UserAccountDeletionService } from './user-account-deletion.service';
 import { UserDeletionSource } from './entities/deleted-user-audit.entity';
+import { LeaderboardProfile } from 'src/module-2/leaderboard/entities/leaderboard-profile.entity';
+import { UserStreak } from 'src/module-2/scoring/entities/user-streak.entity';
 
 @Injectable()
 export class UsersService {
@@ -43,6 +45,10 @@ export class UsersService {
     private userRepository: Repository<User>,
     @InjectRepository(Otp)
     private otpRepository: Repository<Otp>,
+    @InjectRepository(LeaderboardProfile)
+    private readonly leaderboardProfileRepository: Repository<LeaderboardProfile>,
+    @InjectRepository(UserStreak)
+    private readonly userStreakRepository: Repository<UserStreak>,
     private readonly userAccountDeletionService: UserAccountDeletionService,
     private presenceService: PresenceService,
     private smsService: SmsService,
@@ -158,7 +164,27 @@ export class UsersService {
   async getUserProfileById(targetUserId: string) {
     const user = await this.findUserById(targetUserId);
 
-    const presence = await this.presenceService.getUserPresence(user.id);
+    const [presence, leaderboardProfile, streak] = await Promise.all([
+      this.presenceService.getUserPresence(user.id),
+      this.leaderboardProfileRepository.findOne({
+        where: { userId: user.id },
+      }),
+      this.userStreakRepository.findOne({
+        where: { userId: user.id },
+      }),
+    ]);
+
+    const currentStreakDays = Math.max(
+      0,
+      streak?.currentDays ?? 0,
+      leaderboardProfile?.streakDays ?? 0,
+      user.currentStreakDays ?? 0,
+    );
+    const totalXp = Math.max(
+      0,
+      leaderboardProfile?.totalXp ?? 0,
+      user.totalXp ?? 0,
+    );
 
     return {
       id: user.id,
@@ -170,6 +196,11 @@ export class UsersService {
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,
       profilePhotoFileId: user.profilePhotoFileId,
+      avatarUrl: user.avatarUrl,
+      currentStreakDays,
+      totalXp,
+      streakValue: `${currentStreakDays} ${currentStreakDays === 1 ? 'Day' : 'Days'}`,
+      xpValue: `${totalXp} XP`,
       isOnline: presence.isOnline,
       lastSeenAt: presence.lastSeenAt,
       createdAt: user.createdAt,

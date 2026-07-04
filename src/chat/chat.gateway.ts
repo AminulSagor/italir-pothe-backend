@@ -18,8 +18,11 @@ import { ChatService } from './chat.service';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Conversation } from './entities/conversation.entity';
 import { DirectConversation } from './entities/direct-conversation.entity';
-import { UserDeviceService } from '../devices/services/user-device.service';
-import { FirebasePushService } from '../notifications/firebase-push.service';
+import {
+  NotificationPriority,
+  NotificationType,
+} from '../notifications/entities/notification-event.entity';
+import { NotificationsService } from '../notifications/services/notifications.service';
 
 @WebSocketGateway({
   namespace: 'chat',
@@ -63,8 +66,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly participantRepo: Repository<ConversationParticipant>,
 
     private readonly presenceService: PresenceService,
-    private readonly userDeviceService: UserDeviceService,
-    private readonly firebasePushService: FirebasePushService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
@@ -366,29 +368,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const isInInbox = inboxUsers?.has(receiverId) ?? false;
         
         if (!isInInbox) {
-          this.userDeviceService.findActiveFcmDevicesByUsers([receiverId]).then(async (devices) => {
-            const tokens = devices.map(d => d.fcmToken).filter(t => t) as string[];
-            if (tokens.length > 0) {
-              const senderName = user.name || user.fullName || 'Someone';
-              let bodyText = savedMessage.content;
-              if (!bodyText && payload.attachments?.length) {
-                bodyText = 'Sent an attachment';
-              }
-              await this.firebasePushService.sendChatMessagePush({
-                tokens,
-                title: senderName,
-                body: bodyText || 'New message',
-                data: {
-                  type: 'chat_message',
-                  conversationId: payload.conversationId,
-                  senderId: user.id,
-                  messageId: savedMessage.id,
-                }
-              });
-            }
-          }).catch((err) => {
-            this.logger.warn(`Failed to send FCM to ${receiverId}`, err instanceof Error ? err.message : String(err));
-          });
+          try {
+            const senderName = user.name || user.fullName || 'Someone';
+            const bodyText =
+              savedMessage.content ||
+              (payload.attachments?.length ? 'Sent an attachment' : 'New message');
+
+            await this.notificationsService.createSystemNotificationForUser({
+              userId: receiverId,
+              type: NotificationType.ADMIN_MESSAGE,
+              title: senderName.slice(0, 180),
+              body: bodyText.slice(0, 500),
+              deepLink:
+                `/messages?conversationId=${encodeURIComponent(payload.conversationId)}` +
+                `&senderId=${encodeURIComponent(user.id)}`,
+              priority: NotificationPriority.HIGH,
+            });
+          } catch (error) {
+            this.logger.warn(
+              `Failed to create message notification for ${receiverId}`,
+              error instanceof Error ? error.message : String(error),
+            );
+          }
         }
 
         try {
