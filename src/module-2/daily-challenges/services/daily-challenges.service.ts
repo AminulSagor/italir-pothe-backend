@@ -103,6 +103,26 @@ export class DailyChallengesService {
     };
   }
 
+  async getTodayHomeSummary(userId: string, date?: string) {
+    const challengeDate = this.resolveChallengeDate(date);
+    const [planWithTasks, streak] = await Promise.all([
+      this.getOrCreatePlan(challengeDate),
+      this.streakService.getUserStreak(userId),
+    ]);
+    const progress = await this.ensureUserProgress(userId, planWithTasks);
+    const completed = progress.filter(
+      (item) =>
+        item.status === DailyChallengeProgressStatus.COMPLETED ||
+        item.status === DailyChallengeProgressStatus.CLAIMED,
+    ).length;
+
+    return {
+      completed,
+      total: progress.length,
+      streakDays: streak.currentDays,
+    };
+  }
+
   async recordInternalActivity(
     payload: InternalLearningActivityPayload,
   ): Promise<void> {

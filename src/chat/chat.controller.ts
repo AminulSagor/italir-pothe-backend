@@ -215,6 +215,24 @@ export class ChatController {
         ],
       });
 
+    const recentCalls = await this.callRepo
+      .createQueryBuilder('call')
+      .distinctOn(['call.directConversationId'])
+      .where('call.directConversationId IN (:...conversationIds)', {
+        conversationIds,
+      })
+      .orderBy('call.directConversationId', 'ASC')
+      .addOrderBy('call.updatedAt', 'DESC')
+      .addOrderBy('call.createdAt', 'DESC')
+      .getMany();
+
+    const latestCallByConversationId = new Map<string, Call>();
+    for (const call of recentCalls) {
+      if (!latestCallByConversationId.has(call.directConversationId)) {
+        latestCallByConversationId.set(call.directConversationId, call);
+      }
+    }
+
     const allParticipants =
       await this.participantRepo.find({
         where: {
@@ -363,6 +381,34 @@ export class ChatController {
               }
             : null;
 
+        const latestCall = latestCallByConversationId.get(conversation.id);
+        const latestCallAt = latestCall
+          ? latestCall.endedAt ?? latestCall.updatedAt ?? latestCall.createdAt
+          : null;
+        const messageActivityAt =
+          lastMessage?.createdAt ?? conversation.lastMessageAt;
+        const isCallLatest = Boolean(
+          latestCall &&
+            latestCallAt &&
+            (!messageActivityAt ||
+              latestCallAt.getTime() >= messageActivityAt.getTime()),
+        );
+        const lastCall =
+          latestCall && latestCallAt && isCallLatest
+            ? {
+                id: latestCall.id,
+                callType: latestCall.callType,
+                status: latestCall.status,
+                callerId: latestCall.callerId,
+                receiverId: latestCall.receiverId,
+                createdAt: latestCallAt,
+              }
+            : null;
+        const lastActivityAt =
+          isCallLatest && latestCallAt
+            ? latestCallAt
+            : messageActivityAt ?? conversation.createdAt;
+
         const lastMessageReadByOthers =
           lastMessage &&
           lastMessage.senderId ===
@@ -409,6 +455,9 @@ export class ChatController {
 
           lastMessageAt:
             conversation.lastMessageAt,
+
+          lastActivityAt,
+          lastCall,
 
           createdAt:
             conversation.createdAt,
@@ -467,23 +516,8 @@ export class ChatController {
 
     return enriched.sort(
       (first, second) => {
-        const firstTime =
-          first.lastMessageAt
-            ? new Date(
-                first.lastMessageAt,
-              ).getTime()
-            : new Date(
-                first.createdAt,
-              ).getTime();
-
-        const secondTime =
-          second.lastMessageAt
-            ? new Date(
-                second.lastMessageAt,
-              ).getTime()
-            : new Date(
-                second.createdAt,
-              ).getTime();
+        const firstTime = first.lastActivityAt.getTime();
+        const secondTime = second.lastActivityAt.getTime();
 
         return secondTime - firstTime;
       },

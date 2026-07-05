@@ -41,6 +41,7 @@ import { LearningActivityModule } from './module-2/learning-activity/learning-ac
 import { RevenueAnalyticsModule } from './revenue-analytics/revenue-analytics.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { GooglePlayBillingModule } from './billing/google-play/google-play-billing.module';
+import { HomeModule } from './home/home.module';
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { GooglePlayBillingModule } from './billing/google-play/google-play-billi
     RevenueAnalyticsModule,
     AdminDashboardModule,
     GooglePlayBillingModule,
+    HomeModule,
   ],
   controllers: [AppController],
   providers: [AppService],
