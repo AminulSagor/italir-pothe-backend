@@ -199,7 +199,7 @@ export class ModerationService {
      * report.subject can be null after the user account is deleted,
      * but report.subjectId remains stored for audits and analytics.
      */
-    const [subjectCourses, visualEvidence] = await Promise.all([
+    const [subjectCourses, visualEvidence, actionHistory] = await Promise.all([
       this.enrollmentRepo.find({
         where: {
           userId: report.subjectId,
@@ -214,26 +214,16 @@ export class ModerationService {
           reportId: report.id,
         },
       }),
-    ]);
 
-    const reporter = report.reporter;
-    const subject = report.subject;
-
-    const subjectCourses = subject
-      ? await this.enrollmentRepo.find({
-          where: { userId: subject.id },
-          relations: ['course'],
-        })
-      : [];
-
-    const [visualEvidence, actionHistory] = await Promise.all([
-      this.evidenceRepo.find({ where: { reportId: report.id } }),
       this.actionRepo.find({
         where: { reportId: report.id },
         relations: ['moderator'],
         order: { loggedAt: 'DESC' },
       }),
     ]);
+
+    const reporter = report.reporter;
+    const subject = report.subject;
 
     return {
       report_overview: {
@@ -288,12 +278,7 @@ export class ModerationService {
         url: evidence.mediaUrl,
 
         description: evidence.descriptionText ?? null,
-      })),
-      visual_evidence: visualEvidence.map((v) => ({
-        id: v.id,
-        url: v.mediaUrl,
-        description: v.descriptionText,
-        uploadedAt: v.uploadedAt,
+        uploadedAt: evidence.uploadedAt,
       })),
       action_history: actionHistory.map((action) => ({
         id: action.id,
