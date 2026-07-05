@@ -11,17 +11,137 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-const trimString = ({ value }: { value: unknown }) =>
+type TransformInput = {
+  value: unknown;
+  obj?: Record<string, unknown>;
+};
+
+const hasMeaningfulValue = (value: unknown): boolean => {
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value).length > 0;
+  }
+
+  return value !== null && value !== undefined;
+};
+
+const resolveAlias = (
+  value: unknown,
+  obj: Record<string, unknown> | undefined,
+  aliases: string[],
+): unknown => {
+  if (hasMeaningfulValue(value)) {
+    return value;
+  }
+
+  if (!obj) {
+    return value;
+  }
+
+  for (const alias of aliases) {
+    const aliasValue = obj[alias];
+
+    if (hasMeaningfulValue(aliasValue)) {
+      return aliasValue;
+    }
+  }
+
+  return value;
+};
+
+const trimString = ({ value }: TransformInput) =>
   typeof value === 'string' ? value.trim() : value;
 
-const trimStringArray = ({ value }: { value: unknown }) => {
+const trimAliasedString =
+  (aliases: string[]) =>
+  ({ value, obj }: TransformInput) => {
+    const resolvedValue = resolveAlias(value, obj, aliases);
+
+    return typeof resolvedValue === 'string'
+      ? resolvedValue.trim()
+      : resolvedValue;
+  };
+
+const normalizeStringArrayValue = (value: unknown): unknown => {
+  if (typeof value === 'string') {
+    return value
+      .split(/[\n,;]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
   if (!Array.isArray(value)) {
     return value;
   }
 
-  return value
-    .map((item) => (typeof item === 'string' ? item.trim() : item))
-    .filter((item) => item !== '');
+  return [
+    ...new Set(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
+};
+
+const trimStringArray = ({ value }: TransformInput) =>
+  normalizeStringArrayValue(value);
+
+const normalizeNestedArray =
+  (aliases: string[] = []) =>
+  ({ value, obj }: TransformInput) => {
+    const resolvedValue = resolveAlias(value, obj, aliases);
+
+    if (
+      resolvedValue === null ||
+      resolvedValue === undefined ||
+      resolvedValue === ''
+    ) {
+      return undefined;
+    }
+
+    return Array.isArray(resolvedValue) ? resolvedValue : [resolvedValue];
+  };
+
+const mergeSkillFields = ({
+  value,
+  obj,
+}: TransformInput): string[] | unknown => {
+  const values: unknown[] = [
+    value,
+    obj?.skills,
+    obj?.technicalSkills,
+    obj?.softSkills,
+  ];
+
+  const mergedValues: string[] = [];
+
+  for (const currentValue of values) {
+    const normalized = normalizeStringArrayValue(currentValue);
+
+    if (!Array.isArray(normalized)) {
+      continue;
+    }
+
+    for (const item of normalized) {
+      if (typeof item === 'string' && item.trim()) {
+        mergedValues.push(item.trim());
+      }
+    }
+  }
+
+  if (mergedValues.length === 0) {
+    return value;
+  }
+
+  return [...new Set(mergedValues)];
 };
 
 export class CvExperienceDto {
@@ -244,7 +364,11 @@ export class CvDataDto {
   @MaxLength(160)
   fullName: string;
 
-  @Transform(trimString)
+  /*
+   * Canonical field: professionalTitle
+   * Chatbot fallback: targetJob
+   */
+  @Transform(trimAliasedString(['targetJob']))
   @IsString()
   @MaxLength(160)
   professionalTitle: string;
@@ -264,7 +388,11 @@ export class CvDataDto {
   @MaxLength(180)
   location: string;
 
-  @Transform(trimString)
+  /*
+   * Canonical field: summary
+   * Chatbot fallback: professionalSummary
+   */
+  @Transform(trimAliasedString(['professionalSummary']))
   @IsOptional()
   @IsString()
   @MaxLength(1200)
@@ -286,6 +414,15 @@ export class CvDataDto {
   @MaxLength(1000)
   portfolioUrl?: string;
 
+  /*
+   * Canonical field: experiences
+   * Chatbot fallback: workExperience
+   *
+   * workExperience must contain an object or array
+   * of objects. Plain unstructured text will correctly
+   * fail DTO validation.
+   */
+  @Transform(normalizeNestedArray(['workExperience']))
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(8)
@@ -293,6 +430,7 @@ export class CvDataDto {
   @Type(() => CvExperienceDto)
   experiences?: CvExperienceDto[];
 
+  @Transform(normalizeNestedArray())
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(6)
@@ -300,7 +438,13 @@ export class CvDataDto {
   @Type(() => CvEducationDto)
   education?: CvEducationDto[];
 
-  @Transform(trimStringArray)
+  /*
+   * Combines:
+   * skills
+   * technicalSkills
+   * softSkills
+   */
+  @Transform(mergeSkillFields)
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(30)
@@ -308,6 +452,7 @@ export class CvDataDto {
   @MaxLength(100, { each: true })
   skills?: string[];
 
+  @Transform(normalizeNestedArray())
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10)
@@ -315,6 +460,7 @@ export class CvDataDto {
   @Type(() => CvLanguageDto)
   languages?: CvLanguageDto[];
 
+  @Transform(normalizeNestedArray())
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10)
@@ -322,6 +468,7 @@ export class CvDataDto {
   @Type(() => CvCertificationDto)
   certifications?: CvCertificationDto[];
 
+  @Transform(normalizeNestedArray())
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10)
@@ -337,6 +484,7 @@ export class CvDataDto {
   @MaxLength(300, { each: true })
   achievements?: string[];
 
+  @Transform(normalizeNestedArray())
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5)

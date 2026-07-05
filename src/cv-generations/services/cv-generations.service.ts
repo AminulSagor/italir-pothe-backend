@@ -28,9 +28,12 @@ import {
   type CvReferenceImage,
 } from './cv-image-generation.service';
 import { CvPromptService } from './cv-prompt.service';
+import { RegenerateCvGenerationDto } from '../dto/regenerate-cv-generation.dto';
 
 export interface CreateCvGenerationFromAssistantParams {
   assistantSessionId: string;
+
+  sourceGenerationId?: string | null;
 
   mode: CvGenerationMode;
 
@@ -44,11 +47,12 @@ export interface CreateCvGenerationFromAssistantParams {
 
   colorTheme?: string | null;
 
+  regenerationInstruction?: string | null;
+
   profilePhotoFileId: string | null;
 
   referenceImageFileIds: string[];
 }
-
 @Injectable()
 export class CvGenerationsService {
   private readonly logger = new Logger(CvGenerationsService.name);
@@ -86,7 +90,17 @@ export class CvGenerationsService {
     const generation = this.cvGenerationRepository.create({
       userId: currentUser.id,
 
+      /*
+       * Normal form-based generation does not belong
+       * to an assistant session.
+       */
       assistantSessionId: null,
+
+      /*
+       * This is a new CV, not a regenerated or
+       * edited version of another generation.
+       */
+      sourceGenerationId: null,
 
       mode: dto.mode,
 
@@ -94,7 +108,7 @@ export class CvGenerationsService {
 
       status: CvGenerationStatus.PROCESSING,
 
-      cvData: dto.cvData as unknown as Record<string, unknown>,
+      cvData: this.cloneRecord(dto.cvData),
 
       templateAnalysis: null,
 
@@ -113,6 +127,12 @@ export class CvGenerationsService {
               100,
             )
           : null,
+
+      /*
+       * Normal creation has no separate
+       * regeneration instruction.
+       */
+      regenerationInstruction: null,
 
       profilePhotoFileId: dto.profilePhotoFileId ?? null,
 
@@ -165,15 +185,26 @@ export class CvGenerationsService {
 
       assistantSessionId: params.assistantSessionId,
 
+      /*
+       * Null for a newly created CV.
+       * Contains the previous generation ID for
+       * facts-only or design-and-facts editing.
+       */
+      sourceGenerationId: params.sourceGenerationId ?? null,
+
       mode: params.mode,
 
       templateId: params.templateId,
 
       status: CvGenerationStatus.PROCESSING,
 
-      cvData: params.cvData ?? {},
+      /*
+       * Store a separate deep copy so later changes
+       * cannot mutate the source generation data.
+       */
+      cvData: this.cloneRecord(params.cvData),
 
-      templateAnalysis: params.templateAnalysis,
+      templateAnalysis: this.cloneNullableRecord(params.templateAnalysis),
 
       style:
         params.mode === CvGenerationMode.SCRATCH
@@ -190,6 +221,15 @@ export class CvGenerationsService {
               100,
             )
           : null,
+
+      /*
+       * For facts_only, this may contain the
+       * source CV's existing design instruction.
+       *
+       * For design_and_facts, this contains the
+       * user's newly requested design instruction.
+       */
+      regenerationInstruction: params.regenerationInstruction?.trim() || null,
 
       profilePhotoFileId: params.profilePhotoFileId,
 
@@ -250,11 +290,25 @@ export class CvGenerationsService {
     return this.mapGenerationResponse(generation);
   }
 
-  async regenerate(generationId: string, currentUser: FileRequestUser) {
+  async regenerate(
+    generationId: string,
+    dto: RegenerateCvGenerationDto,
+    currentUser: FileRequestUser,
+  ) {
     const originalGeneration = await this.findOwnedGeneration(
       generationId,
       currentUser.id,
     );
+
+    if (originalGeneration.status !== CvGenerationStatus.COMPLETED) {
+      throw new BadRequestException('Only a completed CV can be regenerated.');
+    }
+
+    const designInstruction = dto.designInstruction.trim();
+
+    if (!designInstruction) {
+      throw new BadRequestException('A design instruction is required.');
+    }
 
     if (originalGeneration.profilePhotoFileId) {
       await this.assertOwnedProfilePhoto(
@@ -263,8 +317,12 @@ export class CvGenerationsService {
       );
     }
 
+    const referenceImageFileIds = [
+      ...new Set(originalGeneration.referenceImageFileIds ?? []),
+    ].slice(0, 6);
+
     await this.assertOwnedReferenceImages(
-      originalGeneration.referenceImageFileIds ?? [],
+      referenceImageFileIds,
       currentUser.id,
     );
 
@@ -278,7 +336,13 @@ export class CvGenerationsService {
     const newGeneration = this.cvGenerationRepository.create({
       userId: originalGeneration.userId,
 
-      assistantSessionId: originalGeneration.assistantSessionId,
+      /*
+       * Direct design regeneration is linked through
+       * sourceGenerationId, not the old assistant session.
+       */
+      assistantSessionId: null,
+
+      sourceGenerationId: originalGeneration.id,
 
       mode: originalGeneration.mode,
 
@@ -286,19 +350,37 @@ export class CvGenerationsService {
 
       status: CvGenerationStatus.PROCESSING,
 
-      cvData: originalGeneration.cvData,
+      /*
+       * Preserve the exact confirmed CV facts.
+       * No factual edit is allowed here.
+       */
+      cvData: this.cloneRecord(originalGeneration.cvData),
 
-      templateAnalysis: originalGeneration.templateAnalysis,
+      /*
+       * Preserve the exact template analysis.
+       */
+      templateAnalysis: this.cloneNullableRecord(
+        originalGeneration.templateAnalysis,
+      ),
 
+      /*
+       * Preserve the original design settings.
+       */
       style: originalGeneration.style,
 
       colorTheme: originalGeneration.colorTheme,
 
+      /*
+       * Apply only the new design instruction.
+       */
+      regenerationInstruction: designInstruction,
+
+      /*
+       * Preserve the exact photo and references.
+       */
       profilePhotoFileId: originalGeneration.profilePhotoFileId,
 
-      referenceImageFileIds: [
-        ...(originalGeneration.referenceImageFileIds ?? []),
-      ],
+      referenceImageFileIds,
 
       generatedImageFileId: null,
 
@@ -373,26 +455,50 @@ export class CvGenerationsService {
       let generatedImageBuffer: Buffer;
 
       if (generation.mode === CvGenerationMode.TEMPLATE) {
+        /*
+         * Template mode already uses the selected
+         * template image as its primary reference.
+         */
         generatedImageBuffer = await this.processTemplateGeneration({
           generation,
+
           cvData,
+
           profilePhotoUrl,
+
           designReferences,
         });
       } else {
+        /*
+         * For edited or regenerated scratch CVs,
+         * load the previous generated CV image so
+         * its design can be preserved.
+         */
+        const sourceDesignReference =
+          await this.getSourceGenerationDesignReference(generation);
+
         generatedImageBuffer = await this.processScratchGeneration({
           generation,
+
           cvData,
+
           profilePhotoUrl,
+
           designReferences,
+
+          sourceDesignReference,
         });
       }
 
       const uploadedFile = await this.filesService.createFileFromBuffer(
         generatedImageBuffer,
+
         `generated-cv-${generation.id}.jpg`,
+
         'image/jpeg',
+
         currentUser,
+
         FilePurpose.CV_GENERATED_IMAGE,
       );
 
@@ -438,10 +544,16 @@ export class CvGenerationsService {
       generation.templateId,
     );
 
-    const basePrompt = this.cvPromptService.buildTemplatePrompt(
-      cvData,
-      Boolean(profilePhotoUrl),
-    );
+    /*
+     * Reference positions for template mode:
+     *
+     * Reference 1 = selected CV template
+     * Reference 2 = candidate photo, when provided
+     * Remaining references = additional design references
+     */
+    const templateReferenceIndex = 1;
+
+    const profilePhotoReferenceIndex = profilePhotoUrl ? 2 : null;
 
     const references: CvReferenceImage[] = [
       {
@@ -461,7 +573,20 @@ export class CvGenerationsService {
 
     references.push(...designReferences);
 
-    const designReferenceStartIndex = profilePhotoUrl ? 3 : 2;
+    const designReferenceStartIndex =
+      1 + 1 + (profilePhotoReferenceIndex !== null ? 1 : 0);
+
+    const basePrompt = this.cvPromptService.buildTemplatePrompt({
+      cvData,
+
+      hasProfilePhoto: profilePhotoReferenceIndex !== null,
+
+      templateReferenceIndex,
+
+      profilePhotoReferenceIndex,
+
+      regenerationInstruction: generation.regenerationInstruction,
+    });
 
     const prompt = this.extendGenerationPrompt({
       basePrompt,
@@ -489,8 +614,41 @@ export class CvGenerationsService {
     profilePhotoUrl: string | null;
 
     designReferences: CvReferenceImage[];
+
+    sourceDesignReference: CvReferenceImage | null;
   }): Promise<Buffer> {
-    const { generation, cvData, profilePhotoUrl, designReferences } = params;
+    const {
+      generation,
+      cvData,
+      profilePhotoUrl,
+      designReferences,
+      sourceDesignReference,
+    } = params;
+
+    /*
+     * Reference positions for scratch mode:
+     *
+     * Normal scratch CV:
+     * Reference 1 = candidate photo
+     *
+     * Edited or regenerated scratch CV:
+     * Reference 1 = previously generated CV
+     * Reference 2 = candidate photo
+     *
+     * Additional design references always come last.
+     */
+    const sourceDesignReferenceIndex = sourceDesignReference ? 1 : null;
+
+    const profilePhotoReferenceIndex = profilePhotoUrl
+      ? sourceDesignReferenceIndex !== null
+        ? sourceDesignReferenceIndex + 1
+        : 1
+      : null;
+
+    const designReferenceStartIndex =
+      1 +
+      (sourceDesignReferenceIndex !== null ? 1 : 0) +
+      (profilePhotoReferenceIndex !== null ? 1 : 0);
 
     const basePrompt = this.cvPromptService.buildScratchPrompt({
       cvData,
@@ -499,10 +657,18 @@ export class CvGenerationsService {
 
       colorTheme: generation.colorTheme,
 
-      hasProfilePhoto: Boolean(profilePhotoUrl),
+      hasProfilePhoto: profilePhotoReferenceIndex !== null,
+
+      profilePhotoReferenceIndex,
+
+      regenerationInstruction: generation.regenerationInstruction,
     });
 
     const references: CvReferenceImage[] = [];
+
+    if (sourceDesignReference) {
+      references.push(sourceDesignReference);
+    }
 
     if (profilePhotoUrl) {
       references.push({
@@ -514,9 +680,26 @@ export class CvGenerationsService {
 
     references.push(...designReferences);
 
-    const designReferenceStartIndex = profilePhotoUrl ? 2 : 1;
+    const sourceDesignInstruction =
+      sourceDesignReferenceIndex !== null
+        ? `
+SOURCE CV DESIGN REFERENCE:
 
-    const prompt = this.extendGenerationPrompt({
+- Reference image ${sourceDesignReferenceIndex} is the previously generated CV.
+- Preserve its page size, columns, margins, section positions, spacing,
+  typography hierarchy, colors, dividers, icons, and profile-photo placement
+  as closely as possible.
+- Use the supplied CV data as the only source of factual information.
+- Do not copy outdated names, contact details, dates, employers, education,
+  skills, or other text from reference image ${sourceDesignReferenceIndex}.
+- For a facts-only update, change only the factual content while preserving
+  the existing visual design.
+- When a new design instruction is supplied, preserve the useful structure
+  while applying only the requested visual changes.
+        `.trim()
+        : null;
+
+    const extendedPrompt = this.extendGenerationPrompt({
       basePrompt,
 
       generation,
@@ -527,6 +710,13 @@ export class CvGenerationsService {
 
       templateIsPrimary: false,
     });
+
+    const prompt = [sourceDesignInstruction, extendedPrompt]
+      .filter(
+        (value): value is string =>
+          typeof value === 'string' && value.trim().length > 0,
+      )
+      .join('\n\n');
 
     if (references.length === 0) {
       return this.cvImageGenerationService.generateFromScratch(prompt);
@@ -777,6 +967,8 @@ CHATBOT DATA RULE:
 
       assistantSessionId: generation.assistantSessionId,
 
+      sourceGenerationId: generation.sourceGenerationId,
+
       mode: generation.mode,
 
       templateId: generation.templateId,
@@ -790,6 +982,8 @@ CHATBOT DATA RULE:
       style: generation.style,
 
       colorTheme: generation.colorTheme,
+
+      regenerationInstruction: generation.regenerationInstruction,
 
       profilePhotoFileId: generation.profilePhotoFileId,
 
@@ -842,5 +1036,62 @@ CHATBOT DATA RULE:
     }
 
     return 'The CV image could not be generated. Please try again.';
+  }
+
+  private cloneRecord(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  }
+
+  private cloneNullableRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    return this.cloneRecord(value);
+  }
+
+  private async getSourceGenerationDesignReference(
+    generation: CvGeneration,
+  ): Promise<CvReferenceImage | null> {
+    if (!generation.sourceGenerationId) {
+      return null;
+    }
+
+    const sourceGeneration = await this.cvGenerationRepository.findOne({
+      where: {
+        id: generation.sourceGenerationId,
+        userId: generation.userId,
+        status: CvGenerationStatus.COMPLETED,
+      },
+    });
+
+    if (!sourceGeneration || !sourceGeneration.generatedImageFileId) {
+      return null;
+    }
+
+    const sourceFile = await this.filesService.findActiveFileById(
+      sourceGeneration.generatedImageFileId,
+    );
+
+    if (
+      sourceFile.ownerUserId !== generation.userId ||
+      !sourceFile.mimeType.startsWith('image/') ||
+      sourceFile.filePurpose !== FilePurpose.CV_GENERATED_IMAGE
+    ) {
+      return null;
+    }
+
+    const response = await this.filesService.createSignedReadUrl(
+      sourceGeneration.generatedImageFileId,
+    );
+
+    return {
+      url: response.signedReadUrl,
+      fileName: 'previous-generated-cv-design',
+    };
   }
 }

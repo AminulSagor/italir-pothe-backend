@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   DefaultValuePipe,
   Delete,
@@ -7,7 +8,6 @@ import {
   ParseIntPipe,
   ParseUUIDPipe,
   Post,
-  Body,
   Query,
   Req,
   UnauthorizedException,
@@ -19,6 +19,7 @@ import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-r
 import { FileRequestUser } from 'src/files/services/files.service';
 
 import { CreateCvGenerationDto } from '../dto/create-cv-generation.dto';
+import { RegenerateCvGenerationDto } from '../dto/regenerate-cv-generation.dto';
 import { CvGenerationsService } from '../services/cv-generations.service';
 
 @Controller('cv-generations')
@@ -51,7 +52,9 @@ export class CvGenerationsController {
 
   @Get(':id')
   async getGeneration(
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', new ParseUUIDPipe())
+    id: string,
+
     @Req() request: AuthenticatedRequest,
   ) {
     const currentUser = this.getCurrentUser(request);
@@ -61,18 +64,26 @@ export class CvGenerationsController {
 
   @Post(':id/regenerate')
   async regenerate(
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', new ParseUUIDPipe())
+    id: string,
+
+    @Body()
+    dto: RegenerateCvGenerationDto,
+
     @Req() request: AuthenticatedRequest,
   ) {
     return this.cvGenerationsService.regenerate(
       id,
+      dto,
       this.getCurrentUser(request),
     );
   }
 
   @Delete(':id')
   async deleteGeneration(
-    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('id', new ParseUUIDPipe())
+    id: string,
+
     @Req() request: AuthenticatedRequest,
   ) {
     return this.cvGenerationsService.delete(id, this.getCurrentUser(request));
@@ -80,6 +91,7 @@ export class CvGenerationsController {
 
   private getCurrentUser(request: AuthenticatedRequest): FileRequestUser {
     const id = request.user?.id ?? request.user?.sub;
+
     const role = request.user?.role;
 
     if (!id || !role) {

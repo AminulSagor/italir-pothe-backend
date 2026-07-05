@@ -17,6 +17,7 @@ import type { FileRequestUser } from 'src/files/services/files.service';
 import { AttachCvAssetsDto } from '../dto/attach-cv-assets.dto';
 import { CreateCvSessionDto } from '../dto/create-cv-session.dto';
 import { SendCvMessageDto } from '../dto/send-cv-message.dto';
+import { StartCvEditDto } from '../dto/start-cv-edit.dto';
 import { CvAssistantService } from '../services/cv-assistant.service';
 
 @Controller('cv-assistant')
@@ -69,20 +70,6 @@ export class CvAssistantController {
     );
   }
 
-  @Post('sessions/:sessionId/skip')
-  skipCurrentQuestion(
-    @Param('sessionId', new ParseUUIDPipe())
-    sessionId: string,
-
-    @Req()
-    request: AuthenticatedRequest,
-  ) {
-    return this.cvAssistantService.skipCurrentQuestion(
-      sessionId,
-      this.getCurrentUser(request),
-    );
-  }
-
   @Post('sessions/:sessionId/attachments')
   attachAssets(
     @Param('sessionId', new ParseUUIDPipe())
@@ -111,6 +98,24 @@ export class CvAssistantController {
   ) {
     return this.cvAssistantService.generateCv(
       sessionId,
+      this.getCurrentUser(request),
+    );
+  }
+
+  @Post('generations/:generationId/edit')
+  startGenerationEdit(
+    @Param('generationId', new ParseUUIDPipe())
+    generationId: string,
+
+    @Body()
+    dto: StartCvEditDto,
+
+    @Req()
+    request: AuthenticatedRequest,
+  ) {
+    return this.cvAssistantService.startGenerationEdit(
+      generationId,
+      dto,
       this.getCurrentUser(request),
     );
   }

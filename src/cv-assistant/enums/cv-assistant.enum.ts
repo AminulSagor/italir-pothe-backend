@@ -26,3 +26,15 @@ export enum CvAssistantQuestionType {
   LIST = 'list',
   CHOICE = 'choice',
 }
+
+export enum CvAssistantPhotoDecision {
+  UNRESOLVED = 'unresolved',
+  UPLOADED = 'uploaded',
+  WITHOUT_PHOTO = 'without_photo',
+  NOT_APPLICABLE = 'not_applicable',
+}
+
+export enum CvAssistantEditMode {
+  FACTS_ONLY = 'facts_only',
+  DESIGN_AND_FACTS = 'design_and_facts',
+}
