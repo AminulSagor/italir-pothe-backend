@@ -10,6 +10,11 @@ import { ScoringService } from 'src/module-2/scoring/services/scoring.service';
 import { StreakService } from 'src/module-2/scoring/services/streak.service';
 import { LeaderboardXpService } from 'src/module-2/leaderboard/services/leaderboard-xp.service';
 import { LeaderboardXpSourceType } from 'src/module-2/leaderboard/types/leaderboard.type';
+import {
+  Lesson,
+  LessonStatus,
+} from 'src/module-2/lessons/entities/lesson.entity';
+import { CourseStatus } from 'src/module-2/courses/entities/course.entity';
 
 interface ProgressUser {
   id: string;
@@ -23,6 +28,9 @@ export class ProgressService {
 
     @InjectRepository(UserCourseProgress)
     private readonly courseProgressRepository: Repository<UserCourseProgress>,
+
+    @InjectRepository(Lesson)
+    private readonly lessonRepository: Repository<Lesson>,
 
     private readonly dailyChallengesService: DailyChallengesService,
     private readonly scoringService: ScoringService,
@@ -188,6 +196,62 @@ export class ProgressService {
   }
 
 
+  async getCurrentChapter(userId: string) {
+    const activeProgress = await this.lessonProgressRepository.findOne({
+      where: { userId, isCompleted: false },
+      order: { updatedAt: 'DESC' },
+    });
+
+    let lesson: Lesson | null = null;
+    let progress: UserLessonProgress | null = activeProgress;
+
+    if (activeProgress) {
+      lesson = await this.findPublishedLesson(activeProgress.lessonId);
+    }
+
+    if (!lesson) {
+      const latestCourse = await this.courseProgressRepository.findOne({
+        where: { userId },
+        order: { lastActivityAt: 'DESC', updatedAt: 'DESC' },
+      });
+
+      if (latestCourse?.courseId) {
+        lesson = await this.findFirstIncompletePublishedLesson(
+          userId,
+          latestCourse.courseId,
+        );
+      }
+
+      if (lesson) {
+        progress = await this.lessonProgressRepository.findOne({
+          where: { userId, lessonId: lesson.id },
+        });
+      }
+    }
+
+    if (!lesson) {
+      return null;
+    }
+
+    const progressPercent = progress?.isCompleted
+      ? 100
+      : Math.max(
+          progress?.videoWatchPercent ?? 0,
+          progress?.isTheoryRead ? 50 : 0,
+        );
+
+    return {
+      lessonId: lesson.id,
+      courseId: lesson.courseId,
+      chapterId: lesson.chapterId,
+      courseTitle: lesson.course?.title ?? '',
+      chapterTitle: lesson.chapter?.title ?? '',
+      lessonTitle: lesson.title,
+      subtitle: lesson.course?.subtitle ?? '',
+      progressPercent,
+    };
+  }
+
   async getLessonProgress(userId: string, lessonId: string) {
     const progress = await this.lessonProgressRepository.findOne({
       where: { userId, lessonId },
@@ -230,6 +294,50 @@ export class ProgressService {
     const progress = await this.getCourseProgress(userId, courseId);
 
     return progress.completionPercent;
+  }
+
+  private async findPublishedLesson(lessonId: string) {
+    return this.lessonRepository
+      .createQueryBuilder('lesson')
+      .innerJoinAndSelect('lesson.course', 'course')
+      .innerJoinAndSelect('lesson.chapter', 'chapter')
+      .where('lesson.id = :lessonId', { lessonId })
+      .andWhere('lesson.status = :lessonStatus', {
+        lessonStatus: LessonStatus.PUBLISHED,
+      })
+      .andWhere('course.status = :courseStatus', {
+        courseStatus: CourseStatus.PUBLISHED,
+      })
+      .andWhere('chapter.isPublished = true')
+      .getOne();
+  }
+
+  private async findFirstIncompletePublishedLesson(
+    userId: string,
+    courseId: string,
+  ) {
+    return this.lessonRepository
+      .createQueryBuilder('lesson')
+      .innerJoinAndSelect('lesson.course', 'course')
+      .innerJoinAndSelect('lesson.chapter', 'chapter')
+      .leftJoin(
+        UserLessonProgress,
+        'userProgress',
+        'userProgress.lessonId = lesson.id AND userProgress.userId = :userId',
+        { userId },
+      )
+      .where('lesson.status = :lessonStatus', {
+        lessonStatus: LessonStatus.PUBLISHED,
+      })
+      .andWhere('course.status = :courseStatus', {
+        courseStatus: CourseStatus.PUBLISHED,
+      })
+      .andWhere('chapter.isPublished = true')
+      .andWhere('(userProgress.id IS NULL OR userProgress.isCompleted = false)')
+      .andWhere('lesson.courseId = :courseId', { courseId })
+      .orderBy('chapter.sortOrder', 'ASC')
+      .addOrderBy('lesson.sortOrder', 'ASC')
+      .getOne();
   }
 
   private async getOrCreateLessonProgress(

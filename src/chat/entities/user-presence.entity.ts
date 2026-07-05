@@ -19,9 +19,13 @@ export class UserPresence {
   @PrimaryColumn({ type: 'uuid' })
   userId: string;
 
-  @OneToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @Column({
     type: 'enum',

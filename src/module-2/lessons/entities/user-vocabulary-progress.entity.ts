@@ -73,9 +73,13 @@ export class UserVocabularyProgress {
   @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @ManyToOne(() => User, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @ManyToOne(() => Lesson, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'lessonId' })

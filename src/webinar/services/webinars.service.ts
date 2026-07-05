@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -29,6 +30,8 @@ import {
 import { Webinar, WebinarStatus } from '../entities/webinar.entity';
 import { WebinarGateway } from '../gateways/webinar.gateway';
 import { AgoraLiveRole, AgoraTokenService } from './agora-token.service';
+import { WebinarAudienceService } from './webinar-audience.service';
+import { WebinarNotificationService } from './webinar-notification.service';
 
 type WebinarUserRaw = {
   userId: string;
@@ -84,6 +87,8 @@ export class WebinarsService {
     private readonly s3Service: S3Service,
     private readonly agoraTokenService: AgoraTokenService,
     private readonly webinarGateway: WebinarGateway,
+    private readonly webinarAudienceService: WebinarAudienceService,
+    private readonly webinarNotificationService: WebinarNotificationService,
   ) {}
 
   async createWebinar(dto: CreateWebinarDto, adminId: string) {
@@ -105,6 +110,16 @@ export class WebinarsService {
 
     await this.syncAudienceCourses(savedWebinar.id, dto.courseIds);
 
+    if (
+      savedWebinar.status === WebinarStatus.SCHEDULED &&
+      savedWebinar.sendNotification
+    ) {
+      await this.webinarNotificationService.notifyScheduled(
+        savedWebinar.id,
+        adminId,
+      );
+    }
+
     return {
       message: 'Webinar created successfully.',
       webinar: await this.buildWebinarResponse(savedWebinar.id),
@@ -113,6 +128,8 @@ export class WebinarsService {
 
   async updateWebinar(id: string, dto: UpdateWebinarDto, adminId: string) {
     const webinar = await this.findWebinarEntityById(id);
+    const wasScheduled = webinar.status === WebinarStatus.SCHEDULED;
+    const wasNotificationEnabled = webinar.sendNotification;
 
     if (dto.title !== undefined) {
       webinar.title = dto.title.trim();
@@ -148,6 +165,14 @@ export class WebinarsService {
       await this.syncAudienceCourses(webinar.id, dto.courseIds);
     }
 
+    if (
+      webinar.status === WebinarStatus.SCHEDULED &&
+      webinar.sendNotification &&
+      (!wasScheduled || !wasNotificationEnabled)
+    ) {
+      await this.webinarNotificationService.notifyScheduled(webinar.id, adminId);
+    }
+
     return {
       message: 'Webinar updated successfully.',
       webinar: await this.buildWebinarResponse(webinar.id),
@@ -170,6 +195,8 @@ export class WebinarsService {
     this.webinarGateway.emitWebinarStarted(webinar.id, {
       webinar: webinarResponse,
     });
+
+    await this.webinarNotificationService.notifyStarted(webinar.id, adminId);
 
     return {
       message: 'Webinar started successfully.',
@@ -222,6 +249,7 @@ export class WebinarsService {
 
   async joinWebinar(webinarId: string, userId: string) {
     const webinar = await this.findLiveWebinarById(webinarId);
+    await this.assertUserCanAccessWebinar(webinar.id, userId);
     const participant = await this.upsertJoinedParticipant(webinar.id, userId);
     const participantResponse = await this.findParticipantResponse(
       webinar.id,
@@ -507,17 +535,22 @@ export class WebinarsService {
     };
   }
 
-  async getUpcomingWebinarsList(query: PaginationQueryDto) {
+  async getUpcomingWebinarsList(
+    userId: string,
+    query: PaginationQueryDto,
+  ) {
     return this.getWebinarsListByStatus({
       status: WebinarStatus.SCHEDULED,
       query,
+      userId,
     });
   }
 
-  async getLiveWebinarsList(query: PaginationQueryDto) {
+  async getLiveWebinarsList(userId: string, query: PaginationQueryDto) {
     return this.getWebinarsListByStatus({
       status: WebinarStatus.LIVE,
       query,
+      userId,
     });
   }
 
@@ -671,6 +704,7 @@ export class WebinarsService {
     status: WebinarStatus;
     query: PaginationQueryDto;
     adminId?: string;
+    userId?: string;
   }) {
     const pagination = this.normalizePagination(params.query);
 
@@ -694,8 +728,38 @@ export class WebinarsService {
       take: pagination.limit,
     });
 
+    const audienceCourseIds = Array.from(
+      new Set(
+        webinars.flatMap((webinar) =>
+          (webinar.audienceCourses ?? []).map(
+            (audienceCourse) => audienceCourse.courseId,
+          ),
+        ),
+      ),
+    );
+    const courseTitleMap =
+      await this.webinarAudienceService.getCourseTitleMap(audienceCourseIds);
+    const enrolledCourseIds = params.userId
+      ? await this.webinarAudienceService.getUserEnrolledCourseIds(
+          params.userId,
+          audienceCourseIds,
+        )
+      : new Set<string>();
+
     return {
-      webinars: webinars.map((webinar) => this.mapWebinarResponse(webinar)),
+      webinars: webinars.map((webinar) => {
+        const courseIds = this.getWebinarCourseIds(webinar);
+
+        return this.mapWebinarResponse(webinar, {
+          courseTitleMap,
+          isEligible: params.userId
+            ? this.webinarAudienceService.isEligible(
+                courseIds,
+                enrolledCourseIds,
+              )
+            : true,
+        });
+      }),
       pagination: this.buildPaginationMeta(totalItems, pagination),
     };
   }
@@ -942,15 +1006,27 @@ export class WebinarsService {
       throw new NotFoundException('Webinar not found');
     }
 
-    return this.mapWebinarResponse(webinar);
+    const courseIds = this.getWebinarCourseIds(webinar);
+    const courseTitleMap =
+      await this.webinarAudienceService.getCourseTitleMap(courseIds);
+
+    return this.mapWebinarResponse(webinar, {
+      courseTitleMap,
+      isEligible: true,
+    });
   }
 
-  private mapWebinarResponse(webinar: Webinar) {
-    const courseIds = (webinar.audienceCourses ?? [])
-      .map((audienceCourse) => audienceCourse.courseId)
-      .sort((firstCourseId, secondCourseId) =>
-        firstCourseId.localeCompare(secondCourseId),
-      );
+  private mapWebinarResponse(
+    webinar: Webinar,
+    options: {
+      courseTitleMap: ReadonlyMap<string, string>;
+      isEligible: boolean;
+    },
+  ) {
+    const courseIds = this.getWebinarCourseIds(webinar);
+    const courseNames = courseIds
+      .map((courseId) => options.courseTitleMap.get(courseId))
+      .filter((courseName): courseName is string => Boolean(courseName));
 
     return {
       id: webinar.id,
@@ -966,7 +1042,9 @@ export class WebinarsService {
       audienceSettings: {
         isForAllUsers: courseIds.length === 0,
         courseIds,
+        courseNames,
       },
+      isEligible: options.isEligible,
       createdByAdminId: webinar.createdByAdminId,
       updatedByAdminId: webinar.updatedByAdminId,
       createdAt: webinar.createdAt,
@@ -979,6 +1057,7 @@ export class WebinarsService {
     courseIds?: string[] | null,
   ): Promise<void> {
     const normalizedCourseIds = this.normalizeCourseIds(courseIds);
+    await this.webinarAudienceService.validateCourseIds(normalizedCourseIds);
 
     await this.webinarAudienceCourseRepository.delete({ webinarId });
 
@@ -1010,6 +1089,55 @@ export class WebinarsService {
     }
 
     return [...new Set(normalizedCourseIds)];
+  }
+
+  private getWebinarCourseIds(webinar: Webinar): string[] {
+    return (webinar.audienceCourses ?? [])
+      .map((audienceCourse) => audienceCourse.courseId)
+      .sort((firstCourseId, secondCourseId) =>
+        firstCourseId.localeCompare(secondCourseId),
+      );
+  }
+
+  private async assertUserCanAccessWebinar(
+    webinarId: string,
+    userId: string,
+  ): Promise<void> {
+    const audienceCourses =
+      await this.webinarAudienceCourseRepository.find({
+        where: { webinarId },
+      });
+    const courseIds = audienceCourses.map(
+      (audienceCourse) => audienceCourse.courseId,
+    );
+
+    if (courseIds.length === 0) {
+      return;
+    }
+
+    const enrolledCourseIds =
+      await this.webinarAudienceService.getUserEnrolledCourseIds(
+        userId,
+        courseIds,
+      );
+
+    if (
+      this.webinarAudienceService.isEligible(courseIds, enrolledCourseIds)
+    ) {
+      return;
+    }
+
+    const courseTitleMap =
+      await this.webinarAudienceService.getCourseTitleMap(courseIds);
+    const courseNames = courseIds
+      .map((courseId) => courseTitleMap.get(courseId))
+      .filter((courseName): courseName is string => Boolean(courseName));
+
+    throw new ForbiddenException(
+      courseNames.length > 0
+        ? `This webinar is available only to users enrolled in: ${courseNames.join(', ')}.`
+        : 'This webinar is available only to selected course members.',
+    );
   }
 
   private normalizeNullableString(value?: string | null): string | null {

@@ -16,12 +16,13 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 import {
-  ConfirmStoreGooglePlayDemoDto,
-  ConfirmStoreStripeDemoDto,
   CreateStoreOrderDto,
   PublicStorePackageQueryDto,
   StoreOrderHistoryQueryDto,
   StorePackageQuoteQueryDto,
+  StoreProviderQueryDto,
+  VerifyStoreAppStorePurchaseDto,
+  VerifyStoreGooglePlayPurchaseDto,
 } from '../dto/package-store.dto';
 import { PackageStoreService } from '../services/package-store.service';
 
@@ -31,16 +32,23 @@ export class PackageStoreController {
   constructor(private readonly packageStoreService: PackageStoreService) {}
 
   /**
-   * Main Shop screen:
-   * balances, package summaries and latest-order information.
+   * Main Shop screen. The provider is required so the API returns only
+   * packages that are purchasable on the caller's current app store.
    */
   @Get('shop')
-  async getShop(@Req() request: AuthenticatedRequest) {
-    return this.packageStoreService.getShop(this.getUserId(request));
+  async getShop(
+    @Query() query: StoreProviderQueryDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.packageStoreService.getShop(
+      this.getUserId(request),
+      query.provider,
+    );
   }
 
   /**
-   * AI Refill, Streak Freeze and CV Credit listing.
+   * Dynamic store catalog. Flutter sends google_play on Android and
+   * app_store on iOS, then queries the returned product IDs from the store.
    */
   @Get('packages')
   async findPackages(
@@ -58,10 +66,6 @@ export class PackageStoreController {
     return this.packageStoreService.getMyBalances(this.getUserId(request));
   }
 
-  /**
-   * Unified order history:
-   * courses, AI refills, streak freezes and CV credits.
-   */
   @Get('orders/history')
   async findPurchaseHistory(
     @Query() query: StoreOrderHistoryQueryDto,
@@ -91,8 +95,12 @@ export class PackageStoreController {
   async findPackageById(
     @Param('packageId', new ParseUUIDPipe({ version: '4' }))
     packageId: string,
+    @Query() query: StoreProviderQueryDto,
   ) {
-    return this.packageStoreService.findPublicPackageById(packageId);
+    return this.packageStoreService.findPublicPackageById(
+      packageId,
+      query.provider,
+    );
   }
 
   @Post('orders')
@@ -103,9 +111,6 @@ export class PackageStoreController {
     return this.packageStoreService.createOrder(this.getUserId(request), dto);
   }
 
-  /**
-   * Returns the payment options for the Checkout screen.
-   */
   @Get('orders/:orderId/checkout')
   async getCheckout(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))
@@ -118,28 +123,37 @@ export class PackageStoreController {
     );
   }
 
-  @Post('orders/:orderId/google-play/demo-confirm')
-  async confirmGooglePlayDemo(
+  /**
+   * Stable Android contract. During development it uses the guarded local
+   * verifier. Later the service implementation is replaced by the Google
+   * Play Developer API without changing Flutter's endpoint or payload.
+   */
+  @Post('orders/:orderId/google-play/verify')
+  async verifyGooglePlayPurchase(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
-    @Body() dto: ConfirmStoreGooglePlayDemoDto,
+    @Body() dto: VerifyStoreGooglePlayPurchaseDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.packageStoreService.confirmGooglePlayDemo({
+    return this.packageStoreService.verifyGooglePlayPurchase({
       userId: this.getUserId(request),
       orderId,
       dto,
     });
   }
 
-  @Post('orders/:orderId/stripe/demo-confirm')
-  async confirmStripeDemo(
+  /**
+   * Stable iOS contract. It can be exercised with local StoreKit testing in
+   * development, then backed by App Store Server API verification later.
+   */
+  @Post('orders/:orderId/app-store/verify')
+  async verifyAppStorePurchase(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
-    @Body() dto: ConfirmStoreStripeDemoDto,
+    @Body() dto: VerifyStoreAppStorePurchaseDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.packageStoreService.confirmStripeDemo({
+    return this.packageStoreService.verifyAppStorePurchase({
       userId: this.getUserId(request),
       orderId,
       dto,
@@ -159,12 +173,10 @@ export class PackageStoreController {
     );
 
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
-
     response.setHeader(
       'Content-Disposition',
       `attachment; filename="${invoice.fileName}"`,
     );
-
     response.send(invoice.html);
   }
 

@@ -145,7 +145,10 @@ export class UserBlocksService {
     };
   }
 
-  async hasBlockBetween(userOneId: string, userTwoId: string): Promise<boolean> {
+  async hasBlockBetween(
+    userOneId: string,
+    userTwoId: string,
+  ): Promise<boolean> {
     if (userOneId === userTwoId) {
       return false;
     }
@@ -197,13 +200,29 @@ export class UserBlocksService {
       },
     });
 
-    const data = blocks.map((block) => ({
-      blockedUserId: block.blocked.id,
-      fullName: block.blocked.fullName,
-      email: block.blocked.email,
-      phone: block.blocked.phone,
-      blockedAt: block.createdAt,
-    }));
+    const data = blocks.map((block) => {
+      const blockedUser = block.blocked;
+
+      return {
+        /*
+         * Always use the preserved UUID column.
+         * The related User row may already be deleted.
+         */
+        blockedUserId: block.blockedId,
+
+        fullName: blockedUser?.fullName ?? 'Deleted User',
+
+        email: blockedUser?.email ?? null,
+
+        phone: blockedUser?.phone ?? null,
+
+        avatarUrl: blockedUser?.avatarUrl ?? null,
+
+        isDeleted: blockedUser === null,
+
+        blockedAt: block.createdAt,
+      };
+    });
 
     return {
       message: 'Blocked users fetched successfully',

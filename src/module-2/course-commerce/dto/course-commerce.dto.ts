@@ -1,11 +1,11 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsEnum,
-  IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -18,17 +18,25 @@ import {
   CoursePurchaseStatus,
 } from '../types/course-commerce.type';
 
+const trim = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
+
+const upper = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim().toUpperCase() : value;
+
+const productIdPattern = /^[A-Za-z0-9._-]+$/;
+
 export class CourseQuoteQueryDto {
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
-  @IsEnum(CommerceCurrency)
-  currency: CommerceCurrency;
+  @IsEnum(CoursePaymentProvider)
+  provider: CoursePaymentProvider;
 
   @IsOptional()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
+  @Transform(upper)
+  @IsEnum(CommerceCurrency)
+  currency?: CommerceCurrency;
+
+  @IsOptional()
+  @Transform(upper)
   @IsString()
   @MaxLength(80)
   couponCode?: string;
@@ -38,44 +46,71 @@ export class CreateCoursePurchaseOrderDto {
   @IsUUID()
   courseId: string;
 
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
-  @IsEnum(CommerceCurrency)
-  currency: CommerceCurrency;
-
   @IsEnum(CoursePaymentProvider)
   paymentProvider: CoursePaymentProvider;
+
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  @Matches(productIdPattern, {
+    message:
+      'productId may contain only letters, numbers, dots, underscores and hyphens.',
+  })
+  productId: string;
+
+  @IsOptional()
+  @Transform(upper)
+  @IsEnum(CommerceCurrency)
+  currency?: CommerceCurrency;
 
   @IsUUID()
   idempotencyKey: string;
 
+  /**
+   * Internal reference only. Google Play and App Store prices/offers control
+   * the actual amount charged by the store.
+   */
   @IsOptional()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
+  @Transform(upper)
   @IsString()
   @MaxLength(80)
   couponCode?: string;
 }
 
-export class ConfirmGooglePlayDemoDto {
+export class VerifyCourseGooglePlayPurchaseDto {
+  @Transform(trim)
   @IsString()
   @MaxLength(255)
   productId: string;
 
+  @Transform(trim)
   @IsString()
-  @MaxLength(1000)
+  @MaxLength(4000)
   purchaseToken: string;
-}
 
-export class ConfirmStripeDemoDto {
+  @IsOptional()
+  @Transform(trim)
   @IsString()
   @MaxLength(255)
-  paymentIntentId: string;
+  transactionId?: string;
+}
 
-  @IsIn(['succeeded', 'failed'])
-  demoResult: 'succeeded' | 'failed';
+export class VerifyCourseAppStorePurchaseDto {
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  productId: string;
+
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  transactionId: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(12000)
+  signedTransactionInfo?: string;
 }
 
 export class PurchaseHistoryQueryDto {

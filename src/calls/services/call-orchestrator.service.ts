@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, OnModuleDestroy } from '@nestjs/common';
 
 import { UserBlocksService } from '../../user-blocks/user-blocks.service';
 import { InitiateCallDto } from '../dto/initiate-call.dto';
@@ -17,10 +17,15 @@ interface PendingIncomingAck {
 }
 
 @Injectable()
-export class CallOrchestratorService {
+export class CallOrchestratorService implements OnModuleDestroy {
   private readonly incomingAckTimeoutMs = 2000;
+  private readonly ringingTimeoutMs = 60_000;
 
   private readonly pendingIncomingAcks = new Map<string, PendingIncomingAck>();
+  private readonly ringingTimeouts = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
   constructor(
     private readonly callService: CallService,
@@ -50,6 +55,8 @@ export class CallOrchestratorService {
       receiver,
       dto,
     });
+
+    this.scheduleRingingTimeout(call);
 
     let socketDelivered = false;
     let foregroundAcknowledged = false;
@@ -133,18 +140,31 @@ export class CallOrchestratorService {
       }
     }
 
+    // The receiver can answer or reject while initiate() is waiting for the
+    // foreground ACK. Return the authoritative status instead of the stale
+    // ringing entity so the caller can close immediately on a fast rejection.
+    const latestCall = (await this.callService.findCallById(call.id)) ?? call;
+
     const media = this.callAgoraTokenService.buildPublisherToken({
-      channelName: call.agoraChannelName,
-      uid: call.callerAgoraUid,
+      channelName: latestCall.agoraChannelName,
+      uid: latestCall.callerAgoraUid,
     });
 
     return {
-      call: this.presentCall(call),
+      call: this.presentCall(latestCall),
       receiver: this.presentUser(receiver),
       media,
       created,
       socketDelivered,
       foregroundAcknowledged,
+    };
+  }
+
+  async getCall(userId: string, callId: string) {
+    const call = await this.callService.getParticipantCall(callId, userId);
+
+    return {
+      call: this.presentCall(call),
     };
   }
 
@@ -183,6 +203,7 @@ export class CallOrchestratorService {
     this.resolveIncomingAcknowledgement(callId, true);
 
     const call = await this.callService.answerRingingCall(callId, userId);
+    this.clearRingingTimeout(callId);
 
     const media = this.callAgoraTokenService.buildPublisherToken({
       channelName: call.agoraChannelName,
@@ -205,10 +226,17 @@ export class CallOrchestratorService {
     this.resolveIncomingAcknowledgement(callId, true);
 
     const call = await this.callService.rejectRingingCall(callId, userId);
+    this.clearRingingTimeout(callId);
 
     this.callRealtimeService.emitToUser(call.callerId, 'call:rejected', {
       call: this.presentCall(call),
       rejectedBy: userId,
+    });
+
+    await this.sendCallTerminationPush({
+      userId: call.callerId,
+      callId: call.id,
+      type: 'call_rejected',
     });
 
     return {
@@ -220,10 +248,17 @@ export class CallOrchestratorService {
     this.resolveIncomingAcknowledgement(callId, false);
 
     const call = await this.callService.cancelRingingCall(callId, userId);
+    this.clearRingingTimeout(callId);
 
     this.callRealtimeService.emitToUser(call.receiverId, 'call:cancelled', {
       call: this.presentCall(call),
       cancelledBy: userId,
+    });
+
+    await this.sendCallTerminationPush({
+      userId: call.receiverId,
+      callId: call.id,
+      type: 'call_cancelled',
     });
 
     return {
@@ -231,16 +266,150 @@ export class CallOrchestratorService {
     };
   }
 
+  async timeout(userId: string, callId: string) {
+    this.resolveIncomingAcknowledgement(callId, false);
+
+    const result = await this.callService.timeoutRingingCall(callId, userId);
+    this.clearRingingTimeout(callId);
+
+    if (result.changed) {
+      await this.notifyMissedCall(result.call);
+    }
+
+    return {
+      call: this.presentCall(result.call),
+    };
+  }
+
+  private scheduleRingingTimeout(call: Call): void {
+    if (call.status !== CallStatus.RINGING) {
+      return;
+    }
+
+    this.clearRingingTimeout(call.id);
+
+    const createdAtMs = new Date(call.createdAt).getTime();
+    const elapsedMs = Number.isFinite(createdAtMs)
+      ? Math.max(0, Date.now() - createdAtMs)
+      : 0;
+    const delayMs = Math.max(0, this.ringingTimeoutMs - elapsedMs);
+
+    const timeout = setTimeout(() => {
+      void this.timeoutFromServer(call.id);
+    }, delayMs);
+
+    this.ringingTimeouts.set(call.id, timeout);
+  }
+
+  private async timeoutFromServer(callId: string): Promise<void> {
+    this.ringingTimeouts.delete(callId);
+    this.resolveIncomingAcknowledgement(callId, false);
+
+    try {
+      const result = await this.callService.timeoutRingingCall(callId);
+      if (result.changed) {
+        await this.notifyMissedCall(result.call);
+      }
+    } catch (error) {
+      console.error('[CallTimeout] Unable to expire ringing call', {
+        callId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async notifyMissedCall(call: Call): Promise<void> {
+    const payload = {
+      call: this.presentCall(call),
+      reason: 'timeout',
+    };
+
+    this.callRealtimeService.emitToUser(call.callerId, 'call:ended', payload);
+    this.callRealtimeService.emitToUser(call.receiverId, 'call:ended', payload);
+
+    await Promise.all([
+      this.sendCallTerminationPush({
+        userId: call.callerId,
+        callId: call.id,
+        type: 'call_ended',
+      }),
+      this.sendCallTerminationPush({
+        userId: call.receiverId,
+        callId: call.id,
+        type: 'call_ended',
+      }),
+    ]);
+  }
+
+  private clearRingingTimeout(callId: string): void {
+    const timeout = this.ringingTimeouts.get(callId);
+    if (!timeout) {
+      return;
+    }
+
+    clearTimeout(timeout);
+    this.ringingTimeouts.delete(callId);
+  }
+
+  onModuleDestroy(): void {
+    for (const timeout of this.ringingTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.ringingTimeouts.clear();
+
+    for (const pending of this.pendingIncomingAcks.values()) {
+      clearTimeout(pending.timeout);
+      pending.resolve(false);
+    }
+    this.pendingIncomingAcks.clear();
+  }
+
+  private async sendCallTerminationPush(params: {
+    userId: string;
+    callId: string;
+    type: 'call_cancelled' | 'call_rejected' | 'call_ended';
+  }): Promise<void> {
+    const devices = await this.userDeviceService.findActiveFcmDevicesByUsers([
+      params.userId,
+    ]);
+
+    const tokens = devices
+      .map((device) => device.fcmToken)
+      .filter(
+        (token): token is string =>
+          typeof token === 'string' && token.trim().length > 0,
+      );
+
+    if (tokens.length === 0) {
+      return;
+    }
+
+    await this.firebaseAdminService.sendDataToTokens({
+      tokens,
+      data: {
+        type: params.type,
+        callId: params.callId,
+      },
+    });
+  }
+
   async end(userId: string, callId: string) {
     this.resolveIncomingAcknowledgement(callId, false);
 
     const call = await this.callService.endCall(callId, userId);
+    this.clearRingingTimeout(callId);
 
     const otherUserId = this.getOtherUserId(call, userId);
 
     this.callRealtimeService.emitToUser(otherUserId, 'call:ended', {
       call: this.presentCall(call),
       endedBy: userId,
+    });
+
+    await this.sendCallTerminationPush({
+      userId: otherUserId,
+      callId: call.id,
+      type: 'call_ended',
     });
 
     return {

@@ -7,13 +7,18 @@ import { Course } from '../courses/entities/course.entity';
 import { AdminCourseCommerceController } from './controllers/admin-course-commerce.controller';
 import { CourseCommerceController } from './controllers/course-commerce.controller';
 import { CourseEnrollment } from './entities/course-enrollment.entity';
+import { CourseOrderProviderSnapshot } from './entities/course-order-provider-snapshot.entity';
+import { CourseOrderProviderTransaction } from './entities/course-order-provider-transaction.entity';
 import { CoursePaymentAttempt } from './entities/course-payment-attempt.entity';
 import { CoursePurchaseOrder } from './entities/course-purchase-order.entity';
+import { CourseProviderProduct } from './entities/course-provider-product.entity';
 import { DemoForexRateService } from './providers/demo-forex-rate.service';
 import { DemoPaymentGatewayService } from './providers/demo-payment-gateway.service';
 import { FOREX_RATE_PROVIDER } from './providers/forex-rate-provider';
 import { AdminCourseCommerceService } from './services/admin-course-commerce.service';
 import { CourseCommerceService } from './services/course-commerce.service';
+import { StorePackageProviderProduct } from 'src/package-store/entities/store-package-provider-product.entity';
+import { StoreOrderProviderTransaction } from 'src/package-store/entities/store-order-provider-transaction.entity';
 
 @Module({
   imports: [
@@ -24,6 +29,12 @@ import { CourseCommerceService } from './services/course-commerce.service';
       CoursePurchaseOrder,
       CoursePaymentAttempt,
       CourseEnrollment,
+      CourseProviderProduct,
+      CourseOrderProviderSnapshot,
+      CourseOrderProviderTransaction,
+
+      StorePackageProviderProduct,
+      StoreOrderProviderTransaction,
     ]),
   ],
   controllers: [CourseCommerceController, AdminCourseCommerceController],

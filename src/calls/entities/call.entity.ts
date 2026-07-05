@@ -43,19 +43,19 @@ export class Call {
   callerId: string;
 
   @ManyToOne(() => User, {
-    onDelete: 'CASCADE',
+    createForeignKeyConstraints: false,
   })
   @JoinColumn({ name: 'callerId' })
-  caller: User;
+  caller: User | null;
 
   @Column({ type: 'uuid' })
   receiverId: string;
 
   @ManyToOne(() => User, {
-    onDelete: 'CASCADE',
+    createForeignKeyConstraints: false,
   })
   @JoinColumn({ name: 'receiverId' })
-  receiver: User;
+  receiver: User | null;
 
   @Column({
     type: 'enum',

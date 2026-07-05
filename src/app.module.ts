@@ -36,6 +36,11 @@ import { AiTutorModule } from './ai-tutor/ai-tutor.module';
 import { LeaderboardModule } from './module-2/leaderboard/leaderboard.module';
 import { PackageStoreModule } from './package-store/package-store.module';
 import { CallsModule } from './calls/calls.module';
+import { UserSettingsModule } from './user_settings/user-settings.module';
+import { LearningActivityModule } from './module-2/learning-activity/learning-activity.module';
+import { RevenueAnalyticsModule } from './revenue-analytics/revenue-analytics.module';
+import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
+import { GooglePlayBillingModule } from './billing/google-play/google-play-billing.module';
 
 @Module({
   imports: [
@@ -93,6 +98,11 @@ import { CallsModule } from './calls/calls.module';
     LeaderboardModule,
     PackageStoreModule,
     CallsModule,
+    UserSettingsModule,
+    LearningActivityModule,
+    RevenueAnalyticsModule,
+    AdminDashboardModule,
+    GooglePlayBillingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -8,10 +8,15 @@ import { UserLessonProgress } from './entities/user-lesson-progress.entity';
 import { ProgressService } from './services/progress.service';
 import { ScoringModule } from '../scoring/scoring.module';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+import { Lesson } from '../lessons/entities/lesson.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([UserLessonProgress, UserCourseProgress]),
+    TypeOrmModule.forFeature([
+      UserLessonProgress,
+      UserCourseProgress,
+      Lesson,
+    ]),
     DailyChallengesModule,
     ScoringModule,
     LeaderboardModule,

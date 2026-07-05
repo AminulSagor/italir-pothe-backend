@@ -5,12 +5,15 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
 import { User } from 'src/users/entities/user.entity';
 import { Course } from '../../courses/entities/course.entity';
+import { CourseOrderProviderSnapshot } from './course-order-provider-snapshot.entity';
+import { CourseOrderProviderTransaction } from './course-order-provider-transaction.entity';
 import {
   CommerceCurrency,
   CoursePaymentProvider,
@@ -147,14 +150,28 @@ export class CoursePurchaseOrder {
   updatedAt: Date;
 
   @ManyToOne(() => User, {
-    onDelete: 'RESTRICT',
+    createForeignKeyConstraints: false,
   })
-  @JoinColumn({ name: 'userId' })
-  user: User;
+  @JoinColumn({
+    name: 'userId',
+  })
+  user: User | null;
 
   @ManyToOne(() => Course, {
     onDelete: 'RESTRICT',
   })
   @JoinColumn({ name: 'courseId' })
   course: Course;
+
+  @OneToOne(
+    () => CourseOrderProviderSnapshot,
+    (providerSnapshot) => providerSnapshot.order,
+  )
+  providerSnapshot: CourseOrderProviderSnapshot;
+
+  @OneToOne(
+    () => CourseOrderProviderTransaction,
+    (providerTransaction) => providerTransaction.order,
+  )
+  providerTransaction: CourseOrderProviderTransaction;
 }

@@ -6,25 +6,25 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { createHash, randomUUID } from 'crypto';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { Course, CourseStatus } from '../../courses/entities/course.entity';
 import {
-  ConfirmGooglePlayDemoDto,
-  ConfirmStripeDemoDto,
+  VerifyCourseAppStorePurchaseDto,
+  VerifyCourseGooglePlayPurchaseDto,
   CourseQuoteQueryDto,
   CreateCoursePurchaseOrderDto,
   MyEnrollmentQueryDto,
   PurchaseHistoryQueryDto,
 } from '../dto/course-commerce.dto';
 import { CourseEnrollment } from '../entities/course-enrollment.entity';
+import { CourseOrderProviderSnapshot } from '../entities/course-order-provider-snapshot.entity';
+import { CourseOrderProviderTransaction } from '../entities/course-order-provider-transaction.entity';
 import { CoursePaymentAttempt } from '../entities/course-payment-attempt.entity';
 import { CoursePurchaseOrder } from '../entities/course-purchase-order.entity';
-import {
-  DemoPaymentConfirmation,
-  DemoPaymentGatewayService,
-} from '../providers/demo-payment-gateway.service';
+import { CourseProviderProduct } from '../entities/course-provider-product.entity';
+import { DemoPaymentGatewayService } from '../providers/demo-payment-gateway.service';
 import { FOREX_RATE_PROVIDER } from '../providers/forex-rate-provider';
 import type { ForexRateProvider } from '../providers/forex-rate-provider';
 import {
@@ -33,6 +33,9 @@ import {
   CourseEnrollmentStatus,
   CoursePaymentAttemptStatus,
   CoursePaymentProvider,
+  CourseProviderEnvironment,
+  CourseProviderProductType,
+  CourseProviderVerificationStatus,
   CoursePurchaseStatus,
 } from '../types/course-commerce.type';
 import {
@@ -43,6 +46,8 @@ import {
   subtractMoney,
   zeroMoney,
 } from 'src/common/utils/commerce-money.util';
+import { StorePackageProviderProduct } from 'src/package-store/entities/store-package-provider-product.entity';
+import { StoreOrderProviderTransaction } from 'src/package-store/entities/store-order-provider-transaction.entity';
 
 type CalculatedCourseQuote = {
   basePriceEur: string;
@@ -69,6 +74,12 @@ export class CourseCommerceService {
     @InjectRepository(CourseEnrollment)
     private readonly enrollmentRepository: Repository<CourseEnrollment>,
 
+    @InjectRepository(StorePackageProviderProduct)
+    private readonly storePackageProviderProductRepository: Repository<StorePackageProviderProduct>,
+
+    @InjectRepository(StoreOrderProviderTransaction)
+    private readonly storeOrderProviderTransactionRepository: Repository<StoreOrderProviderTransaction>,
+
     private readonly dataSource: DataSource,
 
     private readonly demoPaymentGateway: DemoPaymentGatewayService,
@@ -80,11 +91,27 @@ export class CourseCommerceService {
   async getQuote(userId: string, courseId: string, query: CourseQuoteQueryDto) {
     const course = await this.getPublishedCourse(courseId);
 
-    const quote = await this.calculateQuote(
-      course,
-      query.currency,
-      query.couponCode,
-    );
+    let providerProduct: CourseProviderProduct | null = null;
+
+    if (!course.isFree) {
+      if (!query.provider) {
+        throw new BadRequestException(
+          'Payment provider is required for a paid course. ' +
+            'Use provider=google_play on Android or provider=app_store on iOS.',
+        );
+      }
+
+      providerProduct = this.requireActiveProviderProduct(
+        course,
+        query.provider,
+      );
+    }
+
+    const currency = query.currency ?? CommerceCurrency.EUR;
+
+    this.assertStoreCouponNotUsed(query.couponCode);
+
+    const quote = await this.calculateQuote(course, currency);
 
     const enrollment = await this.enrollmentRepository.findOne({
       where: {
@@ -101,6 +128,11 @@ export class CourseCommerceService {
         subtitle: course.subtitle,
         isFree: course.isFree,
       },
+
+      storeProduct: providerProduct
+        ? this.mapProviderProduct(providerProduct)
+        : null,
+
       baseCurrency: CommerceCurrency.EUR,
       selectedCurrency: quote.selectedCurrency,
       basePriceEur: quote.basePriceEur,
@@ -113,16 +145,15 @@ export class CourseCommerceService {
       payableAmountEur: quote.payableAmountEur,
       forexRate: quote.forexRate,
       alreadyEnrolled: Boolean(enrollment),
-      supportedProviders: [
-        {
-          provider: CoursePaymentProvider.GOOGLE_PLAY,
-          demo: true,
-        },
-        {
-          provider: CoursePaymentProvider.STRIPE,
-          demo: true,
-        },
-      ],
+
+      supportedProviders: (course.providerProducts ?? [])
+        .filter((item) => item.isActive)
+        .map((item) => this.mapProviderProduct(item)),
+
+      developmentVerification: this.demoPaymentGateway.isDemoModeEnabled(),
+
+      pricingNote:
+        'Google Play or App Store controls the final localized amount charged.',
     };
   }
 
@@ -134,6 +165,19 @@ export class CourseCommerceService {
         'This course is free and does not require a purchase order.',
       );
     }
+
+    const providerProduct = this.requireActiveProviderProduct(
+      course,
+      dto.paymentProvider,
+      dto.productId,
+    );
+
+    await this.assertProductNotMappedToPackage(
+      dto.paymentProvider,
+      providerProduct.productId,
+    );
+
+    this.assertStoreCouponNotUsed(dto.couponCode);
 
     const existingEnrollment = await this.enrollmentRepository.findOne({
       where: {
@@ -154,6 +198,8 @@ export class CourseCommerceService {
       },
       relations: {
         course: true,
+        providerSnapshot: true,
+        providerTransaction: true,
       },
     });
 
@@ -176,34 +222,69 @@ export class CourseCommerceService {
       return response;
     }
 
-    const quote = await this.calculateQuote(
-      course,
-      dto.currency,
-      dto.couponCode,
-    );
+    const selectedCurrency = dto.currency ?? CommerceCurrency.EUR;
+    const quote = await this.calculateQuote(course, selectedCurrency);
 
-    const order = this.purchaseOrderRepository.create({
-      orderNumber: this.generateOrderNumber(),
-      userId,
-      courseId: course.id,
-      basePriceEur: quote.basePriceEur,
-      couponCodeSnapshot: quote.couponCode,
-      discountPercentage: quote.discountPercentage,
-      discountAmountEur: quote.discountAmountEur,
-      payableAmountEur: quote.payableAmountEur,
-      paymentCurrency: quote.selectedCurrency,
-      forexRateSnapshot: quote.forexRate,
-      paymentAmount: quote.payableAmount,
-      paymentProvider: dto.paymentProvider,
-      status: CoursePurchaseStatus.PENDING,
-      idempotencyKey: dto.idempotencyKey,
-      paidAt: null,
-      refundedAt: null,
+    const orderId = await this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(CoursePurchaseOrder);
+      const providerSnapshotRepository = manager.getRepository(
+        CourseOrderProviderSnapshot,
+      );
+      const providerTransactionRepository = manager.getRepository(
+        CourseOrderProviderTransaction,
+      );
+
+      const order = await orderRepository.save(
+        orderRepository.create({
+          orderNumber: this.generateOrderNumber(),
+          userId,
+          courseId: course.id,
+          basePriceEur: quote.basePriceEur,
+          couponCodeSnapshot: quote.couponCode,
+          discountPercentage: quote.discountPercentage,
+          discountAmountEur: quote.discountAmountEur,
+          payableAmountEur: quote.payableAmountEur,
+          paymentCurrency: quote.selectedCurrency,
+          forexRateSnapshot: quote.forexRate,
+          paymentAmount: quote.payableAmount,
+          paymentProvider: providerProduct.provider,
+          status: CoursePurchaseStatus.PENDING,
+          idempotencyKey: dto.idempotencyKey,
+          paidAt: null,
+          refundedAt: null,
+        }),
+      );
+
+      await providerSnapshotRepository.save(
+        providerSnapshotRepository.create({
+          orderId: order.id,
+          providerProductId: providerProduct.id,
+          provider: providerProduct.provider,
+          productId: providerProduct.productId,
+          productType: providerProduct.productType,
+          basePlanId: providerProduct.basePlanId,
+          offerId: providerProduct.offerId,
+        }),
+      );
+
+      await providerTransactionRepository.save(
+        providerTransactionRepository.create({
+          orderId: order.id,
+          provider: providerProduct.provider,
+          productId: providerProduct.productId,
+          tokenHash: null,
+          providerTransactionId: null,
+          environment: CourseProviderEnvironment.DEVELOPMENT,
+          verificationStatus: CourseProviderVerificationStatus.PENDING,
+          verifiedAt: null,
+          verificationPayload: null,
+        }),
+      );
+
+      return order.id;
     });
 
-    const savedOrder = await this.purchaseOrderRepository.save(order);
-
-    savedOrder.course = course;
+    const savedOrder = await this.getOwnedOrder(userId, orderId);
 
     return {
       ...(await this.buildOrderResponse(savedOrder)),
@@ -211,38 +292,84 @@ export class CourseCommerceService {
     };
   }
 
-  async confirmGooglePlayDemo(params: {
+  async verifyGooglePlayPurchase(params: {
     userId: string;
     orderId: string;
-    dto: ConfirmGooglePlayDemoDto;
+    dto: VerifyCourseGooglePlayPurchaseDto;
   }) {
+    this.demoPaymentGateway.assertDemoModeEnabled();
+
     const order = await this.getOwnedOrder(params.userId, params.orderId);
 
     this.assertConfirmableProvider(order, CoursePaymentProvider.GOOGLE_PLAY);
 
-    const confirmation = this.demoPaymentGateway.confirmGooglePlay({
+    if (params.dto.productId !== order.providerSnapshot.productId) {
+      throw new BadRequestException(
+        'Google Play product ID does not match the ordered course.',
+      );
+    }
+
+    const tokenHash = createHash('sha256')
+      .update(params.dto.purchaseToken)
+      .digest('hex');
+    const providerReference =
+      params.dto.transactionId?.trim() || `google-play:${tokenHash}`;
+
+    await this.markDevelopmentTransactionVerified({
       order,
-      dto: params.dto,
+      tokenHash,
+      providerTransactionId: providerReference,
+      payload: {
+        source: 'development_google_play_verifier',
+      },
     });
 
-    return this.completePayment(order.id, confirmation);
+    return this.completePayment({
+      orderId: order.id,
+      provider: CoursePaymentProvider.GOOGLE_PLAY,
+      providerReference,
+    });
   }
 
-  async confirmStripeDemo(params: {
+  async verifyAppStorePurchase(params: {
     userId: string;
     orderId: string;
-    dto: ConfirmStripeDemoDto;
+    dto: VerifyCourseAppStorePurchaseDto;
   }) {
+    this.demoPaymentGateway.assertDemoModeEnabled();
+
     const order = await this.getOwnedOrder(params.userId, params.orderId);
 
-    this.assertConfirmableProvider(order, CoursePaymentProvider.STRIPE);
+    this.assertConfirmableProvider(order, CoursePaymentProvider.APP_STORE);
 
-    const confirmation = this.demoPaymentGateway.confirmStripe({
+    if (params.dto.productId !== order.providerSnapshot.productId) {
+      throw new BadRequestException(
+        'App Store product ID does not match the ordered course.',
+      );
+    }
+
+    const providerReference = params.dto.transactionId.trim();
+    const tokenHash = params.dto.signedTransactionInfo
+      ? createHash('sha256')
+          .update(params.dto.signedTransactionInfo)
+          .digest('hex')
+      : null;
+
+    await this.markDevelopmentTransactionVerified({
       order,
-      dto: params.dto,
+      tokenHash,
+      providerTransactionId: providerReference,
+      payload: {
+        source: 'development_storekit_verifier',
+        signedTransactionProvided: Boolean(params.dto.signedTransactionInfo),
+      },
     });
 
-    return this.completePayment(order.id, confirmation);
+    return this.completePayment({
+      orderId: order.id,
+      provider: CoursePaymentProvider.APP_STORE,
+      providerReference,
+    });
   }
 
   async findOrderById(userId: string, orderId: string) {
@@ -258,6 +385,11 @@ export class CourseCommerceService {
     const queryBuilder = this.purchaseOrderRepository
       .createQueryBuilder('purchaseOrder')
       .leftJoinAndSelect('purchaseOrder.course', 'course')
+      .leftJoinAndSelect('purchaseOrder.providerSnapshot', 'providerSnapshot')
+      .leftJoinAndSelect(
+        'purchaseOrder.providerTransaction',
+        'providerTransaction',
+      )
       .where('purchaseOrder.userId = :userId', { userId })
       .orderBy('purchaseOrder.createdAt', 'DESC')
       .skip((page - 1) * limit)
@@ -400,48 +532,147 @@ export class CourseCommerceService {
     };
   }
 
-  private async completePayment(
-    orderId: string,
-    confirmation: DemoPaymentConfirmation,
-  ) {
+  private async markDevelopmentTransactionVerified(params: {
+    order: CoursePurchaseOrder;
+    tokenHash: string | null;
+    providerTransactionId: string;
+    payload: Record<string, unknown>;
+  }) {
+    await this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(CourseOrderProviderTransaction);
+      const transaction = await repository.findOne({
+        where: {
+          orderId: params.order.id,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!transaction) {
+        throw new ConflictException(
+          'The course order is missing its provider transaction record.',
+        );
+      }
+
+      if (transaction.provider !== params.order.providerSnapshot.provider) {
+        throw new ConflictException(
+          'The provider transaction does not match the order provider.',
+        );
+      }
+
+      await this.lockProviderTransactionIdentity(
+        manager,
+        transaction.provider,
+        params.providerTransactionId,
+        params.tokenHash,
+      );
+
+      await this.assertTransactionNotUsedByPackage(
+        transaction.provider,
+        params.providerTransactionId,
+        params.tokenHash,
+        manager,
+      );
+
+      const duplicateQuery = repository
+        .createQueryBuilder('providerTransaction')
+        .where('providerTransaction.provider = :provider', {
+          provider: transaction.provider,
+        })
+        .andWhere('providerTransaction.id != :transactionId', {
+          transactionId: transaction.id,
+        })
+        .andWhere(
+          `(
+            providerTransaction.providerTransactionId = :providerTransactionId
+            ${params.tokenHash ? 'OR providerTransaction.tokenHash = :tokenHash' : ''}
+          )`,
+          {
+            providerTransactionId: params.providerTransactionId,
+            ...(params.tokenHash ? { tokenHash: params.tokenHash } : {}),
+          },
+        );
+
+      const duplicate = await duplicateQuery.getOne();
+
+      if (duplicate) {
+        throw new ConflictException(
+          'This store transaction has already been assigned to another course order.',
+        );
+      }
+
+      if (
+        transaction.verificationStatus ===
+          CourseProviderVerificationStatus.VERIFIED &&
+        transaction.providerTransactionId === params.providerTransactionId &&
+        transaction.tokenHash === params.tokenHash
+      ) {
+        return;
+      }
+
+      transaction.tokenHash = params.tokenHash;
+      transaction.providerTransactionId = params.providerTransactionId;
+      transaction.environment = CourseProviderEnvironment.DEVELOPMENT;
+      transaction.verificationStatus =
+        CourseProviderVerificationStatus.VERIFIED;
+      transaction.verifiedAt = new Date();
+      transaction.verificationPayload = params.payload;
+
+      await repository.save(transaction);
+    });
+  }
+
+  private async completePayment(params: {
+    orderId: string;
+    provider: CoursePaymentProvider;
+    providerReference: string;
+  }) {
     return this.dataSource.transaction(async (manager) => {
       const orderRepository = manager.getRepository(CoursePurchaseOrder);
-
       const attemptRepository = manager.getRepository(CoursePaymentAttempt);
-
       const enrollmentRepository = manager.getRepository(CourseEnrollment);
 
       const order = await orderRepository
         .createQueryBuilder('purchaseOrder')
         .setLock('pessimistic_write')
-        .where('purchaseOrder.id = :orderId', { orderId })
+        .where('purchaseOrder.id = :orderId', { orderId: params.orderId })
         .getOne();
 
       if (!order) {
         throw new NotFoundException('Purchase order not found.');
       }
 
-      if (order.status === CoursePurchaseStatus.PAID) {
-        const enrollment = await enrollmentRepository.findOne({
-          where: {
-            userId: order.userId,
-            courseId: order.courseId,
-          },
-        });
+      const [course, providerSnapshot, providerTransaction] = await Promise.all(
+        [
+          manager.getRepository(Course).findOne({
+            where: { id: order.courseId },
+          }),
+          manager.getRepository(CourseOrderProviderSnapshot).findOne({
+            where: { orderId: order.id },
+          }),
+          manager.getRepository(CourseOrderProviderTransaction).findOne({
+            where: { orderId: order.id },
+          }),
+        ],
+      );
 
-        return {
-          message: 'Purchase was already completed.',
-          order: await this.buildOrderResponse(order),
-          enrollment: enrollment
-            ? {
-                id: enrollment.id,
-                courseId: enrollment.courseId,
-                status: enrollment.status,
-                accessType: enrollment.accessType,
-                enrolledAt: enrollment.enrolledAt,
-              }
-            : null,
-        };
+      if (!providerSnapshot || !providerTransaction) {
+        throw new ConflictException(
+          'The course order is missing provider verification records.',
+        );
+      }
+
+      if (course) {
+        order.course = course;
+      }
+      order.providerSnapshot = providerSnapshot;
+      order.providerTransaction = providerTransaction;
+
+      if (order.status === CoursePurchaseStatus.PAID) {
+        throw new ConflictException(
+          'This course purchase order has already been completed.',
+        );
       }
 
       if (
@@ -453,14 +684,42 @@ export class CourseCommerceService {
         );
       }
 
+      if (
+        order.paymentProvider !== params.provider ||
+        order.providerSnapshot.provider !== params.provider ||
+        order.providerTransaction.provider !== params.provider
+      ) {
+        throw new BadRequestException(
+          'Payment provider does not match the course order.',
+        );
+      }
+
+      if (
+        order.providerTransaction.verificationStatus !==
+        CourseProviderVerificationStatus.VERIFIED
+      ) {
+        throw new BadRequestException(
+          'The store transaction has not been verified.',
+        );
+      }
+
+      if (
+        order.providerTransaction.providerTransactionId !==
+        params.providerReference
+      ) {
+        throw new BadRequestException(
+          'Verified transaction reference does not match the purchase.',
+        );
+      }
+
       const existingReference = await attemptRepository.findOne({
         where: {
           paymentProvider: order.paymentProvider,
-          providerReference: confirmation.providerReference,
+          providerReference: params.providerReference,
         },
       });
 
-      if (existingReference) {
+      if (existingReference && existingReference.orderId !== order.id) {
         throw new ConflictException(
           'This payment reference has already been used.',
         );
@@ -468,35 +727,20 @@ export class CourseCommerceService {
 
       const now = new Date();
 
-      const attempt = attemptRepository.create({
-        orderId: order.id,
-        paymentProvider: order.paymentProvider,
-        status: confirmation.succeeded
-          ? CoursePaymentAttemptStatus.SUCCEEDED
-          : CoursePaymentAttemptStatus.FAILED,
-        providerReference: confirmation.providerReference,
-        amount: order.paymentAmount,
-        currency: order.paymentCurrency,
-        failureCode: confirmation.failureCode,
-        failureMessage: confirmation.failureMessage,
-        completedAt: now,
-      });
-
-      await attemptRepository.save(attempt);
-
-      if (!confirmation.succeeded) {
-        order.status = CoursePurchaseStatus.FAILED;
-
-        await orderRepository.save(order);
-
-        return {
-          message: 'Payment failed.',
-          order: await this.buildOrderResponse(order),
-          failure: {
-            code: confirmation.failureCode,
-            message: confirmation.failureMessage,
-          },
-        };
+      if (!existingReference) {
+        await attemptRepository.save(
+          attemptRepository.create({
+            orderId: order.id,
+            paymentProvider: order.paymentProvider,
+            status: CoursePaymentAttemptStatus.SUCCEEDED,
+            providerReference: params.providerReference,
+            amount: order.paymentAmount,
+            currency: order.paymentCurrency,
+            failureCode: null,
+            failureMessage: null,
+            completedAt: now,
+          }),
+        );
       }
 
       order.status = CoursePurchaseStatus.PAID;
@@ -526,11 +770,8 @@ export class CourseCommerceService {
         });
       } else {
         enrollment.orderId = order.id;
-
         enrollment.status = CourseEnrollmentStatus.ACTIVE;
-
         enrollment.accessType = CourseAccessType.LIFETIME;
-
         enrollment.enrolledAt = now;
         enrollment.expiresAt = null;
         enrollment.refundedAt = null;
@@ -678,11 +919,73 @@ export class CourseCommerceService {
     return percentage;
   }
 
+  private assertStoreCouponNotUsed(couponCode?: string) {
+    if (couponCode?.trim()) {
+      throw new BadRequestException(
+        'Backend coupon codes cannot change Google Play or App Store prices. Configure and map a store offer instead.',
+      );
+    }
+  }
+
+  private getActiveProviderProduct(
+    course: Course,
+    provider: CoursePaymentProvider,
+  ) {
+    return (course.providerProducts ?? []).find(
+      (item) => item.provider === provider && item.isActive,
+    );
+  }
+
+  private requireActiveProviderProduct(
+    course: Course,
+    provider: CoursePaymentProvider,
+    productId?: string,
+  ) {
+    const providerProduct = this.getActiveProviderProduct(course, provider);
+
+    if (!providerProduct) {
+      throw new BadRequestException(
+        'This course has no active product mapping for the selected provider.',
+      );
+    }
+
+    if (
+      providerProduct.productType !== CourseProviderProductType.NON_CONSUMABLE
+    ) {
+      throw new BadRequestException(
+        'Lifetime courses must use non-consumable store products.',
+      );
+    }
+
+    if (productId && providerProduct.productId !== productId.trim()) {
+      throw new BadRequestException(
+        'The supplied store product ID does not match the active course mapping.',
+      );
+    }
+
+    return providerProduct;
+  }
+
+  private mapProviderProduct(providerProduct: CourseProviderProduct) {
+    return {
+      id: providerProduct.id,
+      provider: providerProduct.provider,
+      productId: providerProduct.productId,
+      productType: providerProduct.productType,
+      basePlanId: providerProduct.basePlanId,
+      offerId: providerProduct.offerId,
+      isActive: providerProduct.isActive,
+    };
+  }
+
   private async getPublishedCourse(courseId: string): Promise<Course> {
     const course = await this.courseRepository.findOne({
       where: {
         id: courseId,
         status: CourseStatus.PUBLISHED,
+      },
+      relations: {
+        providerProducts: true,
       },
     });
 
@@ -704,6 +1007,8 @@ export class CourseCommerceService {
       },
       relations: {
         course: true,
+        providerSnapshot: true,
+        providerTransaction: true,
       },
     });
 
@@ -718,7 +1023,17 @@ export class CourseCommerceService {
     order: CoursePurchaseOrder,
     provider: CoursePaymentProvider,
   ) {
-    if (order.paymentProvider !== provider) {
+    if (!order.providerSnapshot || !order.providerTransaction) {
+      throw new ConflictException(
+        'This legacy course order does not contain provider records. Create a new order.',
+      );
+    }
+
+    if (
+      order.paymentProvider !== provider ||
+      order.providerSnapshot.provider !== provider ||
+      order.providerTransaction.provider !== provider
+    ) {
       throw new BadRequestException(
         `This order was created for ${order.paymentProvider}.`,
       );
@@ -729,10 +1044,17 @@ export class CourseCommerceService {
     order: CoursePurchaseOrder,
     dto: CreateCoursePurchaseOrderDto,
   ) {
+    if (!order.providerSnapshot) {
+      throw new ConflictException(
+        'The idempotency key belongs to a legacy order without a provider snapshot. Use a new idempotency key.',
+      );
+    }
+
     if (
       order.courseId !== dto.courseId ||
-      order.paymentCurrency !== dto.currency ||
-      order.paymentProvider !== dto.paymentProvider
+      order.paymentCurrency !== (dto.currency ?? CommerceCurrency.EUR) ||
+      order.paymentProvider !== dto.paymentProvider ||
+      order.providerSnapshot.productId !== dto.productId.trim()
     ) {
       throw new ConflictException(
         'The idempotency key is already assigned to a different order request.',
@@ -788,6 +1110,25 @@ export class CourseCommerceService {
         paymentAmount: order.paymentAmount,
       },
       paymentProvider: order.paymentProvider,
+      storeProduct: order.providerSnapshot
+        ? {
+            providerProductId: order.providerSnapshot.providerProductId,
+            provider: order.providerSnapshot.provider,
+            productId: order.providerSnapshot.productId,
+            productType: order.providerSnapshot.productType,
+            basePlanId: order.providerSnapshot.basePlanId,
+            offerId: order.providerSnapshot.offerId,
+          }
+        : null,
+      verification: order.providerTransaction
+        ? {
+            environment: order.providerTransaction.environment,
+            status: order.providerTransaction.verificationStatus,
+            providerTransactionId:
+              order.providerTransaction.providerTransactionId,
+            verifiedAt: order.providerTransaction.verifiedAt,
+          }
+        : null,
       status: order.status,
       paidAt: order.paidAt,
       refundedAt: order.refundedAt,
@@ -808,5 +1149,83 @@ export class CourseCommerceService {
     const randomPart = randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase();
 
     return `IT-SHK-${datePart}-${randomPart}`;
+  }
+
+  private async assertProductNotMappedToPackage(
+    provider: CoursePaymentProvider,
+    productId: string,
+  ): Promise<void> {
+    const packageProduct = await this.storePackageProviderProductRepository
+      .createQueryBuilder('packageProviderProduct')
+      .where('packageProviderProduct.provider = :provider', {
+        provider,
+      })
+      .andWhere('packageProviderProduct.productId = :productId', {
+        productId,
+      })
+      .getOne();
+
+    if (packageProduct) {
+      throw new ConflictException(
+        'This store product belongs to an AI, CV, or streak package and cannot be used to purchase a course.',
+      );
+    }
+  }
+
+  private async lockProviderTransactionIdentity(
+    manager: EntityManager,
+    provider: CoursePaymentProvider,
+    providerTransactionId: string,
+    tokenHash: string | null,
+  ): Promise<void> {
+    const lockKeys = [
+      `billing-transaction:${provider}:reference:${providerTransactionId}`,
+    ];
+
+    if (tokenHash) {
+      lockKeys.push(`billing-transaction:${provider}:token:${tokenHash}`);
+    }
+
+    lockKeys.sort();
+
+    for (const lockKey of lockKeys) {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [lockKey],
+      );
+    }
+  }
+
+  private async assertTransactionNotUsedByPackage(
+    provider: CoursePaymentProvider,
+    providerTransactionId: string,
+    tokenHash: string | null,
+    manager: EntityManager,
+  ): Promise<void> {
+    const repository = manager.getRepository(StoreOrderProviderTransaction);
+
+    const queryBuilder = repository
+      .createQueryBuilder('packageTransaction')
+      .where('packageTransaction.provider = :provider', {
+        provider,
+      })
+      .andWhere(
+        `(
+        packageTransaction.providerTransactionId = :providerTransactionId
+        ${tokenHash ? 'OR packageTransaction.tokenHash = :tokenHash' : ''}
+      )`,
+        {
+          providerTransactionId,
+          ...(tokenHash ? { tokenHash } : {}),
+        },
+      );
+
+    const duplicate = await queryBuilder.getOne();
+
+    if (duplicate) {
+      throw new ConflictException(
+        'This store purchase token or transaction ID has already been used for a package purchase.',
+      );
+    }
   }
 }

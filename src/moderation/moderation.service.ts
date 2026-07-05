@@ -180,12 +180,43 @@ export class ModerationService {
 
   async getReportByCaseNumber(caseNumber: string) {
     const report = await this.reportRepo.findOne({
-      where: { caseNumber },
-      relations: ['reporter', 'subject'],
+      where: {
+        caseNumber,
+      },
+      relations: {
+        reporter: true,
+        subject: true,
+      },
     });
 
-    if (!report) throw new NotFoundException('Report not found');
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
 
+    /*
+     * Do not use report.subject.id here.
+     *
+     * report.subject can be null after the user account is deleted,
+     * but report.subjectId remains stored for audits and analytics.
+     */
+    const [subjectCourses, visualEvidence] = await Promise.all([
+      this.enrollmentRepo.find({
+        where: {
+          userId: report.subjectId,
+        },
+        relations: {
+          course: true,
+        },
+      }),
+
+      this.evidenceRepo.find({
+        where: {
+          reportId: report.id,
+        },
+      }),
+    ]);
+
+    const reporter = report.reporter;
     const subject = report.subject;
 
     const subjectCourses = subject
@@ -214,6 +245,7 @@ export class ModerationService {
         contentType: report.contentType,
         contentEntityId: report.contentEntityId,
       },
+
       reporter_details: {
         id: report.reporterId,
         name: report.reporter?.fullName ?? null,
@@ -221,7 +253,10 @@ export class ModerationService {
         email: report.reporter?.email ?? null,
         avatarUrl: report.reporter?.avatarUrl ?? null,
         reporterNote: report.reporterNote ?? null,
+
+        isDeleted: reporter === null,
       },
+
       subject_stats: {
         id: subject?.id ?? null,
         name: subject?.fullName ?? null,
@@ -230,13 +265,29 @@ export class ModerationService {
         avatarUrl: subject?.avatarUrl ?? null,
         is_banned: subject?.isBanned ?? false,
         joinedAt: subject?.joinedAt ?? subject?.createdAt ?? null,
+
         current_streak_days: subject?.currentStreakDays ?? 0,
+
         total_xp: subject?.totalXp ?? 0,
+
         purchase_value_eur: subject?.purchaseValueEur ?? '0.00',
+
+        isDeleted: subject === null,
       },
-      subject_courses: subjectCourses.map((e) => ({
-        title: e.course?.title ?? null,
-        status: e.status,
+
+      subject_courses: subjectCourses.map((enrollment) => ({
+        courseId: enrollment.courseId,
+
+        title: enrollment.course?.title ?? null,
+
+        status: enrollment.status,
+      })),
+
+      visual_evidence: visualEvidence.map((evidence) => ({
+        id: evidence.id,
+        url: evidence.mediaUrl,
+
+        description: evidence.descriptionText ?? null,
       })),
       visual_evidence: visualEvidence.map((v) => ({
         id: v.id,
@@ -254,7 +305,11 @@ export class ModerationService {
     };
   }
 
-  async performAction(reportId: string, payload: { action_type: string; action_reason: string }, moderatorId: string) {
+  async performAction(
+    reportId: string,
+    payload: { action_type: string; action_reason: string },
+    moderatorId: string,
+  ) {
     if (!payload.action_reason || !payload.action_reason.trim()) {
       throw new BadRequestException('action_reason is required');
     }
@@ -267,7 +322,9 @@ export class ModerationService {
     }
 
     return this.dataSource.transaction(async (manager) => {
-      const report = await manager.findOne(ModerationReport, { where: { id: reportId } });
+      const report = await manager.findOne(ModerationReport, {
+        where: { id: reportId },
+      });
       if (!report) throw new NotFoundException('Report not found');
 
       const action = manager.create(ModerationAction, {
@@ -283,7 +340,11 @@ export class ModerationService {
       if (actionType === 'permanent_ban') newStatus = 'banned';
       if (actionType === 'dismiss') newStatus = 'resolved';
 
-      await manager.update(ModerationReport, { id: report.id }, { status: newStatus, assignedModeratorId: moderatorId });
+      await manager.update(
+        ModerationReport,
+        { id: report.id },
+        { status: newStatus, assignedModeratorId: moderatorId },
+      );
 
       if (actionType === 'permanent_ban') {
         await manager.update(User, { id: report.subjectId }, { isBanned: true });

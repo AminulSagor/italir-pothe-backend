@@ -80,6 +80,13 @@ export class ProgressController {
   }
 
 
+  @Get('current-chapter')
+  async getCurrentChapter(@Req() request: AuthenticatedRequest) {
+    return this.progressService.getCurrentChapter(
+      this.getCurrentUser(request).id,
+    );
+  }
+
   @Get('lessons/:lessonId')
   async getLessonProgress(
     @Param('lessonId') lessonId: string,

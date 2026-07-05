@@ -24,6 +24,11 @@ export interface CreateRingingCallResult {
   created: boolean;
 }
 
+export interface TimeoutRingingCallResult {
+  call: Call;
+  changed: boolean;
+}
+
 @Injectable()
 export class CallService {
   private static readonly RINGING_TIMEOUT_MS = 60_000;
@@ -279,6 +284,40 @@ export class CallService {
     call.status = CallStatus.ENDED;
 
     return this.callRepository.save(call);
+  }
+
+  async timeoutRingingCall(
+    callId: string,
+    userId?: string,
+  ): Promise<TimeoutRingingCallResult> {
+    const call = await this.findCallOrFail(callId);
+
+    if (userId) {
+      this.assertCallParticipant(call, userId);
+    }
+
+    if (call.status === CallStatus.MISSED) {
+      return { call, changed: false };
+    }
+
+    // A late timeout event can race with answer/reject/cancel. In that case,
+    // keep the authoritative server state and treat the timeout as idempotent.
+    if (call.status !== CallStatus.RINGING) {
+      return { call, changed: false };
+    }
+
+    call.status = CallStatus.MISSED;
+
+    return {
+      call: await this.callRepository.save(call),
+      changed: true,
+    };
+  }
+
+  async getParticipantCall(callId: string, userId: string): Promise<Call> {
+    const call = await this.findCallOrFail(callId);
+    this.assertCallParticipant(call, userId);
+    return call;
   }
 
   async deleteCall(callId: string): Promise<void> {

@@ -3,6 +3,7 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  OneToMany,
   OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
@@ -14,6 +15,7 @@ import {
 } from '../types/package-store.type';
 import { StorePackageCommerce } from './store-package-commerce.entity';
 import { StorePackageEntitlement } from './store-package-entitlement.entity';
+import { StorePackageProviderProduct } from './store-package-provider-product.entity';
 
 @Entity('store_packages')
 @Index(['packageType', 'status'])
@@ -88,4 +90,13 @@ export class StorePackage {
     },
   )
   entitlement: StorePackageEntitlement;
+
+  @OneToMany(
+    () => StorePackageProviderProduct,
+    (providerProduct) => providerProduct.package,
+    {
+      cascade: true,
+    },
+  )
+  providerProducts: StorePackageProviderProduct[];
 }

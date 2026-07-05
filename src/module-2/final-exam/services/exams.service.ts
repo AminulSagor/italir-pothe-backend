@@ -33,6 +33,7 @@ import {
 import { QuizQuestionFormat } from 'src/module-2/quizzes/types/quiz-question-format.type';
 import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
 import { ProgressService } from 'src/module-2/progress/services/progress.service';
+import { UserCourseProgress } from 'src/module-2/progress/entities/user-course-progress.entity';
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 
 interface UserSafeOption {
@@ -51,6 +52,7 @@ interface UserSafeQuestion {
   promptBn: string | null;
   audioFileId: string | null;
   imageFileId: string | null;
+  points: number;
   sortOrder: number;
   options: UserSafeOption[];
   pairs: {
@@ -89,9 +91,34 @@ export class ExamsService {
     @InjectRepository(ExamAnswerItem)
     private readonly examAnswerItemRepository: Repository<ExamAnswerItem>,
 
+    @InjectRepository(UserCourseProgress)
+    private readonly courseProgressRepository: Repository<UserCourseProgress>,
+
     private readonly dailyChallengesService: DailyChallengesService,
     private readonly progressService: ProgressService,
   ) {}
+
+  async getMyCourseExamGateways(userId: string) {
+    const progressRows = await this.courseProgressRepository.find({
+      where: { userId },
+      order: { lastActivityAt: 'DESC', updatedAt: 'DESC' },
+    });
+
+    const items: unknown[] = [];
+    for (const progress of progressRows) {
+      try {
+        const gateway = await this.getExamGateway(progress.courseId, userId);
+        items.push(gateway);
+      } catch (error) {
+        if (error instanceof NotFoundException) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return { items };
+  }
 
   async getExamGateway(courseId: string, userId: string) {
     const course = await this.getCourseById(courseId);
@@ -407,6 +434,7 @@ export class ExamsService {
   }
 
   private gradeAnswer(question: ExamQuestion, dto: SubmitExamAnswerDto) {
+    const awardedPoints = Math.max(1, question.points ?? 1);
     const sectionReviewMode = question.section?.reviewMode;
 
     if (sectionReviewMode === ExamReviewMode.MANUAL) {
@@ -433,7 +461,7 @@ export class ExamsService {
         isManual: false,
         isCorrect,
         correctAnswer: correctOption?.optionText ?? null,
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -447,7 +475,7 @@ export class ExamsService {
           question.correctBoolean === null
             ? null
             : String(question.correctBoolean),
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -464,7 +492,7 @@ export class ExamsService {
         isManual: false,
         isCorrect: Boolean(correctAnswer),
         correctAnswer: question.acceptedAnswers[0]?.answerText ?? null,
-        score: correctAnswer ? 1 : 0,
+        score: correctAnswer ? awardedPoints : 0,
       };
     }
 
@@ -489,7 +517,7 @@ export class ExamsService {
         isManual: false,
         isCorrect,
         correctAnswer: expected.join(' '),
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -514,7 +542,7 @@ export class ExamsService {
         correctAnswer: question.pairs
           .map((pair) => `${pair.leftText} → ${pair.rightText}`)
           .join(', '),
-        score: isCorrect ? 1 : 0,
+        score: isCorrect ? awardedPoints : 0,
       };
     }
 
@@ -537,6 +565,7 @@ export class ExamsService {
       promptBn: question.promptBn,
       audioFileId: question.audioFileId,
       imageFileId: question.imageFileId,
+      points: question.points,
       sortOrder: question.sortOrder,
       options: question.options.map((option) => ({
         id: option.id,
