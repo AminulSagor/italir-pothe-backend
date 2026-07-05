@@ -90,9 +90,23 @@ export class CourseCommerceService {
 
   async getQuote(userId: string, courseId: string, query: CourseQuoteQueryDto) {
     const course = await this.getPublishedCourse(courseId);
-    const providerProduct = course.isFree
-      ? null
-      : this.requireActiveProviderProduct(course, query.provider);
+
+    let providerProduct: CourseProviderProduct | null = null;
+
+    if (!course.isFree) {
+      if (!query.provider) {
+        throw new BadRequestException(
+          'Payment provider is required for a paid course. ' +
+            'Use provider=google_play on Android or provider=app_store on iOS.',
+        );
+      }
+
+      providerProduct = this.requireActiveProviderProduct(
+        course,
+        query.provider,
+      );
+    }
+
     const currency = query.currency ?? CommerceCurrency.EUR;
 
     this.assertStoreCouponNotUsed(query.couponCode);
@@ -114,9 +128,11 @@ export class CourseCommerceService {
         subtitle: course.subtitle,
         isFree: course.isFree,
       },
+
       storeProduct: providerProduct
         ? this.mapProviderProduct(providerProduct)
         : null,
+
       baseCurrency: CommerceCurrency.EUR,
       selectedCurrency: quote.selectedCurrency,
       basePriceEur: quote.basePriceEur,
@@ -129,10 +145,13 @@ export class CourseCommerceService {
       payableAmountEur: quote.payableAmountEur,
       forexRate: quote.forexRate,
       alreadyEnrolled: Boolean(enrollment),
+
       supportedProviders: (course.providerProducts ?? [])
         .filter((item) => item.isActive)
         .map((item) => this.mapProviderProduct(item)),
+
       developmentVerification: this.demoPaymentGateway.isDemoModeEnabled(),
+
       pricingNote:
         'Google Play or App Store controls the final localized amount charged.',
     };
