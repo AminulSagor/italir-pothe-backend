@@ -306,6 +306,8 @@ export class FilesService {
       FilePurpose.NOTIFICATION_IMAGE,
       FilePurpose.CV_PHOTO,
       FilePurpose.CV_TEMPLATE_THUMBNAIL,
+      FilePurpose.CV_GENERATED_IMAGE,
+      FilePurpose.CV_REFERENCE_IMAGE,
     ];
 
     const audioPurposes = [
