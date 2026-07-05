@@ -8,7 +8,7 @@ import { ChatController } from './chat.controller';
 
 import { ChatGateway } from './chat.gateway';
 
-import { FirebasePushService } from '../notifications/firebase-push.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { MessageDeliveryProcessor } from './message-delivery.processor';
 
 import { Conversation } from './entities/conversation.entity';
@@ -21,6 +21,7 @@ import { MessageReceipt } from './entities/message-receipt.entity';
 import { UserPresence } from './entities/user-presence.entity';
 
 import { User } from '../users/entities/user.entity';
+import { Call } from '../calls/entities/call.entity';
 
 import { PresenceModule } from '../presence/presence.module';
 import { UserBlocksModule } from '../user-blocks/user-blocks.module';
@@ -34,6 +35,7 @@ import { UserDeviceService } from 'src/devices/services/user-device.service';
     PresenceModule,
     UserBlocksModule,
     WebinarModule,
+    NotificationsModule,
     TypeOrmModule.forFeature([
       Conversation,
       ConversationParticipant,
@@ -44,6 +46,7 @@ import { UserDeviceService } from 'src/devices/services/user-device.service';
       MessageReceipt,
       UserDevice,
       UserPresence,
+      Call,
 
       User,
     ]),
@@ -64,10 +67,9 @@ import { UserDeviceService } from 'src/devices/services/user-device.service';
     ChatService,
 
     UserDeviceService,
-    FirebasePushService,
     ChatGateway,
     MessageDeliveryProcessor,
   ],
-  exports: [ChatService, UserDeviceService, FirebasePushService],
+  exports: [ChatService, UserDeviceService],
 })
 export class ChatModule {}

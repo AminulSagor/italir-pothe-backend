@@ -44,6 +44,7 @@ import { CvTemplatesModule } from './cv-templates/cv-templates.module';
 import { CvGenerationsModule } from './cv-generations/cv-generations.module';
 import { CvAssistantModule } from './cv-assistant/cv-assistant.module';
 import { GooglePlayBillingModule } from './billing/google-play/google-play-billing.module';
+import { HomeModule } from './home/home.module';
 
 @Module({
   imports: [
@@ -108,6 +109,7 @@ import { GooglePlayBillingModule } from './billing/google-play/google-play-billi
     RevenueAnalyticsModule,
     AdminDashboardModule,
     GooglePlayBillingModule,
+    HomeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

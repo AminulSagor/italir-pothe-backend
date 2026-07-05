@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 
 import { UserDeviceService } from 'src/devices/services/user-device.service';
 import {
@@ -22,7 +22,10 @@ import {
   SendMultipleUsersNotificationDto,
   SendUserNotificationDto,
 } from '../dto/notification.dto';
-import { NotificationQueryDto } from '../dto/notification-query.dto';
+import {
+  NotificationCategoryQuery,
+  NotificationQueryDto,
+} from '../dto/notification-query.dto';
 import {
   NotificationDelivery,
   NotificationDeliveryStatus,
@@ -186,9 +189,7 @@ export class NotificationsService {
         'event',
         'event.id = userNotification.eventId',
       )
-      .where('userNotification.userId = :userId', {
-        userId,
-      })
+      .where('userNotification.userId = :userId', { userId })
       .orderBy('userNotification.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -197,10 +198,20 @@ export class NotificationsService {
       queryBuilder.andWhere('userNotification.isRead = false');
     }
 
+    this.applyCategoryFilter(queryBuilder, query.category);
+
     const [items, total] = await queryBuilder.getManyAndCount();
 
     return {
-      items,
+      items: items.map((item) => {
+        const event = (item as UserNotification & { event: NotificationEvent })
+          .event;
+        return {
+          ...item,
+          category: this.resolveCategory(event),
+          tone: this.resolveTone(event),
+        };
+      }),
       meta: {
         page,
         limit,
@@ -208,6 +219,76 @@ export class NotificationsService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  private applyCategoryFilter(
+    queryBuilder: SelectQueryBuilder<UserNotification>,
+    category?: NotificationCategoryQuery,
+  ): void {
+    if (!category || category === NotificationCategoryQuery.ALL) return;
+
+    const deepLink = `COALESCE(event.deepLink, '')`;
+    const socialCondition =
+      `(${deepLink} LIKE :messagesLink OR ${deepLink} LIKE :chatLink)`;
+    const learningCondition =
+      `(${deepLink} LIKE :webinarLink OR ${deepLink} LIKE :courseLink ` +
+      `OR ${deepLink} LIKE :finalExamLink ` +
+      `OR ${deepLink} LIKE :certificateLink)`;
+    const params = {
+      messagesLink: '/messages%',
+      chatLink: 'italirpothe://messages%',
+      webinarLink: '/webinar%',
+      courseLink: '/courses%',
+      finalExamLink: 'italirpothe://final-exams%',
+      certificateLink: 'italirpothe://certificates%',
+    };
+
+    if (category === NotificationCategoryQuery.SOCIAL) {
+      queryBuilder.andWhere(socialCondition, params);
+      return;
+    }
+    if (category === NotificationCategoryQuery.LEARNING) {
+      queryBuilder.andWhere(learningCondition, params);
+      return;
+    }
+    queryBuilder.andWhere(
+      `NOT ${socialCondition} AND NOT ${learningCondition}`,
+      params,
+    );
+  }
+
+  private resolveCategory(
+    event?: NotificationEvent,
+  ): NotificationCategoryQuery {
+    const deepLink = event?.deepLink?.trim().toLowerCase() ?? '';
+    if (
+      deepLink.startsWith('/messages') ||
+      deepLink.startsWith('italirpothe://messages')
+    ) {
+      return NotificationCategoryQuery.SOCIAL;
+    }
+    if (
+      deepLink.startsWith('/webinar') ||
+      deepLink.startsWith('/courses') ||
+      deepLink.startsWith('italirpothe://final-exams') ||
+      deepLink.startsWith('italirpothe://certificates')
+    ) {
+      return NotificationCategoryQuery.LEARNING;
+    }
+    return NotificationCategoryQuery.SYSTEM;
+  }
+
+  private resolveTone(event?: NotificationEvent): string {
+    const deepLink = event?.deepLink?.trim().toLowerCase() ?? '';
+    if (
+      deepLink.startsWith('/messages') ||
+      deepLink.startsWith('italirpothe://messages')
+    ) {
+      return 'message';
+    }
+    if (event?.type === NotificationType.STREAK_REMINDER) return 'streak';
+    if (deepLink.startsWith('/webinar')) return 'webinar';
+    return 'lesson';
   }
 
   async markRead(userId: string, notificationId: string) {

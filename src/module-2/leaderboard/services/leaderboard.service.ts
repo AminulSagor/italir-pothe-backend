@@ -165,8 +165,35 @@ export class LeaderboardService {
       definitions,
     );
 
+    const allProfiles = await this.profileRepository.find({
+      order: {
+        totalXp: 'DESC',
+        updatedAt: 'ASC',
+        id: 'ASC',
+      },
+    });
+    const globalRanked = this.rankProfiles(allProfiles);
+    const leagueRanked = this.rankProfiles(
+      allProfiles.filter((item) => {
+        return (
+          this.leagueConfigService.resolveLeague(item.totalXp, definitions)
+            .key === league.key
+        );
+      }),
+    );
+    const globalRank =
+      globalRanked.find((entry) => entry.profile.userId === userId)?.rank ??
+      null;
+    const leagueRank =
+      leagueRanked.find((entry) => entry.profile.userId === userId)?.rank ??
+      null;
+
     return {
       ...this.mapProfile(profile, definitions, userId),
+      scopeRank: leagueRank,
+      globalRank,
+      leagueRank,
+      leagueParticipantCount: leagueRanked.length,
       milestone: this.buildMilestone({
         totalXp: profile.totalXp,
         currentLeague: league,

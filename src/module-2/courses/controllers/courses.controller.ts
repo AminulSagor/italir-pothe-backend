@@ -1,6 +1,9 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 
-import { PublicCourseQueryDto } from '../dto/course.dto';
+import {
+  PublicCourseCatalogQueryDto,
+  PublicCourseQueryDto,
+} from '../dto/course.dto';
 import { CoursesService } from '../services/courses.service';
 
 @Controller('courses')
@@ -10,6 +13,11 @@ export class CoursesController {
   @Get()
   async findAllCourses(@Query() query: PublicCourseQueryDto) {
     return this.coursesService.findAllCourses(query.provider);
+  }
+
+  @Get('catalog')
+  async findCourseCatalog(@Query() query: PublicCourseCatalogQueryDto) {
+    return this.coursesService.findCourseCatalog(query);
   }
 
   @Get(':courseId')

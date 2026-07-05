@@ -535,6 +535,22 @@ export class WebinarsService {
     };
   }
 
+  async getNextHomeWebinar() {
+    const webinar = await this.webinarRepository.findOne({
+      where: { status: WebinarStatus.SCHEDULED },
+      order: { scheduledAt: 'ASC', createdAt: 'DESC' },
+    });
+
+    if (!webinar) return null;
+
+    return {
+      id: webinar.id,
+      title: webinar.title,
+      dateTime: webinar.scheduledAt,
+      hostTeacherName: webinar.hostTeacherName,
+    };
+  }
+
   async getUpcomingWebinarsList(
     userId: string,
     query: PaginationQueryDto,

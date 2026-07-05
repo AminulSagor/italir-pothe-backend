@@ -163,3 +163,24 @@ export class PublicCourseQueryDto {
   @IsEnum(CoursePaymentProvider)
   provider?: CoursePaymentProvider;
 }
+
+export class PublicCourseCatalogQueryDto extends PublicCourseQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(180)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
+}
