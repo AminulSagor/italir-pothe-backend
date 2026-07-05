@@ -31,6 +31,8 @@ export enum FilePurpose {
   NOTIFICATION_IMAGE = 'notification_image',
   CV_PHOTO = 'cv_photo',
   CV_TEMPLATE_THUMBNAIL = 'cv_template_thumbnail',
+  CV_GENERATED_IMAGE = 'cv_generated_image',
+  CV_REFERENCE_IMAGE = 'cv_reference_image',
 }
 
 export enum FileVisibility {
