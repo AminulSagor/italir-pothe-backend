@@ -24,10 +24,21 @@ import {
   CommerceSortOrder,
   CourseEnrollmentStatus,
   CoursePaymentAttemptStatus,
+  CoursePaymentProvider,
   CourseProviderProductType,
+  CourseProviderVerificationStatus,
   CoursePurchaseStatus,
 } from '../types/course-commerce.type';
 import { StorePackageProviderProduct } from 'src/package-store/entities/store-package-provider-product.entity';
+import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
+import { GooglePlayBillingService } from 'src/billing/google-play/google-play-billing.service';
+import {
+  BillingOrderDomain,
+  BillingPaymentProvider,
+  ProviderRefundSource,
+  ProviderRefundStatus,
+} from 'src/billing/types/provider-refund.type';
+import { CourseOrderProviderTransaction } from '../entities/course-order-provider-transaction.entity';
 
 @Injectable()
 export class AdminCourseCommerceService {
@@ -53,6 +64,11 @@ export class AdminCourseCommerceService {
     private readonly dataSource: DataSource,
 
     private readonly demoPaymentGateway: DemoPaymentGatewayService,
+
+    @InjectRepository(ProviderRefundOperation)
+    private readonly refundOperationRepository: Repository<ProviderRefundOperation>,
+
+    private readonly googlePlayBillingService: GooglePlayBillingService,
   ) {}
 
   async createProviderProduct(
@@ -573,6 +589,619 @@ export class AdminCourseCommerceService {
         refundedAt: now,
       };
     });
+  }
+
+  async refundGooglePlayOrder(params: {
+    orderId: string;
+    adminUserId: string;
+    reason?: string;
+  }) {
+    if (!this.googlePlayBillingService.isRealVerificationEnabled()) {
+      throw new BadRequestException(
+        'Real Google Play verification must be enabled before issuing a real refund.',
+      );
+    }
+
+    const prepared = await this.prepareCourseRefundOperation({
+      orderId: params.orderId,
+      adminUserId: params.adminUserId,
+      reason: params.reason,
+    });
+
+    if (prepared.operation.status === ProviderRefundStatus.COMPLETED) {
+      return this.getCourseRefundResult(params.orderId, prepared.operation);
+    }
+
+    if (prepared.shouldCallProvider) {
+      try {
+        await this.googlePlayBillingService.refundOrder({
+          orderId: prepared.operation.providerOrderId,
+          revoke: true,
+        });
+
+        await this.markCourseRefundProviderCompleted(prepared.operation.id);
+      } catch (error) {
+        await this.markCourseRefundFailure({
+          operationId: prepared.operation.id,
+          error,
+          preserveProviderCompleted: false,
+        });
+
+        throw error;
+      }
+    }
+
+    try {
+      return await this.applyCourseRefundLocally({
+        orderId: params.orderId,
+        operationId: prepared.operation.id,
+      });
+    } catch (error) {
+      await this.markCourseRefundFailure({
+        operationId: prepared.operation.id,
+        error,
+        preserveProviderCompleted: true,
+      });
+
+      throw error;
+    }
+  }
+
+  private async prepareCourseRefundOperation(params: {
+    orderId: string;
+    adminUserId: string;
+    reason?: string;
+  }): Promise<{
+    operation: ProviderRefundOperation;
+    shouldCallProvider: boolean;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [`course-refund:${params.orderId}`],
+      );
+
+      const orderRepository = manager.getRepository(CoursePurchaseOrder);
+
+      const transactionRepository = manager.getRepository(
+        CourseOrderProviderTransaction,
+      );
+
+      const operationRepository = manager.getRepository(
+        ProviderRefundOperation,
+      );
+
+      const order = await orderRepository
+        .createQueryBuilder('purchaseOrder')
+        .setLock('pessimistic_write')
+        .where('purchaseOrder.id = :orderId', {
+          orderId: params.orderId,
+        })
+        .getOne();
+
+      if (!order) {
+        throw new NotFoundException('Purchase order not found.');
+      }
+
+      if (order.paymentProvider !== CoursePaymentProvider.GOOGLE_PLAY) {
+        throw new BadRequestException(
+          'Only Google Play course orders can use this refund endpoint.',
+        );
+      }
+
+      const providerTransaction = await transactionRepository.findOne({
+        where: {
+          orderId: order.id,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!providerTransaction) {
+        throw new ConflictException(
+          'The course order is missing its provider transaction.',
+        );
+      }
+
+      if (
+        providerTransaction.provider !== CoursePaymentProvider.GOOGLE_PLAY ||
+        providerTransaction.verificationStatus !==
+          CourseProviderVerificationStatus.VERIFIED
+      ) {
+        throw new BadRequestException(
+          'The Google Play transaction has not been verified.',
+        );
+      }
+
+      const providerOrderId = providerTransaction.providerTransactionId?.trim();
+
+      if (!providerOrderId || providerOrderId.startsWith('google-play:')) {
+        throw new ConflictException(
+          'The verified transaction does not contain a refundable Google Play order ID.',
+        );
+      }
+
+      let operation = await operationRepository.findOne({
+        where: {
+          orderDomain: BillingOrderDomain.COURSE,
+          internalOrderId: order.id,
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (order.status === CoursePurchaseStatus.REFUNDED) {
+        if (operation?.status === ProviderRefundStatus.COMPLETED) {
+          return {
+            operation,
+            shouldCallProvider: false,
+          };
+        }
+
+        throw new ConflictException(
+          'The course order was already refunded outside this refund operation.',
+        );
+      }
+
+      if (order.status !== CoursePurchaseStatus.PAID) {
+        throw new BadRequestException(
+          'Only a paid course order can be refunded.',
+        );
+      }
+
+      if (!operation) {
+        operation = operationRepository.create({
+          orderDomain: BillingOrderDomain.COURSE,
+          internalOrderId: order.id,
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+          providerOrderId,
+          status: ProviderRefundStatus.PROCESSING,
+          source: ProviderRefundSource.ADMIN,
+          revoke: true,
+          reason: params.reason?.trim() || null,
+          requestedByAdminId: params.adminUserId,
+          providerCompletedAt: null,
+          completedAt: null,
+          failureCode: null,
+          failureMessage: null,
+        });
+
+        operation = await operationRepository.save(operation);
+
+        return {
+          operation,
+          shouldCallProvider: true,
+        };
+      }
+
+      if (operation.providerOrderId !== providerOrderId) {
+        throw new ConflictException(
+          'The stored refund operation references another Google Play order.',
+        );
+      }
+
+      if (operation.status === ProviderRefundStatus.COMPLETED) {
+        return {
+          operation,
+          shouldCallProvider: false,
+        };
+      }
+
+      if (operation.status === ProviderRefundStatus.PROVIDER_COMPLETED) {
+        return {
+          operation,
+          shouldCallProvider: false,
+        };
+      }
+
+      if (operation.status === ProviderRefundStatus.PROCESSING) {
+        throw new ConflictException(
+          'A refund request for this course order is already processing.',
+        );
+      }
+
+      operation.status = ProviderRefundStatus.PROCESSING;
+      operation.reason = params.reason?.trim() || operation.reason;
+      operation.requestedByAdminId = params.adminUserId;
+      operation.failureCode = null;
+      operation.failureMessage = null;
+
+      operation = await operationRepository.save(operation);
+
+      return {
+        operation,
+        shouldCallProvider: true,
+      };
+    });
+  }
+
+  private async markCourseRefundProviderCompleted(
+    operationId: string,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(ProviderRefundOperation);
+
+      const operation = await repository.findOne({
+        where: {
+          id: operationId,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!operation) {
+        throw new NotFoundException('Refund operation not found.');
+      }
+
+      if (operation.status === ProviderRefundStatus.COMPLETED) {
+        return;
+      }
+
+      operation.status = ProviderRefundStatus.PROVIDER_COMPLETED;
+
+      operation.providerCompletedAt = new Date();
+      operation.failureCode = null;
+      operation.failureMessage = null;
+
+      await repository.save(operation);
+    });
+  }
+
+  private async applyCourseRefundLocally(params: {
+    orderId: string;
+    operationId: string;
+  }) {
+    return this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(CoursePurchaseOrder);
+
+      const enrollmentRepository = manager.getRepository(CourseEnrollment);
+
+      const attemptRepository = manager.getRepository(CoursePaymentAttempt);
+
+      const operationRepository = manager.getRepository(
+        ProviderRefundOperation,
+      );
+
+      const operation = await operationRepository.findOne({
+        where: {
+          id: params.operationId,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!operation) {
+        throw new NotFoundException('Refund operation not found.');
+      }
+
+      if (
+        operation.status !== ProviderRefundStatus.PROVIDER_COMPLETED &&
+        operation.status !== ProviderRefundStatus.COMPLETED
+      ) {
+        throw new ConflictException(
+          'Google Play has not completed the refund.',
+        );
+      }
+
+      const order = await orderRepository
+        .createQueryBuilder('purchaseOrder')
+        .setLock('pessimistic_write')
+        .where('purchaseOrder.id = :orderId', {
+          orderId: params.orderId,
+        })
+        .getOne();
+
+      if (!order) {
+        throw new NotFoundException('Purchase order not found.');
+      }
+
+      const now = new Date();
+
+      const enrollment = await enrollmentRepository.findOne({
+        where: {
+          userId: order.userId,
+          courseId: order.courseId,
+          orderId: order.id,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (order.status !== CoursePurchaseStatus.REFUNDED) {
+        if (order.status !== CoursePurchaseStatus.PAID) {
+          throw new BadRequestException(
+            'Only a paid course order can be refunded.',
+          );
+        }
+
+        order.status = CoursePurchaseStatus.REFUNDED;
+        order.refundedAt = now;
+
+        await orderRepository.save(order);
+
+        /*
+         * Only revoke the enrollment if the refunded order is still
+         * the enrollment's current order. This preserves a later
+         * repurchase of the same course.
+         */
+        if (enrollment) {
+          enrollment.status = CourseEnrollmentStatus.REFUNDED;
+
+          enrollment.refundedAt = now;
+
+          await enrollmentRepository.save(enrollment);
+        }
+
+        const refundReference = `refund:${operation.providerOrderId}`;
+
+        const existingAttempt = await attemptRepository.findOne({
+          where: {
+            paymentProvider: CoursePaymentProvider.GOOGLE_PLAY,
+
+            providerReference: refundReference,
+          },
+        });
+
+        if (!existingAttempt) {
+          await attemptRepository.save(
+            attemptRepository.create({
+              orderId: order.id,
+
+              paymentProvider: CoursePaymentProvider.GOOGLE_PLAY,
+
+              status: CoursePaymentAttemptStatus.REFUNDED,
+
+              providerReference: refundReference,
+
+              amount: order.paymentAmount,
+              currency: order.paymentCurrency,
+
+              failureCode: null,
+              failureMessage: null,
+              completedAt: now,
+            }),
+          );
+        }
+      }
+
+      operation.status = ProviderRefundStatus.COMPLETED;
+      operation.completedAt = operation.completedAt ?? now;
+
+      operation.failureCode = null;
+      operation.failureMessage = null;
+
+      await operationRepository.save(operation);
+
+      return {
+        message: 'Google Play course refund completed successfully.',
+
+        refundOperationId: operation.id,
+        providerOrderId: operation.providerOrderId,
+
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+
+        enrollmentStatus: enrollment?.status ?? null,
+
+        refundedAt: order.refundedAt,
+      };
+    });
+  }
+
+  async applyGooglePlayVoidedPurchase(params: {
+    internalOrderId: string;
+    providerOrderId: string;
+    purchaseTokenHash: string;
+    eventTime: Date;
+  }) {
+    const operation = await this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(CoursePurchaseOrder);
+
+      const transactionRepository = manager.getRepository(
+        CourseOrderProviderTransaction,
+      );
+
+      const operationRepository = manager.getRepository(
+        ProviderRefundOperation,
+      );
+
+      const order = await orderRepository
+        .createQueryBuilder('purchaseOrder')
+        .setLock('pessimistic_write')
+        .where('purchaseOrder.id = :orderId', {
+          orderId: params.internalOrderId,
+        })
+        .getOne();
+
+      if (!order) {
+        throw new NotFoundException('Course purchase order not found.');
+      }
+
+      if (order.paymentProvider !== CoursePaymentProvider.GOOGLE_PLAY) {
+        throw new BadRequestException(
+          'The course order is not a Google Play order.',
+        );
+      }
+
+      const providerTransaction = await transactionRepository.findOne({
+        where: {
+          orderId: order.id,
+        },
+
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!providerTransaction) {
+        throw new ConflictException('Course provider transaction not found.');
+      }
+
+      const tokenMatches =
+        providerTransaction.tokenHash === params.purchaseTokenHash;
+
+      const orderMatches =
+        providerTransaction.providerTransactionId === params.providerOrderId;
+
+      if (!tokenMatches && !orderMatches) {
+        throw new ConflictException(
+          'Voided purchase does not match the course order.',
+        );
+      }
+
+      let operation = await operationRepository.findOne({
+        where: {
+          orderDomain: BillingOrderDomain.COURSE,
+
+          internalOrderId: order.id,
+
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+        },
+
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!operation) {
+        operation = operationRepository.create({
+          orderDomain: BillingOrderDomain.COURSE,
+
+          internalOrderId: order.id,
+
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+
+          providerOrderId: params.providerOrderId,
+
+          status: ProviderRefundStatus.PROVIDER_COMPLETED,
+
+          source: ProviderRefundSource.GOOGLE_RTDN,
+
+          revoke: true,
+
+          reason: 'Google Play voided the purchase.',
+
+          requestedByAdminId: null,
+
+          providerCompletedAt: params.eventTime,
+
+          completedAt: null,
+
+          failureCode: null,
+
+          failureMessage: null,
+        });
+      } else if (operation.status !== ProviderRefundStatus.COMPLETED) {
+        operation.status = ProviderRefundStatus.PROVIDER_COMPLETED;
+
+        operation.source = ProviderRefundSource.GOOGLE_RTDN;
+
+        operation.revoke = true;
+
+        operation.providerCompletedAt =
+          operation.providerCompletedAt ?? params.eventTime;
+
+        operation.failureCode = null;
+
+        operation.failureMessage = null;
+      }
+
+      return operationRepository.save(operation);
+    });
+
+    if (operation.status === ProviderRefundStatus.COMPLETED) {
+      return this.getCourseRefundResult(params.internalOrderId, operation);
+    }
+
+    return this.applyCourseRefundLocally({
+      orderId: params.internalOrderId,
+
+      operationId: operation.id,
+    });
+  }
+
+  private async getCourseRefundResult(
+    orderId: string,
+    operation: ProviderRefundOperation,
+  ) {
+    const [order, enrollment] = await Promise.all([
+      this.purchaseOrderRepository.findOne({
+        where: {
+          id: orderId,
+        },
+      }),
+
+      this.enrollmentRepository.findOne({
+        where: {
+          orderId,
+        },
+      }),
+    ]);
+
+    if (!order) {
+      throw new NotFoundException('Purchase order not found.');
+    }
+
+    return {
+      message: 'Google Play course refund was already completed.',
+
+      refundOperationId: operation.id,
+      providerOrderId: operation.providerOrderId,
+
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+
+      enrollmentStatus: enrollment?.status ?? null,
+
+      refundedAt: order.refundedAt,
+    };
+  }
+
+  private async markCourseRefundFailure(params: {
+    operationId: string;
+    error: unknown;
+    preserveProviderCompleted: boolean;
+  }): Promise<void> {
+    const normalized = this.normalizeRefundError(params.error);
+
+    await this.refundOperationRepository.update(
+      {
+        id: params.operationId,
+      },
+      {
+        status: params.preserveProviderCompleted
+          ? ProviderRefundStatus.PROVIDER_COMPLETED
+          : ProviderRefundStatus.FAILED,
+
+        failureCode: normalized.code,
+        failureMessage: normalized.message,
+      },
+    );
+  }
+
+  private normalizeRefundError(error: unknown): {
+    code: string;
+    message: string;
+  } {
+    if (error instanceof Error) {
+      return {
+        code: error.name.slice(0, 80),
+        message: error.message.slice(0, 500),
+      };
+    }
+
+    return {
+      code: 'UNKNOWN_REFUND_ERROR',
+      message: 'Unknown refund error.',
+    };
   }
 
   private validateProviderProductConfiguration(input: {

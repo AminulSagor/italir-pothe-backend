@@ -191,8 +191,22 @@ export class AdminPackageStoreController {
     response.send(invoice.html);
   }
 
+  @Post('orders/:orderId/refund')
+  async refundGooglePlayOrder(
+    @Param('orderId', new ParseUUIDPipe({ version: '4' }))
+    orderId: string,
+    @Body() dto: RefundStoreOrderDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.packageStoreService.refundGooglePlayOrder({
+      orderId,
+      adminUserId: this.getAdminId(request),
+      dto,
+    });
+  }
+
   @Post('orders/:orderId/demo-refund')
-  async refundOrder(
+  async demoRefund(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))
     orderId: string,
     @Body() dto: RefundStoreOrderDto,

@@ -38,6 +38,12 @@ export class StoreWalletService {
     });
   }
 
+  async getBalancesWithManager(userId: string, manager: EntityManager) {
+    const wallet = await this.getOrCreateWallet(userId, manager, true);
+
+    return this.mapBalances(userId, wallet, manager);
+  }
+
   async grantLeaderboardReward(params: {
     userId: string;
     aiVoiceMinutes?: number;
@@ -225,6 +231,7 @@ export class StoreWalletService {
 
     if (snapshot.packageType === StorePackageType.AI_BUNDLE) {
       wallet.aiVoiceSeconds += (snapshot.voiceMinutes ?? 0) * 60;
+
       wallet.aiVoiceMinutes = Math.ceil(wallet.aiVoiceSeconds / 60);
 
       wallet.aiTextTokens += snapshot.textTokens ?? 0;
@@ -249,11 +256,23 @@ export class StoreWalletService {
         reversal.unlimitedProtectionPreviousUntil =
           wallet.unlimitedStreakProtectionUntil;
 
-        const grantedUntil = new Date(currentExpiry);
+        const verifiedSubscriptionExpiry =
+          this.getVerifiedSubscriptionExpiry(order);
 
-        grantedUntil.setUTCDate(
-          grantedUntil.getUTCDate() + (snapshot.protectionDurationDays ?? 30),
-        );
+        let grantedUntil: Date;
+
+        if (verifiedSubscriptionExpiry && verifiedSubscriptionExpiry > now) {
+          grantedUntil =
+            verifiedSubscriptionExpiry > currentExpiry
+              ? verifiedSubscriptionExpiry
+              : new Date(currentExpiry);
+        } else {
+          grantedUntil = new Date(currentExpiry);
+
+          grantedUntil.setUTCDate(
+            grantedUntil.getUTCDate() + (snapshot.protectionDurationDays ?? 30),
+          );
+        }
 
         wallet.unlimitedStreakProtectionUntil = grantedUntil;
 
@@ -272,6 +291,31 @@ export class StoreWalletService {
     return this.mapBalances(order.userId, wallet, manager);
   }
 
+  private getVerifiedSubscriptionExpiry(order: StoreOrder): Date | null {
+    const payload = order.providerTransaction?.verificationPayload;
+
+    if (!payload) {
+      return null;
+    }
+
+    if (payload.source !== 'google_play_developer_api_subscription') {
+      return null;
+    }
+
+    const rawExpiry = payload.expiryTime;
+
+    if (typeof rawExpiry !== 'string') {
+      return null;
+    }
+
+    const expiry = new Date(rawExpiry);
+
+    if (Number.isNaN(expiry.getTime())) {
+      return null;
+    }
+
+    return expiry;
+  }
   /**
    * On refund only unused balance can be removed.
    *
@@ -399,10 +443,7 @@ export class StoreWalletService {
     };
   }
 
-  private async getLockedWallet(
-    userId: string,
-    manager: EntityManager,
-  ) {
+  private async getLockedWallet(userId: string, manager: EntityManager) {
     await this.getOrCreateWallet(userId, manager, true);
 
     const wallet = await manager.getRepository(UserStoreWallet).findOne({

@@ -41,6 +41,9 @@ import { LearningActivityModule } from './module-2/learning-activity/learning-ac
 import { RevenueAnalyticsModule } from './revenue-analytics/revenue-analytics.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { GooglePlayBillingModule } from './billing/google-play/google-play-billing.module';
+import { GooglePlayRtdnModule } from './billing/google-play-rtdn/google-play-rtdn.module';
+import { GooglePlayReconciliationModule } from './billing/google-play-reconciliation/google-play-reconciliation.module';
+import { AppStoreNotificationsModule } from './billing/app-store/app-store-notifications.module';
 
 @Module({
   imports: [
@@ -103,6 +106,9 @@ import { GooglePlayBillingModule } from './billing/google-play/google-play-billi
     RevenueAnalyticsModule,
     AdminDashboardModule,
     GooglePlayBillingModule,
+    GooglePlayRtdnModule,
+    GooglePlayReconciliationModule,
+    AppStoreNotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -18,9 +18,11 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "verbs:sync": "ts-node -r tsconfig-paths/register src/module-2/important-verbs/scripts/sync-important-verbs.ts"
+    "verbs:sync": "ts-node -r tsconfig-paths/register src/module-2/important-verbs/scripts/sync-important-verbs.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts"
   },
   "dependencies": {
+    "@apple/app-store-server-library": "^3.1.0",
     "@aws-sdk/client-s3": "^3.1068.0",
     "@aws-sdk/client-ses": "^3.1048.0",
     "@aws-sdk/s3-request-presigner": "^3.1068.0",
