@@ -30,6 +30,11 @@ export class NotificationsController {
     );
   }
 
+  @Patch('read-all')
+  async markAllRead(@Req() request: AuthenticatedRequest) {
+    return this.notificationsService.markAllRead(this.getUserId(request));
+  }
+
   @Patch(':notificationId/read')
   async markRead(
     @Param('notificationId') notificationId: string,
@@ -39,11 +44,6 @@ export class NotificationsController {
       this.getUserId(request),
       notificationId,
     );
-  }
-
-  @Patch('read-all')
-  async markAllRead(@Req() request: AuthenticatedRequest) {
-    return this.notificationsService.markAllRead(this.getUserId(request));
   }
 
   private getUserId(request: AuthenticatedRequest) {

@@ -89,6 +89,12 @@ export class Call {
   })
   clientCallId: string | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  answeredAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  endedAt: Date | null;
+
   @CreateDateColumn({
     type: 'timestamptz',
   })

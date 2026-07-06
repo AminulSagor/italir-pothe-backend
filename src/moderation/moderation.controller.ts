@@ -23,25 +23,21 @@ export class ModerationController {
   @Get('dashboard/metrics')
   @Roles(UserRole.ADMIN, UserRole.MODERATOR, UserRole.LEAD_MODERATOR)
   async getMetrics() {
-    // For now return a simple metrics object (can be enriched later)
-    // Implementing a lightweight metrics response to start
-    const reports = await this.moderationService.listReports(1, 1);
-    return {
-      total_pending_count: (await this.moderationService.listReports(1, 1, 'pending')).meta.total,
-      pending_percentage_change: 0,
-      avg_response_time_minutes: null,
-      response_time_percentage_change: 0,
-      resolved_today_count: 0,
-      resolved_today_percentage_change: 0,
-    };
+    return this.moderationService.getDashboardMetrics();
   }
 
   @Get('reports')
   @Roles(UserRole.ADMIN, UserRole.MODERATOR, UserRole.LEAD_MODERATOR)
-  async listReports(@Query('page') page = '1', @Query('limit') limit = '10', @Query('status') status?: string, @Query('reason') reason?: string) {
+  async listReports(
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+    @Query('status') status?: string,
+    @Query('reason') reason?: string,
+    @Query('search') search?: string,
+  ) {
     const p = parseInt(page as any, 10) || 1;
     const l = parseInt(limit as any, 10) || 10;
-    return this.moderationService.listReports(p, l, status, reason);
+    return this.moderationService.listReports(p, l, status, reason, search);
   }
 
   @Get('reports/:caseNumber')

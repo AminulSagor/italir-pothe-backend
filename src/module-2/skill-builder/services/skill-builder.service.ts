@@ -93,6 +93,90 @@ export class SkillBuilderService {
     };
   }
 
+  async findHomeCareerTracks(userId: string, limit = 8) {
+    const tracks = await this.careerTrackRepository.find({
+      where: { status: CareerTrackStatus.PUBLISHED },
+      order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      take: limit,
+    });
+
+    if (tracks.length === 0) {
+      return [];
+    }
+
+    const trackIds = tracks.map((track) => track.id);
+    const [modules, learnedRows] = await Promise.all([
+      this.moduleRepository.find({
+        where: {
+          careerTrackId: In(trackIds),
+          status: SkillBuilderModuleStatus.ACTIVE,
+        },
+        select: ['id', 'careerTrackId'],
+      }),
+      this.progressRepository
+        .createQueryBuilder('progress')
+        .select('progress.careerTrackId', 'careerTrackId')
+        .addSelect('COUNT(progress.id)', 'count')
+        .where('progress.userId = :userId', { userId })
+        .andWhere('progress.careerTrackId IN (:...trackIds)', { trackIds })
+        .andWhere('progress.isLearned = :isLearned', { isLearned: true })
+        .groupBy('progress.careerTrackId')
+        .getRawMany<{ careerTrackId: string; count: string }>(),
+    ]);
+
+    const trackIdByModuleId = new Map(
+      modules.map((moduleItem) => [moduleItem.id, moduleItem.careerTrackId]),
+    );
+    const moduleCountByTrackId = new Map<string, number>();
+    for (const moduleItem of modules) {
+      moduleCountByTrackId.set(
+        moduleItem.careerTrackId,
+        (moduleCountByTrackId.get(moduleItem.careerTrackId) ?? 0) + 1,
+      );
+    }
+
+    const sentenceCountByTrackId = new Map<string, number>();
+    if (modules.length > 0) {
+      const sentenceRows = await this.sentenceRepository
+        .createQueryBuilder('sentence')
+        .select('sentence.moduleId', 'moduleId')
+        .addSelect('COUNT(sentence.id)', 'count')
+        .where('sentence.moduleId IN (:...moduleIds)', {
+          moduleIds: modules.map((moduleItem) => moduleItem.id),
+        })
+        .andWhere('sentence.status = :status', {
+          status: SkillBuilderSentenceStatus.ACTIVE,
+        })
+        .groupBy('sentence.moduleId')
+        .getRawMany<{ moduleId: string; count: string }>();
+
+      for (const row of sentenceRows) {
+        const trackId = trackIdByModuleId.get(row.moduleId);
+        if (!trackId) continue;
+        sentenceCountByTrackId.set(
+          trackId,
+          (sentenceCountByTrackId.get(trackId) ?? 0) + Number(row.count),
+        );
+      }
+    }
+
+    const learnedCountByTrackId = new Map<string, number>();
+    for (const row of learnedRows) {
+      learnedCountByTrackId.set(row.careerTrackId, Number(row.count));
+    }
+
+    return tracks.map((track) => ({
+      id: track.id,
+      title: track.title,
+      subtitleBn: track.subtitleBn,
+      iconKey: track.iconKey,
+      cardColor: track.cardColor,
+      moduleCount: moduleCountByTrackId.get(track.id) ?? 0,
+      sentenceCount: sentenceCountByTrackId.get(track.id) ?? 0,
+      learnedSentenceCount: learnedCountByTrackId.get(track.id) ?? 0,
+    }));
+  }
+
   async findPublishedCareerTrackDetails(userId: string, trackId: string) {
     const track = await this.findPublishedTrackOrFail(trackId);
 

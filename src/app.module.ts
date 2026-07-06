@@ -18,7 +18,6 @@ import { FinalExamModule } from './module-2/final-exam/final-exam.module';
 import { CertificatesModule } from './module-2/certificates/certificates.module';
 import { WebinarModule } from './webinar/webinar.module';
 import { ModerationModule } from './moderation/moderation.module';
-import { CvBuilderModule } from './cv-builder/cv-builder.module';
 import { UserReportsModule } from './user-reports/user-reports.module';
 import { ScoringModule } from './module-2/scoring/scoring.module';
 import { DailyChallengesModule } from './module-2/daily-challenges/daily-challenges.module';
@@ -38,12 +37,17 @@ import { PackageStoreModule } from './package-store/package-store.module';
 import { CallsModule } from './calls/calls.module';
 import { UserSettingsModule } from './user_settings/user-settings.module';
 import { LearningActivityModule } from './module-2/learning-activity/learning-activity.module';
+
 import { RevenueAnalyticsModule } from './revenue-analytics/revenue-analytics.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
+import { CvTemplatesModule } from './cv-templates/cv-templates.module';
+import { CvGenerationsModule } from './cv-generations/cv-generations.module';
+import { CvAssistantModule } from './cv-assistant/cv-assistant.module';
 import { GooglePlayBillingModule } from './billing/google-play/google-play-billing.module';
 import { GooglePlayRtdnModule } from './billing/google-play-rtdn/google-play-rtdn.module';
 import { GooglePlayReconciliationModule } from './billing/google-play-reconciliation/google-play-reconciliation.module';
 import { AppStoreNotificationsModule } from './billing/app-store/app-store-notifications.module';
+import { HomeModule } from './home/home.module';
 
 @Module({
   imports: [
@@ -84,7 +88,9 @@ import { AppStoreNotificationsModule } from './billing/app-store/app-store-notif
     CertificatesModule,
     WebinarModule,
     ModerationModule,
-    CvBuilderModule,
+    CvTemplatesModule,
+    CvGenerationsModule,
+    CvAssistantModule,
     UserReportsModule,
     ScoringModule,
     DailyChallengesModule,
@@ -109,6 +115,7 @@ import { AppStoreNotificationsModule } from './billing/app-store/app-store-notif
     GooglePlayRtdnModule,
     GooglePlayReconciliationModule,
     AppStoreNotificationsModule,
+    HomeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

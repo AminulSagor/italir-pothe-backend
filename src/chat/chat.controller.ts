@@ -22,6 +22,8 @@ import { ConversationParticipant } from './entities/conversation-participant.ent
 import { Conversation } from './entities/conversation.entity';
 import { DirectConversation } from './entities/direct-conversation.entity';
 import { Message } from './entities/message.entity';
+import { Call } from '../calls/entities/call.entity';
+import { CallStatus } from '../calls/enums/call.enums';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -45,6 +47,10 @@ export class ChatController {
     @InjectRepository(Message)
     private readonly messageRepo:
       Repository<Message>,
+
+    @InjectRepository(Call)
+    private readonly callRepo:
+      Repository<Call>,
   ) {}
 
   @Get('sync')
@@ -209,6 +215,24 @@ export class ChatController {
         ],
       });
 
+    const recentCalls = await this.callRepo
+      .createQueryBuilder('call')
+      .distinctOn(['call.directConversationId'])
+      .where('call.directConversationId IN (:...conversationIds)', {
+        conversationIds,
+      })
+      .orderBy('call.directConversationId', 'ASC')
+      .addOrderBy('call.updatedAt', 'DESC')
+      .addOrderBy('call.createdAt', 'DESC')
+      .getMany();
+
+    const latestCallByConversationId = new Map<string, Call>();
+    for (const call of recentCalls) {
+      if (!latestCallByConversationId.has(call.directConversationId)) {
+        latestCallByConversationId.set(call.directConversationId, call);
+      }
+    }
+
     const allParticipants =
       await this.participantRepo.find({
         where: {
@@ -243,7 +267,7 @@ export class ChatController {
                       .fullName,
                   avatarUrl:
                     participant.user
-                      .profilePhotoFileId,
+                      .avatarUrl ?? '',
                   profilePhotoFileId:
                     participant.user
                       .profilePhotoFileId,
@@ -357,6 +381,34 @@ export class ChatController {
               }
             : null;
 
+        const latestCall = latestCallByConversationId.get(conversation.id);
+        const latestCallAt = latestCall
+          ? latestCall.endedAt ?? latestCall.updatedAt ?? latestCall.createdAt
+          : null;
+        const messageActivityAt =
+          lastMessage?.createdAt ?? conversation.lastMessageAt;
+        const isCallLatest = Boolean(
+          latestCall &&
+            latestCallAt &&
+            (!messageActivityAt ||
+              latestCallAt.getTime() >= messageActivityAt.getTime()),
+        );
+        const lastCall =
+          latestCall && latestCallAt && isCallLatest
+            ? {
+                id: latestCall.id,
+                callType: latestCall.callType,
+                status: latestCall.status,
+                callerId: latestCall.callerId,
+                receiverId: latestCall.receiverId,
+                createdAt: latestCallAt,
+              }
+            : null;
+        const lastActivityAt =
+          isCallLatest && latestCallAt
+            ? latestCallAt
+            : messageActivityAt ?? conversation.createdAt;
+
         const lastMessageReadByOthers =
           lastMessage &&
           lastMessage.senderId ===
@@ -403,6 +455,9 @@ export class ChatController {
 
           lastMessageAt:
             conversation.lastMessageAt,
+
+          lastActivityAt,
+          lastCall,
 
           createdAt:
             conversation.createdAt,
@@ -461,23 +516,8 @@ export class ChatController {
 
     return enriched.sort(
       (first, second) => {
-        const firstTime =
-          first.lastMessageAt
-            ? new Date(
-                first.lastMessageAt,
-              ).getTime()
-            : new Date(
-                first.createdAt,
-              ).getTime();
-
-        const secondTime =
-          second.lastMessageAt
-            ? new Date(
-                second.lastMessageAt,
-              ).getTime()
-            : new Date(
-                second.createdAt,
-              ).getTime();
+        const firstTime = first.lastActivityAt.getTime();
+        const secondTime = second.lastActivityAt.getTime();
 
         return secondTime - firstTime;
       },
@@ -544,6 +584,7 @@ export class ChatController {
   async getMessages(
     @Req() req: any,
     @Param('id') id: string,
+    @Query('page') page = '1',
     @Query('limit') limit = '50',
   ) {
     const me = req.user;
@@ -562,15 +603,85 @@ export class ChatController {
       };
     }
 
-    return this.messageRepo.find({
-      where: {
-        conversationId: id,
-      },
-      order: {
-        sequenceNo: 'ASC',
-      },
-      take: Number(limit),
-    });
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(100, Math.max(1, Number(limit) || 50));
+
+    const [messages, calls] = await Promise.all([
+      this.messageRepo.find({
+        where: {
+          conversationId: id,
+        },
+        order: {
+          createdAt: 'ASC',
+        },
+      }),
+      this.callRepo.find({
+        where: {
+          directConversationId: id,
+        },
+        order: {
+          createdAt: 'ASC',
+        },
+      }),
+    ]);
+
+    const messageItems = messages.map((message) => ({
+      ...message,
+      itemType: 'message',
+    }));
+
+    const callItems = calls
+      .filter((call) =>
+        [
+          CallStatus.REJECTED,
+          CallStatus.CANCELLED,
+          CallStatus.ENDED,
+          CallStatus.MISSED,
+          CallStatus.FAILED,
+        ].includes(call.status),
+      )
+      .map((call) => ({
+        id: `call:${call.id}`,
+        itemType: 'call',
+        callId: call.id,
+        conversationId: call.directConversationId,
+        senderId: call.callerId,
+        receiverId: call.receiverId,
+        callType: call.callType,
+        callStatus: this.resolveChatCallStatus(call.status),
+        durationSeconds: this.resolveCallDurationSeconds(call),
+        content: null,
+        messageType: 'call',
+        createdAt: call.createdAt,
+        updatedAt: call.updatedAt,
+      }));
+
+    const timeline = [...messageItems, ...callItems].sort(
+      (left, right) => left.createdAt.getTime() - right.createdAt.getTime(),
+    );
+
+    const pageEnd = Math.max(0, timeline.length - (safePage - 1) * safeLimit);
+    const pageStart = Math.max(0, pageEnd - safeLimit);
+
+    return timeline.slice(pageStart, pageEnd);
+  }
+
+  private resolveChatCallStatus(status: CallStatus) {
+    if (status === CallStatus.ENDED) return 'completed';
+    if (status === CallStatus.REJECTED) return 'rejected';
+    if (status === CallStatus.FAILED) return 'failed';
+    return 'missed';
+  }
+
+  private resolveCallDurationSeconds(call: Call): number {
+    if (call.status !== CallStatus.ENDED) return 0;
+
+    const startedAt = call.answeredAt ?? call.createdAt;
+    const endedAt = call.endedAt ?? call.updatedAt;
+    const durationMs = endedAt.getTime() - startedAt.getTime();
+
+    if (!Number.isFinite(durationMs) || durationMs <= 0) return 0;
+    return Math.floor(durationMs / 1000);
   }
 
   @Post('conversations/:id/messages')

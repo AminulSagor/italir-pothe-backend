@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 
 import { CourseProviderProduct } from '../../course-commerce/entities/course-provider-product.entity';
 import { CoursePaymentProvider } from '../../course-commerce/types/course-commerce.type';
+import { PublicCourseCatalogQueryDto } from '../dto/course.dto';
 import { Course, CourseStatus } from '../entities/course.entity';
 
 @Injectable()
@@ -54,6 +55,59 @@ export class CoursesService {
       );
   }
 
+  async findCourseCatalog(query: PublicCourseCatalogQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const normalizedSearch = query.search?.trim().toLowerCase() ?? '';
+
+    const courseQuery = this.courseRepository
+      .createQueryBuilder('course')
+      .where('course.status = :status', { status: CourseStatus.PUBLISHED })
+      .orderBy('course.createdAt', 'DESC');
+
+    if (normalizedSearch) {
+      courseQuery.andWhere(
+        `(
+          LOWER(course.title) LIKE :search OR
+          LOWER(COALESCE(course.subtitle, '')) LIKE :search OR
+          LOWER(COALESCE(course.description, '')) LIKE :search
+        )`,
+        { search: `%${normalizedSearch}%` },
+      );
+    }
+
+    const courses = await courseQuery.getMany();
+    const availableCourses = await this.filterCoursesForProvider(
+      courses,
+      query.provider,
+    );
+    const total = availableCourses.length;
+    const paginatedCourses = availableCourses.slice(
+      (page - 1) * limit,
+      page * limit,
+    );
+
+    const providerProductByCourseId = await this.getProviderProductMap(
+      paginatedCourses,
+      query.provider,
+    );
+
+    return {
+      items: paginatedCourses.map((course) =>
+        this.mapCourse(
+          course,
+          providerProductByCourseId.get(course.id) ?? null,
+        ),
+      ),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
   async findCourseById(courseId: string, provider?: CoursePaymentProvider) {
     const course = await this.courseRepository.findOne({
       where: {
@@ -83,6 +137,43 @@ export class CoursesService {
     }
 
     return this.mapCourse(course, providerProduct);
+  }
+
+  private async filterCoursesForProvider(
+    courses: Course[],
+    provider?: CoursePaymentProvider,
+  ): Promise<Course[]> {
+    if (!provider || courses.length === 0) {
+      return courses;
+    }
+
+    const providerProductByCourseId = await this.getProviderProductMap(
+      courses,
+      provider,
+    );
+
+    return courses.filter(
+      (course) => course.isFree || providerProductByCourseId.has(course.id),
+    );
+  }
+
+  private async getProviderProductMap(
+    courses: Course[],
+    provider?: CoursePaymentProvider,
+  ): Promise<Map<string, CourseProviderProduct>> {
+    if (!provider || courses.length === 0) {
+      return new Map<string, CourseProviderProduct>();
+    }
+
+    const providerProducts = await this.providerProductRepository.find({
+      where: {
+        courseId: In(courses.map((course) => course.id)),
+        provider,
+        isActive: true,
+      },
+    });
+
+    return new Map(providerProducts.map((item) => [item.courseId, item]));
   }
 
   private mapCourse(
