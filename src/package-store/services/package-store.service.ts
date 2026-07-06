@@ -75,6 +75,17 @@ import { StoreWalletService } from './store-wallet.service';
 import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
 import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
 import { GooglePlayBillingService } from 'src/billing/google-play/google-play-billing.service';
+import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
+import {
+  BillingOrderDomain,
+  BillingPaymentProvider,
+  ProviderRefundSource,
+  ProviderRefundStatus,
+} from 'src/billing/types/provider-refund.type';
+import { GooglePlaySubscriptionLifecycleService } from 'src/billing/google-play-subscriptions/services/google-play-subscription-lifecycle.service';
+import { AppStoreBillingService } from 'src/billing/app-store/services/app-store-billing.service';
+import { Environment, Type } from '@apple/app-store-server-library';
+import { AppStoreSubscriptionLifecycleService } from 'src/billing/app-store/services/app-store-subscription-lifecycle.service';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -186,8 +197,17 @@ export class PackageStoreService {
     @InjectRepository(CourseOrderProviderTransaction)
     private readonly courseProviderTransactionRepository: Repository<CourseOrderProviderTransaction>,
 
+    @InjectRepository(ProviderRefundOperation)
+    private readonly refundOperationRepository: Repository<ProviderRefundOperation>,
+
+    private readonly appStoreBillingService: AppStoreBillingService,
+
+    private readonly appStoreSubscriptionLifecycleService: AppStoreSubscriptionLifecycleService,
+
     @Inject(FOREX_RATE_PROVIDER)
     private readonly forexRateProvider: ForexRateProvider,
+
+    private readonly googlePlaySubscriptionLifecycleService: GooglePlaySubscriptionLifecycleService,
 
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
@@ -1144,7 +1164,9 @@ export class PackageStoreService {
       balances: await this.walletService.getBalances(userId),
       payment: {
         provider: query.provider,
-        developmentVerification: this.isDevelopmentPaymentMode(),
+        developmentVerification: this.isDevelopmentVerificationForProvider(
+          query.provider,
+        ),
       },
     };
   }
@@ -1367,8 +1389,6 @@ export class PackageStoreService {
     orderId: string;
     dto: VerifyStoreGooglePlayPurchaseDto;
   }) {
-    this.assertDevelopmentPaymentMode();
-
     const order = await this.getOwnedOrderGraph(params.userId, params.orderId);
 
     if (order.providerSnapshot.provider !== StorePaymentProvider.GOOGLE_PLAY) {
@@ -1377,33 +1397,198 @@ export class PackageStoreService {
       );
     }
 
-    if (params.dto.productId !== order.providerSnapshot.productId) {
+    const productId = params.dto.productId.trim();
+    const purchaseToken = params.dto.purchaseToken.trim();
+
+    if (productId !== order.providerSnapshot.productId) {
       throw new BadRequestException(
         'Google Play product ID does not match the ordered package.',
       );
     }
 
-    const tokenHash = createHash('sha256')
-      .update(params.dto.purchaseToken)
-      .digest('hex');
-    const providerReference =
-      params.dto.transactionId?.trim() || `google-play:${tokenHash}`;
+    if (!this.googlePlayBillingService.isRealVerificationEnabled()) {
+      this.assertDevelopmentPaymentMode();
 
-    await this.markDevelopmentTransactionVerified({
+      const tokenHash = createHash('sha256')
+        .update(purchaseToken)
+        .digest('hex');
+
+      const providerReference =
+        params.dto.transactionId?.trim() || `google-play:${tokenHash}`;
+
+      await this.markProviderTransactionVerified({
+        order,
+        tokenHash,
+        providerTransactionId: providerReference,
+        environment: StoreProviderEnvironment.DEVELOPMENT,
+        payload: {
+          source: 'development_google_play_verifier',
+        },
+      });
+
+      return this.completeOrder({
+        userId: params.userId,
+        orderId: params.orderId,
+        provider: StorePaymentProvider.GOOGLE_PLAY,
+        providerReference,
+      });
+    }
+
+    const expectedObfuscatedAccountId = createHash('sha256')
+      .update(order.userId)
+      .digest('hex');
+
+    if (
+      order.providerSnapshot.productType ===
+      StoreProviderProductType.SUBSCRIPTION
+    ) {
+      const verifiedSubscription =
+        await this.googlePlayBillingService.verifySubscription({
+          purchaseToken,
+          expectedProductId: order.providerSnapshot.productId,
+          expectedBasePlanId: order.providerSnapshot.basePlanId,
+          expectedOfferId: order.providerSnapshot.offerId,
+          expectedObfuscatedAccountId,
+        });
+
+      const providerReference =
+        verifiedSubscription.latestOrderId ||
+        `google-play:${verifiedSubscription.purchaseTokenHash}`;
+
+      await this.markProviderTransactionVerified({
+        order,
+        tokenHash: verifiedSubscription.purchaseTokenHash,
+        providerTransactionId: providerReference,
+        environment: verifiedSubscription.isTestPurchase
+          ? StoreProviderEnvironment.SANDBOX
+          : StoreProviderEnvironment.PRODUCTION,
+        payload: {
+          source: 'google_play_developer_api_subscription',
+          productId: verifiedSubscription.productId,
+          basePlanId: verifiedSubscription.basePlanId,
+          offerId: verifiedSubscription.offerId,
+          latestOrderId: verifiedSubscription.latestOrderId,
+          subscriptionState: verifiedSubscription.subscriptionState,
+          acknowledgementState: verifiedSubscription.acknowledgementState,
+          startedAt: verifiedSubscription.startedAt,
+          expiryTime: verifiedSubscription.expiresAt,
+          autoRenewEnabled: verifiedSubscription.autoRenewEnabled,
+          regionCode: verifiedSubscription.regionCode,
+          isTestPurchase: verifiedSubscription.isTestPurchase,
+        },
+      });
+
+      const completion = await this.completeOrder({
+        userId: params.userId,
+        orderId: params.orderId,
+        provider: StorePaymentProvider.GOOGLE_PLAY,
+        providerReference,
+      });
+
+      const acknowledgement =
+        await this.googlePlayBillingService.acknowledgeSubscription({
+          subscriptionId: order.providerSnapshot.productId,
+
+          purchaseToken,
+        });
+
+      const subscriptionLifecycle =
+        await this.googlePlaySubscriptionLifecycleService.registerInitialPurchase(
+          {
+            initialOrderId: order.id,
+
+            userId: order.userId,
+
+            purchaseToken,
+
+            eventTime: new Date(),
+          },
+        );
+
+      return {
+        ...completion,
+
+        googlePlayProcessing: {
+          type: 'subscription',
+
+          acknowledged: acknowledgement.acknowledged,
+
+          alreadyAcknowledged: acknowledgement.alreadyAcknowledged,
+        },
+
+        subscriptionLifecycle,
+      };
+    }
+
+    if (
+      order.providerSnapshot.productType !== StoreProviderProductType.CONSUMABLE
+    ) {
+      throw new BadRequestException(
+        'This package is not configured as a consumable Google Play product.',
+      );
+    }
+
+    const verifiedPurchase =
+      await this.googlePlayBillingService.verifyOneTimeProduct({
+        purchaseToken,
+        expectedProductId: order.providerSnapshot.productId,
+        expectedOfferId: order.providerSnapshot.offerId,
+        expectedObfuscatedAccountId,
+      });
+
+    if (verifiedPurchase.quantity !== 1) {
+      throw new BadRequestException(
+        'Package purchases currently support a quantity of exactly one.',
+      );
+    }
+
+    const providerReference =
+      verifiedPurchase.orderId ||
+      `google-play:${verifiedPurchase.purchaseTokenHash}`;
+
+    await this.markProviderTransactionVerified({
       order,
-      tokenHash,
+      tokenHash: verifiedPurchase.purchaseTokenHash,
       providerTransactionId: providerReference,
+      environment: verifiedPurchase.isTestPurchase
+        ? StoreProviderEnvironment.SANDBOX
+        : StoreProviderEnvironment.PRODUCTION,
       payload: {
-        source: 'development_google_play_verifier',
+        source: 'google_play_developer_api',
+        productId: verifiedPurchase.productId,
+        orderId: verifiedPurchase.orderId,
+        purchaseOptionId: verifiedPurchase.purchaseOptionId,
+        offerId: verifiedPurchase.offerId,
+        purchaseState: verifiedPurchase.purchaseState,
+        acknowledgementState: verifiedPurchase.acknowledgementState,
+        consumptionState: verifiedPurchase.consumptionState,
+        purchaseCompletionTime: verifiedPurchase.purchaseCompletionTime,
+        regionCode: verifiedPurchase.regionCode,
+        isTestPurchase: verifiedPurchase.isTestPurchase,
       },
     });
 
-    return this.completeOrder({
+    const completion = await this.completeOrder({
       userId: params.userId,
       orderId: params.orderId,
       provider: StorePaymentProvider.GOOGLE_PLAY,
       providerReference,
     });
+
+    const consumption =
+      await this.googlePlayBillingService.consumeOneTimeProduct({
+        productId: order.providerSnapshot.productId,
+        purchaseToken,
+      });
+
+    return {
+      ...completion,
+      googlePlayProcessing: {
+        type: 'consumable',
+        consumed: consumption.consumed,
+        alreadyConsumed: consumption.alreadyConsumed,
+      },
+    };
   }
 
   async verifyAppStorePurchase(params: {
@@ -1411,8 +1596,6 @@ export class PackageStoreService {
     orderId: string;
     dto: VerifyStoreAppStorePurchaseDto;
   }) {
-    this.assertDevelopmentPaymentMode();
-
     const order = await this.getOwnedOrderGraph(params.userId, params.orderId);
 
     if (order.providerSnapshot.provider !== StorePaymentProvider.APP_STORE) {
@@ -1421,35 +1604,149 @@ export class PackageStoreService {
       );
     }
 
-    if (params.dto.productId !== order.providerSnapshot.productId) {
+    const productId = params.dto.productId.trim();
+
+    if (productId !== order.providerSnapshot.productId) {
       throw new BadRequestException(
         'App Store product ID does not match the ordered package.',
       );
     }
 
-    const providerReference = params.dto.transactionId.trim();
-    const tokenHash = params.dto.signedTransactionInfo
-      ? createHash('sha256')
-          .update(params.dto.signedTransactionInfo)
-          .digest('hex')
-      : null;
+    if (!this.appStoreBillingService.isRealVerificationEnabled()) {
+      this.assertDevelopmentPaymentMode();
 
-    await this.markDevelopmentTransactionVerified({
+      const providerReference = params.dto.transactionId.trim();
+
+      const tokenHash = createHash('sha256')
+        .update(params.dto.signedTransactionInfo)
+        .digest('hex');
+
+      await this.markProviderTransactionVerified({
+        order,
+
+        tokenHash,
+
+        providerTransactionId: providerReference,
+
+        environment: StoreProviderEnvironment.DEVELOPMENT,
+
+        payload: {
+          source: 'development_storekit_verifier',
+
+          signedTransactionProvided: true,
+        },
+      });
+
+      return this.completeOrder({
+        userId: params.userId,
+
+        orderId: params.orderId,
+
+        provider: StorePaymentProvider.APP_STORE,
+
+        providerReference,
+      });
+    }
+
+    const expectedType =
+      order.providerSnapshot.productType ===
+      StoreProviderProductType.SUBSCRIPTION
+        ? Type.AUTO_RENEWABLE_SUBSCRIPTION
+        : order.providerSnapshot.productType ===
+            StoreProviderProductType.CONSUMABLE
+          ? Type.CONSUMABLE
+          : Type.NON_CONSUMABLE;
+
+    const verified = await this.appStoreBillingService.verifyTransaction({
+      signedTransactionInfo: params.dto.signedTransactionInfo,
+
+      expectedTransactionId: params.dto.transactionId,
+
+      expectedProductId: order.providerSnapshot.productId,
+
+      expectedAppAccountToken: order.id,
+
+      expectedType,
+    });
+
+    const tokenHash = this.appStoreBillingService.hash(
+      verified.originalTransactionId,
+    );
+
+    await this.markProviderTransactionVerified({
       order,
+
       tokenHash,
-      providerTransactionId: providerReference,
+
+      providerTransactionId: verified.transactionId,
+
+      environment:
+        verified.environment === Environment.PRODUCTION
+          ? StoreProviderEnvironment.PRODUCTION
+          : StoreProviderEnvironment.SANDBOX,
+
       payload: {
-        source: 'development_storekit_verifier',
-        signedTransactionProvided: Boolean(params.dto.signedTransactionInfo),
+        source: 'app_store_server_api',
+
+        ...verified.sanitizedPayload,
       },
     });
 
-    return this.completeOrder({
+    const completion = await this.completeOrder({
       userId: params.userId,
+
       orderId: params.orderId,
+
       provider: StorePaymentProvider.APP_STORE,
-      providerReference,
+
+      providerReference: verified.transactionId,
     });
+
+    if (
+      order.providerSnapshot.productType ===
+      StoreProviderProductType.SUBSCRIPTION
+    ) {
+      const subscriptionLifecycle =
+        await this.appStoreSubscriptionLifecycleService.registerInitialPurchase(
+          {
+            initialOrderId: order.id,
+
+            userId: order.userId,
+
+            transaction: verified.decoded,
+          },
+        );
+
+      return {
+        ...completion,
+
+        appStoreProcessing: {
+          type: 'auto_renewable_subscription',
+
+          verified: true,
+
+          finishTransactionOnDevice: true,
+        },
+
+        subscriptionLifecycle,
+      };
+    }
+
+    return {
+      ...completion,
+
+      appStoreProcessing: {
+        type: order.providerSnapshot.productType,
+
+        verified: true,
+
+        /*
+         * Apple StoreKit transactions are finished
+         * by Flutter only after this API succeeds.
+         */
+        finishTransactionOnDevice: true,
+      },
+    };
   }
 
   // =========================================================
@@ -1672,6 +1969,21 @@ export class PackageStoreService {
     return this.buildInvoice(order);
   }
 
+  async getAdminInvoice(orderId: string) {
+    const order = await this.getOrderGraph(orderId);
+
+    if (
+      order.status !== StoreOrderStatus.COMPLETED &&
+      order.status !== StoreOrderStatus.REFUNDED
+    ) {
+      throw new BadRequestException(
+        'An invoice is only available for a completed or refunded order.',
+      );
+    }
+
+    return this.buildInvoice(order);
+  }
+
   // =========================================================
   // Admin orders
   // =========================================================
@@ -1865,9 +2177,96 @@ export class PackageStoreService {
     return this.mapOrder(order);
   }
 
-  async refundOrder(orderId: string, dto: RefundStoreOrderDto) {
+  async refundGooglePlayOrder(params: {
+    orderId: string;
+    adminUserId: string;
+    dto: RefundStoreOrderDto;
+  }) {
+    if (!this.googlePlayBillingService.isRealVerificationEnabled()) {
+      throw new BadRequestException(
+        'Real Google Play verification must be enabled before issuing a real refund.',
+      );
+    }
+
+    const prepared = await this.preparePackageRefundOperation({
+      orderId: params.orderId,
+      adminUserId: params.adminUserId,
+      reason: params.dto.reason,
+    });
+
+    if (prepared.operation.status === ProviderRefundStatus.COMPLETED) {
+      return {
+        message: 'Google Play package refund was already completed.',
+
+        refundOperation: this.mapRefundOperation(prepared.operation),
+
+        order: await this.findAdminOrderById(params.orderId),
+      };
+    }
+
+    if (prepared.shouldCallProvider) {
+      try {
+        await this.googlePlayBillingService.refundOrder({
+          orderId: prepared.operation.providerOrderId,
+          revoke: true,
+        });
+
+        await this.markPackageRefundProviderCompleted(prepared.operation.id);
+      } catch (error) {
+        await this.markPackageRefundFailure({
+          operationId: prepared.operation.id,
+          error,
+          preserveProviderCompleted: false,
+        });
+
+        throw error;
+      }
+    }
+
+    try {
+      await this.applyPackageRefundLocally({
+        orderId: params.orderId,
+        operationId: prepared.operation.id,
+        reason: params.dto.reason,
+      });
+    } catch (error) {
+      await this.markPackageRefundFailure({
+        operationId: prepared.operation.id,
+        error,
+        preserveProviderCompleted: true,
+      });
+
+      throw error;
+    }
+
+    const operation = await this.refundOperationRepository.findOne({
+      where: {
+        id: prepared.operation.id,
+      },
+    });
+
+    if (!operation) {
+      throw new NotFoundException('Refund operation not found.');
+    }
+
+    return {
+      message: 'Google Play package refund completed successfully.',
+
+      refundOperation: this.mapRefundOperation(operation),
+
+      order: await this.findAdminOrderById(params.orderId),
+    };
+  }
+
+  async demoRefund(orderId: string, dto?: RefundStoreOrderDto) {
+    this.assertDemoMode();
+
     await this.dataSource.transaction(async (manager) => {
       const order = await this.getOrderGraphWithManager(manager, orderId);
+
+      if (order.status === StoreOrderStatus.REFUNDED) {
+        throw new ConflictException('Package order was already refunded.');
+      }
 
       if (order.status !== StoreOrderStatus.COMPLETED) {
         throw new BadRequestException('Only completed orders can be refunded.');
@@ -1879,7 +2278,7 @@ export class PackageStoreService {
 
       order.payment.refundedAt = new Date();
 
-      order.payment.refundReason = dto.reason?.trim() || null;
+      order.payment.refundReason = dto?.reason?.trim() || 'Demo refund';
 
       await manager.getRepository(StoreOrder).save(order);
 
@@ -1891,9 +2290,9 @@ export class PackageStoreService {
 
         StoreTimelineEventType.REFUND_PROCESSED,
 
-        'Refund processed',
+        'Demo refund processed',
 
-        dto.reason?.trim() || 'The order was refunded.',
+        order.payment.refundReason,
 
         {
           reversedVoiceMinutes: order.reversal.reversedVoiceMinutes,
@@ -1910,20 +2309,6 @@ export class PackageStoreService {
     return this.findAdminOrderById(orderId);
   }
 
-  async demoRefund(orderId: string, dto?: RefundStoreOrderDto) {
-    this.assertDemoMode();
-
-    return this.refundOrder(orderId, {
-      reason: dto?.reason?.trim() || 'Demo refund',
-    });
-  }
-
-  async getAdminInvoice(orderId: string) {
-    const order = await this.getOrderGraph(orderId);
-
-    return this.buildInvoice(order);
-  }
-
   // Compatibility aliases
   async findOrders(query: AdminStoreOrderQueryDto) {
     return this.findAdminOrders(query);
@@ -1933,18 +2318,523 @@ export class PackageStoreService {
     return this.findAdminOrderById(orderId);
   }
 
+  async applyGooglePlayVoidedPurchase(params: {
+    internalOrderId: string;
+    providerOrderId: string;
+    purchaseTokenHash: string;
+    eventTime: Date;
+  }) {
+    const operation = await this.dataSource.transaction(async (manager) => {
+      const operationRepository = manager.getRepository(
+        ProviderRefundOperation,
+      );
+
+      const order = await this.getOrderGraphWithManager(
+        manager,
+        params.internalOrderId,
+      );
+
+      if (
+        order.payment.provider !== StorePaymentProvider.GOOGLE_PLAY ||
+        order.providerSnapshot.provider !== StorePaymentProvider.GOOGLE_PLAY
+      ) {
+        throw new BadRequestException(
+          'The package order is not a Google Play order.',
+        );
+      }
+
+      const tokenMatches =
+        order.providerTransaction.tokenHash === params.purchaseTokenHash;
+
+      const orderMatches =
+        order.providerTransaction.providerTransactionId ===
+        params.providerOrderId;
+
+      if (!tokenMatches && !orderMatches) {
+        throw new ConflictException(
+          'Voided purchase does not match the package order.',
+        );
+      }
+
+      let operation = await operationRepository.findOne({
+        where: {
+          orderDomain: BillingOrderDomain.PACKAGE_STORE,
+
+          internalOrderId: order.id,
+
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+        },
+
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!operation) {
+        operation = operationRepository.create({
+          orderDomain: BillingOrderDomain.PACKAGE_STORE,
+
+          internalOrderId: order.id,
+
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+
+          providerOrderId: params.providerOrderId,
+
+          status: ProviderRefundStatus.PROVIDER_COMPLETED,
+
+          source: ProviderRefundSource.GOOGLE_RTDN,
+
+          revoke: true,
+
+          reason: 'Google Play voided the purchase.',
+
+          requestedByAdminId: null,
+
+          providerCompletedAt: params.eventTime,
+
+          completedAt: null,
+
+          failureCode: null,
+
+          failureMessage: null,
+        });
+      } else if (operation.status !== ProviderRefundStatus.COMPLETED) {
+        operation.status = ProviderRefundStatus.PROVIDER_COMPLETED;
+
+        operation.source = ProviderRefundSource.GOOGLE_RTDN;
+
+        operation.revoke = true;
+
+        operation.providerCompletedAt =
+          operation.providerCompletedAt ?? params.eventTime;
+
+        operation.failureCode = null;
+
+        operation.failureMessage = null;
+      }
+
+      return operationRepository.save(operation);
+    });
+
+    if (operation.status !== ProviderRefundStatus.COMPLETED) {
+      await this.applyPackageRefundLocally({
+        orderId: params.internalOrderId,
+
+        operationId: operation.id,
+
+        reason: 'Google Play voided the purchase.',
+      });
+    }
+
+    const updatedOperation = await this.refundOperationRepository.findOne({
+      where: {
+        id: operation.id,
+      },
+    });
+
+    if (!updatedOperation) {
+      throw new NotFoundException('Refund operation not found.');
+    }
+
+    return {
+      message: 'Google Play voided purchase was applied successfully.',
+
+      refundOperation: this.mapRefundOperation(updatedOperation),
+
+      order: await this.findAdminOrderById(params.internalOrderId),
+    };
+  }
+
   // =========================================================
   // Internal order processing
   // =========================================================
 
-  private async markDevelopmentTransactionVerified(params: {
+  private async preparePackageRefundOperation(params: {
+    orderId: string;
+    adminUserId: string;
+    reason?: string;
+  }): Promise<{
+    operation: ProviderRefundOperation;
+    shouldCallProvider: boolean;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [`package-refund:${params.orderId}`],
+      );
+
+      const operationRepository = manager.getRepository(
+        ProviderRefundOperation,
+      );
+
+      const order = await this.getOrderGraphWithManager(
+        manager,
+        params.orderId,
+      );
+
+      if (
+        order.providerSnapshot.provider !== StorePaymentProvider.GOOGLE_PLAY ||
+        order.payment.provider !== StorePaymentProvider.GOOGLE_PLAY
+      ) {
+        throw new BadRequestException(
+          'Only Google Play package orders can use this refund endpoint.',
+        );
+      }
+
+      if (
+        order.providerTransaction.verificationStatus !==
+        StoreProviderVerificationStatus.VERIFIED
+      ) {
+        throw new BadRequestException(
+          'The Google Play transaction has not been verified.',
+        );
+      }
+
+      const providerOrderId =
+        order.providerTransaction.providerTransactionId?.trim();
+
+      if (!providerOrderId || providerOrderId.startsWith('google-play:')) {
+        throw new ConflictException(
+          'The verified transaction does not contain a refundable Google Play order ID.',
+        );
+      }
+
+      let operation = await operationRepository.findOne({
+        where: {
+          orderDomain: BillingOrderDomain.PACKAGE_STORE,
+
+          internalOrderId: order.id,
+
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+        },
+
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (order.status === StoreOrderStatus.REFUNDED) {
+        if (operation?.status === ProviderRefundStatus.COMPLETED) {
+          return {
+            operation,
+            shouldCallProvider: false,
+          };
+        }
+
+        throw new ConflictException(
+          'The package order was already refunded outside this refund operation.',
+        );
+      }
+
+      if (order.status !== StoreOrderStatus.COMPLETED) {
+        throw new BadRequestException(
+          'Only a completed package order can be refunded.',
+        );
+      }
+
+      if (!operation) {
+        operation = operationRepository.create({
+          orderDomain: BillingOrderDomain.PACKAGE_STORE,
+
+          internalOrderId: order.id,
+
+          provider: BillingPaymentProvider.GOOGLE_PLAY,
+
+          providerOrderId,
+
+          status: ProviderRefundStatus.PROCESSING,
+
+          source: ProviderRefundSource.ADMIN,
+
+          revoke: true,
+
+          reason: params.reason?.trim() || null,
+
+          requestedByAdminId: params.adminUserId,
+
+          providerCompletedAt: null,
+          completedAt: null,
+
+          failureCode: null,
+          failureMessage: null,
+        });
+
+        operation = await operationRepository.save(operation);
+
+        return {
+          operation,
+          shouldCallProvider: true,
+        };
+      }
+
+      if (operation.providerOrderId !== providerOrderId) {
+        throw new ConflictException(
+          'The stored refund operation references another Google Play order.',
+        );
+      }
+
+      if (operation.status === ProviderRefundStatus.COMPLETED) {
+        return {
+          operation,
+          shouldCallProvider: false,
+        };
+      }
+
+      if (operation.status === ProviderRefundStatus.PROVIDER_COMPLETED) {
+        return {
+          operation,
+          shouldCallProvider: false,
+        };
+      }
+
+      if (operation.status === ProviderRefundStatus.PROCESSING) {
+        throw new ConflictException(
+          'A refund request for this package order is already processing.',
+        );
+      }
+
+      operation.status = ProviderRefundStatus.PROCESSING;
+
+      operation.reason = params.reason?.trim() || operation.reason;
+
+      operation.requestedByAdminId = params.adminUserId;
+
+      operation.failureCode = null;
+      operation.failureMessage = null;
+
+      operation = await operationRepository.save(operation);
+
+      return {
+        operation,
+        shouldCallProvider: true,
+      };
+    });
+  }
+
+  private async markPackageRefundProviderCompleted(
+    operationId: string,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(ProviderRefundOperation);
+
+      const operation = await repository.findOne({
+        where: {
+          id: operationId,
+        },
+
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!operation) {
+        throw new NotFoundException('Refund operation not found.');
+      }
+
+      if (operation.status === ProviderRefundStatus.COMPLETED) {
+        return;
+      }
+
+      operation.status = ProviderRefundStatus.PROVIDER_COMPLETED;
+
+      operation.providerCompletedAt = new Date();
+
+      operation.failureCode = null;
+      operation.failureMessage = null;
+
+      await repository.save(operation);
+    });
+  }
+
+  private async applyPackageRefundLocally(params: {
+    orderId: string;
+    operationId: string;
+    reason?: string;
+  }): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const operationRepository = manager.getRepository(
+        ProviderRefundOperation,
+      );
+
+      const operation = await operationRepository.findOne({
+        where: {
+          id: params.operationId,
+        },
+
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!operation) {
+        throw new NotFoundException('Refund operation not found.');
+      }
+
+      if (
+        operation.status !== ProviderRefundStatus.PROVIDER_COMPLETED &&
+        operation.status !== ProviderRefundStatus.COMPLETED
+      ) {
+        throw new ConflictException(
+          'Google Play has not completed the refund.',
+        );
+      }
+
+      const order = await this.getOrderGraphWithManager(
+        manager,
+        params.orderId,
+      );
+
+      if (order.status !== StoreOrderStatus.REFUNDED) {
+        if (order.status !== StoreOrderStatus.COMPLETED) {
+          throw new BadRequestException(
+            'Only a completed package order can be refunded.',
+          );
+        }
+
+        /*
+         * Google refunds the money, but the developer must
+         * handle already consumed in-app resources locally.
+         */
+        await this.walletService.reverseOrder(order, manager);
+
+        const now = new Date();
+
+        order.status = StoreOrderStatus.REFUNDED;
+
+        order.payment.refundedAt = now;
+
+        order.payment.refundReason =
+          params.reason?.trim() || operation.reason || null;
+
+        await manager.getRepository(StoreOrder).save(order);
+
+        await manager.getRepository(StoreOrderPayment).save(order.payment);
+
+        await this.addTimelineEvent(
+          manager,
+          order.id,
+
+          StoreTimelineEventType.REFUND_PROCESSED,
+
+          'Google Play refund processed',
+
+          order.payment.refundReason ||
+            'The order was refunded and revoked through Google Play.',
+
+          {
+            refundOperationId: operation.id,
+
+            providerOrderId: operation.providerOrderId,
+
+            revoke: operation.revoke,
+
+            reversedVoiceMinutes: order.reversal.reversedVoiceMinutes,
+
+            reversedTextTokens: order.reversal.reversedTextTokens,
+
+            reversedFreezeCount: order.reversal.reversedFreezeCount,
+
+            reversedCvCredits: order.reversal.reversedCvCredits,
+          },
+        );
+      }
+
+      operation.status = ProviderRefundStatus.COMPLETED;
+
+      operation.completedAt = operation.completedAt ?? new Date();
+
+      operation.failureCode = null;
+      operation.failureMessage = null;
+
+      await operationRepository.save(operation);
+    });
+  }
+
+  private async markPackageRefundFailure(params: {
+    operationId: string;
+    error: unknown;
+    preserveProviderCompleted: boolean;
+  }): Promise<void> {
+    const normalized = this.normalizeProviderRefundError(params.error);
+
+    await this.refundOperationRepository.update(
+      {
+        id: params.operationId,
+      },
+      {
+        status: params.preserveProviderCompleted
+          ? ProviderRefundStatus.PROVIDER_COMPLETED
+          : ProviderRefundStatus.FAILED,
+
+        failureCode: normalized.code,
+        failureMessage: normalized.message,
+      },
+    );
+  }
+
+  private normalizeProviderRefundError(error: unknown): {
+    code: string;
+    message: string;
+  } {
+    if (error instanceof Error) {
+      return {
+        code: error.name.slice(0, 80),
+        message: error.message.slice(0, 500),
+      };
+    }
+
+    return {
+      code: 'UNKNOWN_REFUND_ERROR',
+      message: 'Unknown refund error.',
+    };
+  }
+
+  private mapRefundOperation(operation: ProviderRefundOperation) {
+    return {
+      id: operation.id,
+
+      orderDomain: operation.orderDomain,
+
+      internalOrderId: operation.internalOrderId,
+
+      provider: operation.provider,
+
+      providerOrderId: operation.providerOrderId,
+
+      status: operation.status,
+
+      source: operation.source,
+
+      revoke: operation.revoke,
+
+      reason: operation.reason,
+
+      requestedByAdminId: operation.requestedByAdminId,
+
+      providerCompletedAt: operation.providerCompletedAt,
+
+      completedAt: operation.completedAt,
+
+      failureCode: operation.failureCode,
+
+      failureMessage: operation.failureMessage,
+
+      createdAt: operation.createdAt,
+
+      updatedAt: operation.updatedAt,
+    };
+  }
+
+  private async markProviderTransactionVerified(params: {
     order: StoreOrder;
     tokenHash: string | null;
     providerTransactionId: string;
+    environment: StoreProviderEnvironment;
     payload: Record<string, unknown>;
   }) {
     await this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(StoreOrderProviderTransaction);
+
       const transaction = await repository.findOne({
         where: {
           orderId: params.order.id,
@@ -1963,6 +2853,12 @@ export class PackageStoreService {
       if (transaction.provider !== params.order.providerSnapshot.provider) {
         throw new ConflictException(
           'The provider transaction does not match the order provider.',
+        );
+      }
+
+      if (transaction.productId !== params.order.providerSnapshot.productId) {
+        throw new ConflictException(
+          'The provider transaction product does not match the order.',
         );
       }
 
@@ -1990,9 +2886,13 @@ export class PackageStoreService {
         })
         .andWhere(
           `(
-      providerTransaction.providerTransactionId = :providerTransactionId
-      ${params.tokenHash ? 'OR providerTransaction.tokenHash = :tokenHash' : ''}
-    )`,
+          providerTransaction.providerTransactionId = :providerTransactionId
+          ${
+            params.tokenHash
+              ? 'OR providerTransaction.tokenHash = :tokenHash'
+              : ''
+          }
+        )`,
           {
             providerTransactionId: params.providerTransactionId,
             ...(params.tokenHash
@@ -2013,16 +2913,24 @@ export class PackageStoreService {
 
       if (
         transaction.verificationStatus ===
-          StoreProviderVerificationStatus.VERIFIED &&
-        transaction.providerTransactionId === params.providerTransactionId &&
-        transaction.tokenHash === params.tokenHash
+        StoreProviderVerificationStatus.VERIFIED
       ) {
+        const sameTransaction =
+          transaction.providerTransactionId === params.providerTransactionId &&
+          transaction.tokenHash === params.tokenHash;
+
+        if (!sameTransaction) {
+          throw new ConflictException(
+            'This package order was already verified using another store transaction.',
+          );
+        }
+
         return;
       }
 
       transaction.tokenHash = params.tokenHash;
       transaction.providerTransactionId = params.providerTransactionId;
-      transaction.environment = StoreProviderEnvironment.DEVELOPMENT;
+      transaction.environment = params.environment;
       transaction.verificationStatus = StoreProviderVerificationStatus.VERIFIED;
       transaction.verifiedAt = new Date();
       transaction.verificationPayload = params.payload;
@@ -2044,18 +2952,6 @@ export class PackageStoreService {
         params.userId,
       );
 
-      if (order.status === StoreOrderStatus.COMPLETED) {
-        throw new ConflictException(
-          'This package order has already been completed.',
-        );
-      }
-
-      if (order.status !== StoreOrderStatus.PENDING) {
-        throw new BadRequestException(
-          `Order cannot be completed from status ${order.status}.`,
-        );
-      }
-
       if (order.payment.provider !== params.provider) {
         throw new BadRequestException(
           'Payment provider does not match the order.',
@@ -2065,6 +2961,12 @@ export class PackageStoreService {
       if (order.providerSnapshot.provider !== params.provider) {
         throw new BadRequestException(
           'The provider product snapshot does not match the order.',
+        );
+      }
+
+      if (order.providerTransaction.provider !== params.provider) {
+        throw new BadRequestException(
+          'The provider transaction does not match the order.',
         );
       }
 
@@ -2086,12 +2988,32 @@ export class PackageStoreService {
         );
       }
 
+      if (order.status === StoreOrderStatus.COMPLETED) {
+        if (order.payment.providerReference !== params.providerReference) {
+          throw new ConflictException(
+            'The completed package order uses another payment reference.',
+          );
+        }
+
+        const balances = await this.walletService.getBalancesWithManager(
+          order.userId,
+          manager,
+        );
+
+        return this.buildCompletionResponse(order, balances);
+      }
+
+      if (order.status !== StoreOrderStatus.PENDING) {
+        throw new BadRequestException(
+          `Order cannot be completed from status ${order.status}.`,
+        );
+      }
+
       const duplicatePayment = await manager
         .getRepository(StoreOrderPayment)
         .findOne({
           where: {
             provider: params.provider,
-
             providerReference: params.providerReference,
           },
         });
@@ -2102,13 +3024,15 @@ export class PackageStoreService {
         );
       }
 
+      const paidAt = new Date();
+
       order.status = StoreOrderStatus.COMPLETED;
 
       order.payment.providerReference = params.providerReference;
 
       order.payment.failureCode = null;
       order.payment.failureMessage = null;
-      order.payment.paidAt = new Date();
+      order.payment.paidAt = paidAt;
 
       await manager.getRepository(StoreOrder).save(order);
 
@@ -2117,18 +3041,12 @@ export class PackageStoreService {
       await this.addTimelineEvent(
         manager,
         order.id,
-
         StoreTimelineEventType.PAYMENT_PROCESSED,
-
         'Payment processed',
-
         'The payment was completed successfully.',
-
         {
           provider: params.provider,
-
           productId: order.providerSnapshot.productId,
-
           providerReference: params.providerReference,
         },
       );
@@ -2138,28 +3056,30 @@ export class PackageStoreService {
       await this.addTimelineEvent(
         manager,
         order.id,
-
         StoreTimelineEventType.ENTITLEMENT_GRANTED,
-
         'Package resources credited',
-
         'The purchased package resources were added to the user balance.',
-
         {
           voiceMinutes: order.snapshot.voiceMinutes ?? 0,
-
           textTokens: order.snapshot.textTokens ?? 0,
-
           freezeCount: order.snapshot.freezeCount ?? 0,
-
           cvCreditCount: order.snapshot.cvCreditCount ?? 0,
-
           streakProtectionMode: order.snapshot.streakProtectionMode,
         },
       );
 
       return this.buildCompletionResponse(order, balances);
     });
+  }
+
+  private isDevelopmentVerificationForProvider(
+    provider: StorePaymentProvider,
+  ): boolean {
+    if (provider === StorePaymentProvider.GOOGLE_PLAY) {
+      return !this.googlePlayBillingService.isRealVerificationEnabled();
+    }
+
+    return this.isDevelopmentPaymentMode();
   }
 
   private async failOrder(params: {
@@ -3008,29 +3928,16 @@ export class PackageStoreService {
     orderId: string,
     userId?: string,
   ) {
-    const orderRepository = manager.getRepository(StoreOrder);
-    const lockQuery = orderRepository
-      .createQueryBuilder('storeOrder')
-      .select('storeOrder.id')
-      .where('storeOrder.id = :orderId', { orderId })
-      .setLock('pessimistic_write');
-
-    if (userId) {
-      lockQuery.andWhere('storeOrder.userId = :userId', { userId });
-    }
-
-    // Lock only the root order row. PostgreSQL cannot apply FOR UPDATE to
-    // nullable rows produced by the LEFT JOIN relations below.
-    const lockedOrder = await lockQuery.getOne();
-
-    if (!lockedOrder) {
-      throw new NotFoundException('Store order not found.');
-    }
-
-    const order = await orderRepository.findOne({
+    const order = await manager.getRepository(StoreOrder).findOne({
       where: userId
-        ? { id: lockedOrder.id, userId }
-        : { id: lockedOrder.id },
+        ? {
+            id: orderId,
+            userId,
+          }
+        : {
+            id: orderId,
+          },
+
       relations: [
         'snapshot',
         'providerSnapshot',
@@ -3042,6 +3949,10 @@ export class PackageStoreService {
         'package',
         'user',
       ],
+
+      lock: {
+        mode: 'pessimistic_write',
+      },
     });
 
     if (!order) {
@@ -3152,33 +4063,41 @@ export class PackageStoreService {
             th,
             td {
               padding: 12px;
-              border-bottom: 1px solid #e5e7eb;
-              text-align: left;
-            }
+              border-botto    const orderRepository = manager.getRepository(StoreOrder);
+    const lockQuery = orderRepository
+      .createQueryBuilder('storeOrder')
+      .select('storeOrder.id')
+      .where('storeOrder.id = :orderId', { orderId })
+      .setLock('pessimistic_write');
 
-            .right {
-              text-align: right;
-            }
+    if (userId) {
+      lockQuery.andWhere('storeOrder.userId = :userId', { userId });
+    }
 
-            .total {
-              font-size: 18px;
-              font-weight: 700;
-            }
-          </style>
-        </head>
+    // Lock only the root order row. PostgreSQL cannot apply FOR UPDATE to
+    // nullable rows produced by the LEFT JOIN relations below.
+    const lockedOrder = await lockQuery.getOne();
 
-        <body>
-          <div class="header">
-            <h1>Italir Pothe Invoice</h1>
+    if (!lockedOrder) {
+      throw new NotFoundException('Store order not found.');
+    }
 
-            <p>
-              Order:
-              ${this.escapeHtml(order.orderNumber)}
-            </p>
-
-            <p>
-              Status:
-              ${this.escapeHtml(order.status)}
+    const order = await orderRepository.findOne({
+      where: userId
+        ? { id: lockedOrder.id, userId }
+        : { id: lockedOrder.id },
+      relations: [
+        'snapshot',
+        'providerSnapshot',
+        'providerTransaction',
+        'pricing',
+        'payment',
+        'reversal',
+        'timeline',
+        'package',
+        'user',
+      ],
+        ${this.escapeHtml(order.status)}
             </p>
 
             <p>

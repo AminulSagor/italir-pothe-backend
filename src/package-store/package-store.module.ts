@@ -33,6 +33,9 @@ import { StoreWalletService } from './services/store-wallet.service';
 import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
 import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
 import { GooglePlayBillingModule } from 'src/billing/google-play/google-play-billing.module';
+import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
+import { GooglePlaySubscriptionsModule } from 'src/billing/google-play-subscriptions/google-play-subscriptions.module';
+import { AppStoreCoreModule } from 'src/billing/app-store/app-store-core.module';
 
 const packageStoreForexRateProvider: Provider = {
   provide: FOREX_RATE_PROVIDER,
@@ -63,6 +66,8 @@ const packageStoreForexRateProvider: Provider = {
     ConfigModule,
     FilesModule,
     GooglePlayBillingModule,
+    GooglePlaySubscriptionsModule,
+    AppStoreCoreModule,
 
     TypeOrmModule.forFeature([
       User,
@@ -88,6 +93,8 @@ const packageStoreForexRateProvider: Provider = {
       CoursePurchaseOrder,
       CourseProviderProduct,
       CourseOrderProviderTransaction,
+
+      ProviderRefundOperation,
     ]),
   ],
 

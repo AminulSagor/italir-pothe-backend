@@ -106,11 +106,10 @@ export class VerifyCourseAppStorePurchaseDto {
   @MaxLength(255)
   transactionId: string;
 
-  @IsOptional()
   @Transform(trim)
   @IsString()
-  @MaxLength(12000)
-  signedTransactionInfo?: string;
+  @MaxLength(50000)
+  signedTransactionInfo: string;
 }
 
 export class PurchaseHistoryQueryDto {

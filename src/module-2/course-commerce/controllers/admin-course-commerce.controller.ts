@@ -8,6 +8,8 @@ import {
   Patch,
   Post,
   Query,
+  Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 
@@ -18,9 +20,11 @@ import { UserRole } from 'src/users/entities/user.entity';
 import {
   AdminEnrollmentQueryDto,
   CreateCourseProviderProductDto,
+  RefundCourseOrderDto,
   UpdateCourseProviderProductDto,
 } from '../dto/admin-course-commerce.dto';
 import { AdminCourseCommerceService } from '../services/admin-course-commerce.service';
+import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -109,5 +113,29 @@ export class AdminCourseCommerceController {
     orderId: string,
   ) {
     return this.adminCourseCommerceService.demoRefund(orderId);
+  }
+
+  @Post('course-purchases/:orderId/refund')
+  async refundGooglePlayOrder(
+    @Param('orderId', new ParseUUIDPipe({ version: '4' }))
+    orderId: string,
+    @Body() dto: RefundCourseOrderDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.adminCourseCommerceService.refundGooglePlayOrder({
+      orderId,
+      adminUserId: this.getAdminId(request),
+      reason: dto.reason,
+    });
+  }
+
+  private getAdminId(request: AuthenticatedRequest): string {
+    const id = request.user?.id ?? request.user?.sub;
+
+    if (!id) {
+      throw new UnauthorizedException('Authenticated admin user not found.');
+    }
+
+    return id;
   }
 }

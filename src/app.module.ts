@@ -44,6 +44,9 @@ import { CvTemplatesModule } from './cv-templates/cv-templates.module';
 import { CvGenerationsModule } from './cv-generations/cv-generations.module';
 import { CvAssistantModule } from './cv-assistant/cv-assistant.module';
 import { GooglePlayBillingModule } from './billing/google-play/google-play-billing.module';
+import { GooglePlayRtdnModule } from './billing/google-play-rtdn/google-play-rtdn.module';
+import { GooglePlayReconciliationModule } from './billing/google-play-reconciliation/google-play-reconciliation.module';
+import { AppStoreNotificationsModule } from './billing/app-store/app-store-notifications.module';
 import { HomeModule } from './home/home.module';
 
 @Module({
@@ -109,6 +112,9 @@ import { HomeModule } from './home/home.module';
     RevenueAnalyticsModule,
     AdminDashboardModule,
     GooglePlayBillingModule,
+    GooglePlayRtdnModule,
+    GooglePlayReconciliationModule,
+    AppStoreNotificationsModule,
     HomeModule,
   ],
   controllers: [AppController],

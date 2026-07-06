@@ -126,3 +126,11 @@ export class AdminEnrollmentQueryDto {
   @IsEnum(CommerceSortOrder)
   sortOrder?: CommerceSortOrder;
 }
+
+export class RefundCourseOrderDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}

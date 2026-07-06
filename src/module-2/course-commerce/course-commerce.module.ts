@@ -19,10 +19,16 @@ import { AdminCourseCommerceService } from './services/admin-course-commerce.ser
 import { CourseCommerceService } from './services/course-commerce.service';
 import { StorePackageProviderProduct } from 'src/package-store/entities/store-package-provider-product.entity';
 import { StoreOrderProviderTransaction } from 'src/package-store/entities/store-order-provider-transaction.entity';
+import { GooglePlayBillingModule } from 'src/billing/google-play/google-play-billing.module';
+import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
+import { AppStoreCoreModule } from 'src/billing/app-store/app-store-core.module';
 
 @Module({
   imports: [
     ConfigModule,
+    GooglePlayBillingModule,
+    AppStoreCoreModule,
+
     TypeOrmModule.forFeature([
       User,
       Course,
@@ -35,6 +41,8 @@ import { StoreOrderProviderTransaction } from 'src/package-store/entities/store-
 
       StorePackageProviderProduct,
       StoreOrderProviderTransaction,
+
+      ProviderRefundOperation,
     ]),
   ],
   controllers: [CourseCommerceController, AdminCourseCommerceController],
