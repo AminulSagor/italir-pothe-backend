@@ -36,6 +36,7 @@ import { GooglePlayBillingModule } from 'src/billing/google-play/google-play-bil
 import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
 import { GooglePlaySubscriptionsModule } from 'src/billing/google-play-subscriptions/google-play-subscriptions.module';
 import { AppStoreCoreModule } from 'src/billing/app-store/app-store-core.module';
+import { InfluencerHubModule } from 'src/influencer-hub/influencer-hub.module';
 
 const packageStoreForexRateProvider: Provider = {
   provide: FOREX_RATE_PROVIDER,
@@ -68,6 +69,7 @@ const packageStoreForexRateProvider: Provider = {
     GooglePlayBillingModule,
     GooglePlaySubscriptionsModule,
     AppStoreCoreModule,
+    InfluencerHubModule,
 
     TypeOrmModule.forFeature([
       User,

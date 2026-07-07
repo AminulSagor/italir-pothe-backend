@@ -1,9 +1,15 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+
+import { InternalInfluencerPaidOrderDto } from '../dto/influencer-hub.dto';
+import { InfluencerHubService } from '../services/influencer-hub.service';
 
 @Controller('api/internal/influencer-hub/orders')
 export class InternalOrdersController {
+  constructor(private readonly influencerHubService: InfluencerHubService) {}
+
   @Post('handle-paid')
-  handlePaid(@Body() body: any) {
-    return { success: true, message: 'Order processed for attribution.' };
+  @HttpCode(200)
+  handlePaid(@Body() dto: InternalInfluencerPaidOrderDto) {
+    return this.influencerHubService.handlePaidOrder(dto);
   }
 }

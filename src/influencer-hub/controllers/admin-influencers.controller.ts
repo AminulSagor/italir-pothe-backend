@@ -1,101 +1,113 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, HttpCode } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { UserRole } from 'src/users/entities/user.entity';
+import {
+  AddManualLedgerEntryDto,
+  CreateInfluencerPartnerDto,
+  InfluencerPartnerQueryDto,
+  InfluencerReportQueryDto,
+  UpdateInfluencerPartnerDto,
+} from '../dto/influencer-hub.dto';
+import { InfluencerLedgerTransactionType } from '../types/influencer-hub.type';
+import { InfluencerHubService } from '../services/influencer-hub.service';
 
 @Controller('api/admin/influencers')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
 export class AdminInfluencersController {
+  constructor(private readonly influencerHubService: InfluencerHubService) {}
+
   @Get('dashboard')
   getDashboard() {
-    return {
-      success: true,
-      message: 'Influencer dashboard retrieved successfully.',
-      data: {
-        totalPartners: 28,
-        activePartners: 24,
-        totalLinkedUsers: 4250,
-        totalSales: '49450.00',
-        lifetimeCommissionEarned: '8560.00',
-        totalCommissionOwed: '1450.00',
-        pendingPayoutAmount: '450.00',
-        paidPayoutAmount: '7110.00',
-        currency: 'EUR',
-      },
-    };
+    return this.influencerHubService.getDashboard();
+  }
+
+  @Get('export.csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="influencer-partners.csv"')
+  exportCsv(@Query() query: InfluencerPartnerQueryDto) {
+    return this.influencerHubService.exportCsv(query);
   }
 
   @Get()
-  listPartners(@Query('page') page = '1', @Query('limit') limit = '10') {
-    return {
-      success: true,
-      message: 'Influencer partners retrieved successfully.',
-      data: {
-        items: [],
-        meta: {
-          page: Number(page),
-          limit: Number(limit),
-          totalItems: 0,
-          totalPages: 0,
-          hasNextPage: false,
-          hasPreviousPage: false,
-        },
-      },
-    };
+  listPartners(@Query() query: InfluencerPartnerQueryDto) {
+    return this.influencerHubService.listPartners(query);
   }
 
   @Post()
   @HttpCode(201)
-  createPartner(@Body() body: any) {
-    return {
-      success: true,
-      message: 'Influencer partner created successfully.',
-      data: { id: '00000000-0000-0000-0000-000000000000', fullName: body?.fullName ?? 'Jane Doe' },
-    };
+  createPartner(@Body() dto: CreateInfluencerPartnerDto) {
+    return this.influencerHubService.createPartner(dto);
+  }
+
+  @Get(':partnerId/report')
+  getReport(
+    @Param('partnerId', new ParseUUIDPipe({ version: '4' })) partnerId: string,
+    @Query() query: InfluencerReportQueryDto,
+  ) {
+    return this.influencerHubService.getReport(partnerId, query);
   }
 
   @Get(':partnerId')
-  getPartner(@Param('partnerId') partnerId: string) {
-    return {
-      success: true,
-      message: 'Influencer partner retrieved.',
-      data: {
-        partner: {
-          id: partnerId ?? '<uuid>',
-          fullName: 'Jane Doe',
-          email: 'jane@example.com',
-          status: 'ACTIVE',
-          paymentDisplayLabel: 'DE**1300',
-          currency: 'EUR',
-          createdAt: new Date().toISOString(),
-        },
-        socialHandles: [],
-        deal: null,
-        linkedUsersCount: 0,
-      },
-    };
+  getPartner(
+    @Param('partnerId', new ParseUUIDPipe({ version: '4' })) partnerId: string,
+  ) {
+    return this.influencerHubService.getPartner(partnerId);
   }
 
   @Patch(':partnerId')
-  updatePartner(@Param('partnerId') id: string, @Body() body: any) {
-    return {
-      success: true,
-      message: 'Influencer partner updated successfully.',
-      data: { id },
-    };
+  updatePartner(
+    @Param('partnerId', new ParseUUIDPipe({ version: '4' })) partnerId: string,
+    @Body() dto: UpdateInfluencerPartnerDto,
+  ) {
+    return this.influencerHubService.updatePartner(partnerId, dto);
+  }
+
+  @Delete(':partnerId')
+  archivePartner(
+    @Param('partnerId', new ParseUUIDPipe({ version: '4' })) partnerId: string,
+  ) {
+    return this.influencerHubService.archivePartner(partnerId);
   }
 
   @Post(':partnerId/payouts')
   @HttpCode(201)
-  createPayout(@Param('partnerId') partnerId: string, @Body() body: any) {
-    return { success: true, message: 'Payout created.', data: { id: '00000000-0000-0000-0000-000000000000' } };
+  createPayout(
+    @Param('partnerId', new ParseUUIDPipe({ version: '4' })) partnerId: string,
+    @Body() dto: AddManualLedgerEntryDto,
+  ) {
+    return this.influencerHubService.createLedgerEntry(partnerId, {
+      ...dto,
+      transactionType: dto.transactionType ?? InfluencerLedgerTransactionType.PAYOUT,
+    });
   }
 
   @Post(':partnerId/ledger/adjustments')
   @HttpCode(201)
-  createLedgerAdjustment(@Param('partnerId') partnerId: string, @Body() body: any) {
-    return { success: true, message: 'Ledger adjustment created.', data: { id: '00000000-0000-0000-0000-000000000000' } };
-  }
-
-  @Get('export.csv')
-  getExport() {
-    const csv = 'id,fullName,email,couponCode\n00000000-0000-0000-0000-000000000000,Jane Doe,jane@example.com,JANE10';
-    return csv;
+  createLedgerAdjustment(
+    @Param('partnerId', new ParseUUIDPipe({ version: '4' })) partnerId: string,
+    @Body() dto: AddManualLedgerEntryDto,
+  ) {
+    return this.influencerHubService.createLedgerEntry(partnerId, {
+      ...dto,
+      transactionType:
+        dto.transactionType ?? InfluencerLedgerTransactionType.MANUAL_ADJUSTMENT,
+    });
   }
 }
