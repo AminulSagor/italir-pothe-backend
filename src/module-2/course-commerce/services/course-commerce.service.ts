@@ -51,6 +51,13 @@ import { StoreOrderProviderTransaction } from 'src/package-store/entities/store-
 import { GooglePlayBillingService } from 'src/billing/google-play/google-play-billing.service';
 import { AppStoreBillingService } from 'src/billing/app-store/services/app-store-billing.service';
 import { Environment, Type } from '@apple/app-store-server-library';
+import { InfluencerHubService } from 'src/influencer-hub/services/influencer-hub.service';
+import {
+  InfluencerBillingProvider,
+  InfluencerCouponProductDomain,
+  InfluencerOrderDomain,
+  type InfluencerCheckoutCouponResolution,
+} from 'src/influencer-hub/types/influencer-hub.type';
 
 type CalculatedCourseQuote = {
   basePriceEur: string;
@@ -91,6 +98,8 @@ export class CourseCommerceService {
 
     private readonly googlePlayBillingService: GooglePlayBillingService,
 
+    private readonly influencerHubService: InfluencerHubService,
+
     @Inject(FOREX_RATE_PROVIDER)
     private readonly forexRateProvider: ForexRateProvider,
   ) {}
@@ -116,9 +125,32 @@ export class CourseCommerceService {
 
     const currency = query.currency ?? CommerceCurrency.EUR;
 
-    this.assertStoreCouponNotUsed(query.couponCode);
+    let couponResolution: InfluencerCheckoutCouponResolution | null = null;
+    let quote: CalculatedCourseQuote;
 
-    const quote = await this.calculateQuote(course, currency);
+    if (query.couponCode?.trim()) {
+      if (!providerProduct) {
+        throw new BadRequestException(
+          'Payment provider is required before applying a coupon.',
+        );
+      }
+
+      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
+        couponCode: query.couponCode,
+        productDomain: InfluencerCouponProductDomain.COURSE,
+        productId: course.id,
+        provider: query.provider as unknown as InfluencerBillingProvider,
+        regularProviderProductId: providerProduct.productId,
+        basePriceEur: course.price ?? '0.00',
+      });
+
+      quote = await this.buildCourseQuoteFromInfluencerResolution(
+        couponResolution,
+        currency,
+      );
+    } else {
+      quote = await this.calculateQuote(course, currency);
+    }
 
     const enrollment = await this.enrollmentRepository.findOne({
       where: {
@@ -137,7 +169,17 @@ export class CourseCommerceService {
       },
 
       storeProduct: providerProduct
-        ? this.mapProviderProduct(providerProduct)
+        ? {
+            ...this.mapProviderProduct(providerProduct),
+            productId:
+              couponResolution?.discountedProviderProductId ??
+              providerProduct.productId,
+            basePlanId:
+              couponResolution?.providerBasePlanId ??
+              providerProduct.basePlanId,
+            offerId:
+              couponResolution?.providerOfferId ?? providerProduct.offerId,
+          }
         : null,
 
       baseCurrency: CommerceCurrency.EUR,
@@ -165,6 +207,7 @@ export class CourseCommerceService {
             : false,
 
       pricingNote:
+        couponResolution?.taxWarning ??
         'Google Play or App Store controls the final localized amount charged.',
     };
   }
@@ -178,18 +221,16 @@ export class CourseCommerceService {
       );
     }
 
-    const providerProduct = this.requireActiveProviderProduct(
+    const regularProviderProduct = this.requireActiveProviderProduct(
       course,
       dto.paymentProvider,
-      dto.productId,
     );
 
-    await this.assertProductNotMappedToPackage(
-      dto.paymentProvider,
-      providerProduct.productId,
-    );
-
-    this.assertStoreCouponNotUsed(dto.couponCode);
+    let providerProduct = regularProviderProduct;
+    let checkoutProductId = dto.productId.trim();
+    let checkoutBasePlanId = regularProviderProduct.basePlanId;
+    let checkoutOfferId = regularProviderProduct.offerId;
+    let couponResolution: InfluencerCheckoutCouponResolution | null = null;
 
     const existingEnrollment = await this.enrollmentRepository.findOne({
       where: {
@@ -235,7 +276,49 @@ export class CourseCommerceService {
     }
 
     const selectedCurrency = dto.currency ?? CommerceCurrency.EUR;
-    const quote = await this.calculateQuote(course, selectedCurrency);
+    let quote: CalculatedCourseQuote;
+
+    if (dto.couponCode?.trim()) {
+      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
+        couponCode: dto.couponCode,
+        productDomain: InfluencerCouponProductDomain.COURSE,
+        productId: course.id,
+        provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
+        regularProviderProductId: regularProviderProduct.productId,
+        basePriceEur: course.price ?? '0.00',
+      });
+
+      checkoutProductId = couponResolution.discountedProviderProductId;
+      checkoutBasePlanId = couponResolution.providerBasePlanId;
+      checkoutOfferId = couponResolution.providerOfferId;
+
+      if (dto.productId.trim() !== checkoutProductId) {
+        throw new BadRequestException(
+          'The selected store product does not match the validated coupon discount product.',
+        );
+      }
+
+      quote = await this.buildCourseQuoteFromInfluencerResolution(
+        couponResolution,
+        selectedCurrency,
+      );
+    } else {
+      providerProduct = this.requireActiveProviderProduct(
+        course,
+        dto.paymentProvider,
+        dto.productId,
+      );
+      checkoutProductId = providerProduct.productId;
+      checkoutBasePlanId = providerProduct.basePlanId;
+      checkoutOfferId = providerProduct.offerId;
+
+      quote = await this.calculateQuote(course, selectedCurrency);
+    }
+
+    await this.assertProductNotMappedToPackage(
+      dto.paymentProvider,
+      checkoutProductId,
+    );
 
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepository = manager.getRepository(CoursePurchaseOrder);
@@ -272,10 +355,10 @@ export class CourseCommerceService {
           orderId: order.id,
           providerProductId: providerProduct.id,
           provider: providerProduct.provider,
-          productId: providerProduct.productId,
+          productId: checkoutProductId,
           productType: providerProduct.productType,
-          basePlanId: providerProduct.basePlanId,
-          offerId: providerProduct.offerId,
+          basePlanId: checkoutBasePlanId,
+          offerId: checkoutOfferId,
         }),
       );
 
@@ -283,7 +366,7 @@ export class CourseCommerceService {
         providerTransactionRepository.create({
           orderId: order.id,
           provider: providerProduct.provider,
-          productId: providerProduct.productId,
+          productId: checkoutProductId,
           tokenHash: null,
           providerTransactionId: null,
           environment: CourseProviderEnvironment.DEVELOPMENT,
@@ -292,6 +375,16 @@ export class CourseCommerceService {
           verificationPayload: null,
         }),
       );
+
+      if (couponResolution) {
+        await this.influencerHubService.recordPendingOrderAttribution(manager, {
+          userId,
+          orderDomain: InfluencerOrderDomain.COURSE,
+          orderId: order.id,
+          productId: course.id,
+          resolution: couponResolution,
+        });
+      }
 
       return order.id;
     });
@@ -999,6 +1092,12 @@ export class CourseCommerceService {
 
       enrollment = await enrollmentRepository.save(enrollment);
 
+      await this.influencerHubService.convertOrderAttribution(manager, {
+        orderDomain: InfluencerOrderDomain.COURSE,
+        orderId: order.id,
+        paidAt: now,
+      });
+
       return {
         message: 'Course purchase completed successfully.',
         order: await this.buildOrderResponse(order),
@@ -1011,6 +1110,51 @@ export class CourseCommerceService {
         },
       };
     });
+  }
+
+  private async buildCourseQuoteFromInfluencerResolution(
+    resolution: InfluencerCheckoutCouponResolution,
+    currency: CommerceCurrency,
+  ): Promise<CalculatedCourseQuote> {
+    if (currency === CommerceCurrency.EUR) {
+      return {
+        basePriceEur: resolution.basePriceEur,
+        couponCode: resolution.couponCode,
+        discountPercentage: resolution.discountPercentage,
+        discountAmountEur: resolution.discountAmountEur,
+        payableAmountEur: resolution.payableAmountEur,
+        selectedCurrency: CommerceCurrency.EUR,
+        forexRate: null,
+        originalAmount: resolution.basePriceEur,
+        discountAmount: resolution.discountAmountEur,
+        payableAmount: resolution.payableAmountEur,
+      };
+    }
+
+    const forexRate = await this.forexRateProvider.getEurToBdtRate();
+
+    const originalAmountBdt = convertEurToBdt({
+      amountEur: resolution.basePriceEur,
+      forexRate,
+    });
+
+    const payableAmountBdt = convertEurToBdt({
+      amountEur: resolution.payableAmountEur,
+      forexRate,
+    });
+
+    return {
+      basePriceEur: resolution.basePriceEur,
+      couponCode: resolution.couponCode,
+      discountPercentage: resolution.discountPercentage,
+      discountAmountEur: resolution.discountAmountEur,
+      payableAmountEur: resolution.payableAmountEur,
+      selectedCurrency: CommerceCurrency.BDT,
+      forexRate,
+      originalAmount: originalAmountBdt,
+      discountAmount: subtractMoney(originalAmountBdt, payableAmountBdt),
+      payableAmount: payableAmountBdt,
+    };
   }
 
   private async calculateQuote(

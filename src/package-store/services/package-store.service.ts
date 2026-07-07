@@ -86,6 +86,13 @@ import { GooglePlaySubscriptionLifecycleService } from 'src/billing/google-play-
 import { AppStoreBillingService } from 'src/billing/app-store/services/app-store-billing.service';
 import { Environment, Type } from '@apple/app-store-server-library';
 import { AppStoreSubscriptionLifecycleService } from 'src/billing/app-store/services/app-store-subscription-lifecycle.service';
+import { InfluencerHubService } from 'src/influencer-hub/services/influencer-hub.service';
+import {
+  InfluencerBillingProvider,
+  InfluencerCouponProductDomain,
+  InfluencerOrderDomain,
+  type InfluencerCheckoutCouponResolution,
+} from 'src/influencer-hub/types/influencer-hub.type';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -213,6 +220,7 @@ export class PackageStoreService {
     private readonly configService: ConfigService,
     private readonly walletService: StoreWalletService,
     private readonly googlePlayBillingService: GooglePlayBillingService,
+    private readonly influencerHubService: InfluencerHubService,
   ) {}
 
   // =========================================================
@@ -1139,15 +1147,38 @@ export class PackageStoreService {
     );
     const currency = query.currency ?? CommerceCurrency.EUR;
 
-    const quote = await this.calculateStoreQuote(
-      storePackage,
-      currency,
-      query.couponCode,
-    );
+    let couponResolution: InfluencerCheckoutCouponResolution | null = null;
+    let quote: StoreQuote;
+    let storeProduct = this.mapProviderProduct(providerProduct);
+
+    if (query.couponCode?.trim()) {
+      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
+        couponCode: query.couponCode,
+        productDomain: InfluencerCouponProductDomain.STORE_PACKAGE,
+        productId: storePackage.id,
+        provider: query.provider as unknown as InfluencerBillingProvider,
+        regularProviderProductId: providerProduct.productId,
+        basePriceEur: storePackage.commerce.priceEur,
+      });
+
+      quote = await this.buildStoreQuoteFromInfluencerResolution(
+        couponResolution,
+        currency,
+      );
+
+      storeProduct = {
+        ...storeProduct,
+        productId: couponResolution.discountedProviderProductId,
+        basePlanId: couponResolution.providerBasePlanId,
+        offerId: couponResolution.providerOfferId,
+      };
+    } else {
+      quote = await this.calculateStoreQuote(storePackage, currency);
+    }
 
     return {
       package: this.mapPackage(storePackage, false, query.provider),
-      storeProduct: this.mapProviderProduct(providerProduct),
+      storeProduct,
       pricing: {
         baseCurrency: CommerceCurrency.EUR,
         selectedCurrency: quote.selectedCurrency,
@@ -1160,6 +1191,8 @@ export class PackageStoreService {
         discountAmountEur: quote.discountAmountEur,
         payableAmountEur: quote.totalAmountEur,
         forexRate: quote.forexRate,
+        taxWarning: couponResolution?.taxWarning ??
+          'Google Play or App Store controls the final localized amount charged.',
       },
       balances: await this.walletService.getBalances(userId),
       payment: {
@@ -1199,7 +1232,9 @@ export class PackageStoreService {
         existingOrder.packageId !== dto.packageId ||
         existingOrder.payment?.provider !== dto.paymentProvider ||
         existingOrder.providerSnapshot?.productId !== dto.productId ||
-        existingOrder.pricing?.paymentCurrency !== selectedCurrency
+        existingOrder.pricing?.paymentCurrency !== selectedCurrency ||
+        (existingOrder.pricing?.couponCode ?? null) !==
+          (dto.couponCode?.trim().toUpperCase() ?? null)
       ) {
         throw new ConflictException(
           'The idempotency key is already assigned to another order request.',
@@ -1211,21 +1246,61 @@ export class PackageStoreService {
     }
 
     const storePackage = await this.getPublishedPackage(dto.packageId);
-    const providerProduct = this.requireActiveProviderProduct(
+    const regularProviderProduct = this.requireActiveProviderProduct(
       storePackage,
       dto.paymentProvider,
-      dto.productId,
     );
+
+    let providerProduct = regularProviderProduct;
+    let checkoutProductId = dto.productId.trim();
+    let checkoutBasePlanId = regularProviderProduct.basePlanId;
+    let checkoutOfferId = regularProviderProduct.offerId;
+    let couponResolution: InfluencerCheckoutCouponResolution | null = null;
+    let quote: StoreQuote;
+
+    if (dto.couponCode?.trim()) {
+      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
+        couponCode: dto.couponCode,
+        productDomain: InfluencerCouponProductDomain.STORE_PACKAGE,
+        productId: storePackage.id,
+        provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
+        regularProviderProductId: regularProviderProduct.productId,
+        basePriceEur: storePackage.commerce.priceEur,
+      });
+
+      checkoutProductId = couponResolution.discountedProviderProductId;
+      checkoutBasePlanId = couponResolution.providerBasePlanId;
+      checkoutOfferId = couponResolution.providerOfferId;
+
+      if (dto.productId.trim() !== checkoutProductId) {
+        throw new BadRequestException(
+          'The selected store product does not match the validated coupon discount product.',
+        );
+      }
+
+      quote = await this.buildStoreQuoteFromInfluencerResolution(
+        couponResolution,
+        selectedCurrency,
+      );
+    } else {
+      providerProduct = this.requireActiveProviderProduct(
+        storePackage,
+        dto.paymentProvider,
+        dto.productId,
+      );
+      checkoutProductId = providerProduct.productId;
+      checkoutBasePlanId = providerProduct.basePlanId;
+      checkoutOfferId = providerProduct.offerId;
+
+      quote = await this.calculateStoreQuote(
+        storePackage,
+        selectedCurrency,
+      );
+    }
 
     await this.assertProductNotMappedToCourse(
       dto.paymentProvider,
-      providerProduct.productId,
-    );
-
-    const quote = await this.calculateStoreQuote(
-      storePackage,
-      selectedCurrency,
-      dto.couponCode,
+      checkoutProductId,
     );
 
     const orderId = await this.dataSource.transaction(async (manager) => {
@@ -1276,10 +1351,10 @@ export class PackageStoreService {
           orderId: order.id,
           providerProductId: providerProduct.id,
           provider: providerProduct.provider,
-          productId: providerProduct.productId,
+          productId: checkoutProductId,
           productType: providerProduct.productType,
-          basePlanId: providerProduct.basePlanId,
-          offerId: providerProduct.offerId,
+          basePlanId: checkoutBasePlanId,
+          offerId: checkoutOfferId,
         }),
       );
 
@@ -1287,7 +1362,7 @@ export class PackageStoreService {
         providerTransactionRepository.create({
           orderId: order.id,
           provider: providerProduct.provider,
-          productId: providerProduct.productId,
+          productId: checkoutProductId,
           tokenHash: null,
           providerTransactionId: null,
           environment: StoreProviderEnvironment.DEVELOPMENT,
@@ -1345,12 +1420,22 @@ export class PackageStoreService {
         {
           packageId: storePackage.id,
           paymentProvider: dto.paymentProvider,
-          productId: providerProduct.productId,
+          productId: checkoutProductId,
           providerProductId: providerProduct.id,
           currency: quote.selectedCurrency,
           paymentAmount: quote.totalAmount,
         },
       );
+
+      if (couponResolution) {
+        await this.influencerHubService.recordPendingOrderAttribution(manager, {
+          userId,
+          orderDomain: InfluencerOrderDomain.STORE_PACKAGE,
+          orderId: order.id,
+          productId: storePackage.id,
+          resolution: couponResolution,
+        });
+      }
 
       return order.id;
     });
@@ -3068,6 +3153,12 @@ export class PackageStoreService {
         },
       );
 
+      await this.influencerHubService.convertOrderAttribution(manager, {
+        orderDomain: InfluencerOrderDomain.STORE_PACKAGE,
+        orderId: order.id,
+        paidAt,
+      });
+
       return this.buildCompletionResponse(order, balances);
     });
   }
@@ -3373,6 +3464,65 @@ export class PackageStoreService {
   // =========================================================
   // Quote calculation
   // =========================================================
+
+  private async buildStoreQuoteFromInfluencerResolution(
+    resolution: InfluencerCheckoutCouponResolution,
+    currency: CommerceCurrency,
+  ): Promise<StoreQuote> {
+    if (currency === CommerceCurrency.EUR) {
+      return {
+        basePriceEur: resolution.basePriceEur,
+        couponCode: resolution.couponCode,
+        discountPercentage: resolution.discountPercentage,
+        discountAmountEur: resolution.discountAmountEur,
+        totalAmountEur: resolution.payableAmountEur,
+        selectedCurrency: CommerceCurrency.EUR,
+        forexRate: null,
+        originalAmount: resolution.basePriceEur,
+        discountAmount: resolution.discountAmountEur,
+        totalAmount: resolution.payableAmountEur,
+      };
+    }
+
+    let forexRate: string;
+
+    try {
+      forexRate = await this.forexRateProvider.getEurToBdtRate();
+    } catch {
+      throw new ServiceUnavailableException(
+        'The EUR to BDT exchange rate is temporarily unavailable.',
+      );
+    }
+
+    const numericRate = Number(forexRate);
+
+    if (!Number.isFinite(numericRate) || numericRate <= 0) {
+      throw new ServiceUnavailableException(
+        'The forex provider returned an invalid exchange rate.',
+      );
+    }
+
+    const originalBdtMinor = Math.round(
+      this.parseMoney(resolution.basePriceEur, 'Base price') * numericRate,
+    );
+    const totalBdtMinor = Math.round(
+      this.parseMoney(resolution.payableAmountEur, 'Payable amount') * numericRate,
+    );
+    const discountBdtMinor = originalBdtMinor - totalBdtMinor;
+
+    return {
+      basePriceEur: resolution.basePriceEur,
+      couponCode: resolution.couponCode,
+      discountPercentage: resolution.discountPercentage,
+      discountAmountEur: resolution.discountAmountEur,
+      totalAmountEur: resolution.payableAmountEur,
+      selectedCurrency: CommerceCurrency.BDT,
+      forexRate: numericRate.toFixed(4),
+      originalAmount: this.formatMoney(originalBdtMinor),
+      discountAmount: this.formatMoney(discountBdtMinor),
+      totalAmount: this.formatMoney(totalBdtMinor),
+    };
+  }
 
   private async calculateStoreQuote(
     storePackage: StorePackage,

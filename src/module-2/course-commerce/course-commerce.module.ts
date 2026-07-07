@@ -22,12 +22,14 @@ import { StoreOrderProviderTransaction } from 'src/package-store/entities/store-
 import { GooglePlayBillingModule } from 'src/billing/google-play/google-play-billing.module';
 import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
 import { AppStoreCoreModule } from 'src/billing/app-store/app-store-core.module';
+import { InfluencerHubModule } from 'src/influencer-hub/influencer-hub.module';
 
 @Module({
   imports: [
     ConfigModule,
     GooglePlayBillingModule,
     AppStoreCoreModule,
+    InfluencerHubModule,
 
     TypeOrmModule.forFeature([
       User,

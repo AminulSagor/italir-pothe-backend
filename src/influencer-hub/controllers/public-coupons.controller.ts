@@ -1,21 +1,15 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+
+import { ValidateInfluencerCouponDto } from '../dto/influencer-hub.dto';
+import { InfluencerHubService } from '../services/influencer-hub.service';
 
 @Controller('api/coupons')
 export class PublicCouponsController {
+  constructor(private readonly influencerHubService: InfluencerHubService) {}
+
   @Post('validate')
-  validateCoupon(@Body() body: any) {
-    return {
-      success: true,
-      message: 'Coupon validation result.',
-      data: {
-        valid: true,
-        couponCode: body?.couponCode ?? 'JANE10',
-        discountPercentage: '10.0',
-        discountAmount: '10.00',
-        finalSubtotal: '90.00',
-        partnerDisplayName: 'Jane Doe',
-        reasonCode: null,
-      },
-    };
+  @HttpCode(200)
+  validateCoupon(@Body() dto: ValidateInfluencerCouponDto) {
+    return this.influencerHubService.validateCoupon(dto);
   }
 }
