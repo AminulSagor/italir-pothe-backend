@@ -37,6 +37,11 @@ export class AdminCoursesController {
     return this.adminCoursesService.findAllCourses(query);
   }
 
+  @Get('summary')
+  async getCourseDirectorySummary() {
+    return this.adminCoursesService.getCourseDirectorySummary();
+  }
+
   @Get(':courseId/setup-progress')
   async getCourseSetupProgress(@Param('courseId') courseId: string) {
     return this.adminCoursesService.getCourseSetupProgress(courseId);

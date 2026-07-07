@@ -57,6 +57,18 @@ export class CertificatesController {
     return certificate;
   }
 
+  @Get(':id/download-url')
+  @UseGuards(JwtAuthGuard)
+  async getCertificateDownloadUrl(
+    @Param('id') id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.certificatesService.getCertificateDownloadUrl(
+      id,
+      this.getUserId(request),
+    );
+  }
+
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   async findById(

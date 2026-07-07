@@ -41,6 +41,7 @@ import {
   GooglePlayVoidedRecordStatus,
   type GooglePlayVoidedReconciliationSummary,
 } from 'src/billing/types/google-play-reconciliation.type';
+import { QueryGooglePlayVoidedRecordsDto } from '../dto/google-play-reconciliation.dto';
 
 type InternalPurchaseMatch =
   | {
@@ -511,6 +512,100 @@ export class GooglePlayReconciliationService {
         id: record.id,
       },
     });
+  }
+
+  async findVoidedPurchaseRecords(query: QueryGooglePlayVoidedRecordsDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const queryBuilder = this.recordRepository
+      .createQueryBuilder('record')
+      .orderBy('record.discoveredAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (query.status) {
+      queryBuilder.andWhere('record.status = :status', {
+        status: query.status,
+      });
+    }
+
+    const search = query.search?.trim();
+
+    if (search) {
+      queryBuilder.andWhere(
+        `(
+        CAST(record.id AS TEXT) ILIKE :search
+        OR record.providerOrderId ILIKE :search
+        OR record.purchaseTokenHash ILIKE :search
+        OR CAST(record.internalOrderId AS TEXT) ILIKE :search
+      )`,
+        {
+          search: `%${search}%`,
+        },
+      );
+    }
+
+    const [records, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      items: records.map((record) => this.mapVoidedRecord(record)),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async findVoidedPurchaseRecordById(recordId: string) {
+    const record = await this.recordRepository.findOne({
+      where: {
+        id: recordId,
+      },
+    });
+
+    if (!record) {
+      throw new NotFoundException('Voided purchase record not found.');
+    }
+
+    return this.mapVoidedRecord(record, true);
+  }
+
+  private mapVoidedRecord(
+    record: GooglePlayVoidedPurchaseRecord,
+    includeDetails = false,
+  ) {
+    return {
+      id: record.id,
+      fingerprint: record.fingerprint,
+      providerOrderId: record.providerOrderId,
+      purchaseTokenHash: record.purchaseTokenHash,
+
+      purchaseTime: record.purchaseTime,
+      voidedTime: record.voidedTime,
+      voidedReason: record.voidedReason,
+      voidedSource: record.voidedSource,
+      voidedQuantity: record.voidedQuantity,
+
+      matchedDomain: record.matchedDomain,
+      internalOrderId: record.internalOrderId,
+
+      status: record.status,
+      attemptCount: record.attemptCount,
+
+      lastErrorCode: record.lastErrorCode,
+      lastErrorMessage: record.lastErrorMessage,
+      nextAttemptAt: record.nextAttemptAt,
+      processingStartedAt: record.processingStartedAt,
+      processedAt: record.processedAt,
+
+      discoveredAt: record.discoveredAt,
+      updatedAt: record.updatedAt,
+
+      processingResult: includeDetails ? record.processingResult : undefined,
+    };
   }
 
   async getStatus() {

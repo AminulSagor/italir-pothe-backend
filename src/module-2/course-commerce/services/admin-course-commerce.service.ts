@@ -309,11 +309,8 @@ export class AdminCourseCommerceService {
     await this.getCourse(courseId);
 
     const now = new Date();
-
     const activeThreshold = new Date(now.getTime() - 15 * 60 * 1000);
-
     const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-
     const lastThirtyDays = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const totalStudents = await this.enrollmentRepository.count({
@@ -334,14 +331,29 @@ export class AdminCourseCommerceService {
       })
       .getCount();
 
-    const revenueResult = await this.purchaseOrderRepository
-      .createQueryBuilder('purchaseOrder')
+    const revenueResult = await this.enrollmentRepository
+      .createQueryBuilder('enrollment')
+      .innerJoin('enrollment.order', 'purchaseOrder')
       .select('COALESCE(SUM(purchaseOrder.payableAmountEur), 0)', 'total')
-      .where('purchaseOrder.courseId = :courseId', { courseId })
-      .andWhere('purchaseOrder.status = :status', {
-        status: CoursePurchaseStatus.PAID,
+      .where('enrollment.courseId = :courseId', { courseId })
+      .andWhere('enrollment.status = :enrollmentStatus', {
+        enrollmentStatus: CourseEnrollmentStatus.ACTIVE,
       })
-      .andWhere('purchaseOrder.paidAt >= :startOfYear', { startOfYear })
+      .andWhere(
+        `(
+        purchaseOrder.status = :paidStatus
+        OR purchaseOrder.paidAt IS NOT NULL
+      )`,
+        {
+          paidStatus: CoursePurchaseStatus.PAID,
+        },
+      )
+      .andWhere(
+        'COALESCE(purchaseOrder.paidAt, enrollment.enrolledAt) >= :startOfYear',
+        {
+          startOfYear,
+        },
+      )
       .getRawOne<{
         total: string;
       }>();
@@ -385,6 +397,11 @@ export class AdminCourseCommerceService {
       .createQueryBuilder('enrollment')
       .leftJoinAndSelect('enrollment.user', 'user')
       .leftJoinAndSelect('enrollment.order', 'purchaseOrder')
+      .leftJoinAndSelect('purchaseOrder.providerSnapshot', 'providerSnapshot')
+      .leftJoinAndSelect(
+        'purchaseOrder.providerTransaction',
+        'providerTransaction',
+      )
       .where('enrollment.courseId = :courseId', { courseId })
       .skip((page - 1) * limit)
       .take(limit);
@@ -438,6 +455,29 @@ export class AdminCourseCommerceService {
               amountPaidEur: enrollment.order.payableAmountEur,
               paymentProvider: enrollment.order.paymentProvider,
               status: enrollment.order.status,
+              paidAt: enrollment.order.paidAt,
+              refundedAt: enrollment.order.refundedAt,
+              billing: {
+                provider: enrollment.order.providerSnapshot?.provider ?? null,
+                productId: enrollment.order.providerSnapshot?.productId ?? null,
+                productType:
+                  enrollment.order.providerSnapshot?.productType ?? null,
+                basePlanId:
+                  enrollment.order.providerSnapshot?.basePlanId ?? null,
+                offerId: enrollment.order.providerSnapshot?.offerId ?? null,
+                environment:
+                  enrollment.order.providerTransaction?.environment ?? null,
+                verificationStatus:
+                  enrollment.order.providerTransaction?.verificationStatus ??
+                  null,
+                providerTransactionId:
+                  enrollment.order.providerTransaction?.providerTransactionId ??
+                  null,
+                tokenHash:
+                  enrollment.order.providerTransaction?.tokenHash ?? null,
+                verifiedAt:
+                  enrollment.order.providerTransaction?.verifiedAt ?? null,
+              },
             }
           : null,
         enrollmentStatus: enrollment.status,
@@ -460,10 +500,14 @@ export class AdminCourseCommerceService {
       where: {
         id: enrollmentId,
       },
+
       relations: {
         user: true,
         course: true,
-        order: true,
+        order: {
+          providerSnapshot: true,
+          providerTransaction: true,
+        },
       },
     });
 
@@ -471,32 +515,103 @@ export class AdminCourseCommerceService {
       throw new NotFoundException('Course enrollment not found.');
     }
 
+    const refundOperation = enrollment.order
+      ? await this.refundOperationRepository.findOne({
+          where: {
+            orderDomain: BillingOrderDomain.COURSE,
+            internalOrderId: enrollment.order.id,
+
+            provider:
+              enrollment.order.paymentProvider ===
+              CoursePaymentProvider.GOOGLE_PLAY
+                ? BillingPaymentProvider.GOOGLE_PLAY
+                : BillingPaymentProvider.APP_STORE,
+          },
+        })
+      : null;
+
     return {
       id: enrollment.id,
+
       student: this.mapUser(enrollment.user),
+
       course: {
         id: enrollment.courseId,
         title: enrollment.course?.title ?? null,
         subtitle: enrollment.course?.subtitle ?? null,
       },
+
       order: enrollment.order
         ? {
             id: enrollment.order.id,
             orderNumber: enrollment.order.orderNumber,
+
             basePriceEur: enrollment.order.basePriceEur,
             couponCode: enrollment.order.couponCodeSnapshot,
             discountPercentage: enrollment.order.discountPercentage,
             discountAmountEur: enrollment.order.discountAmountEur,
             payableAmountEur: enrollment.order.payableAmountEur,
+
             paymentCurrency: enrollment.order.paymentCurrency,
             forexRate: enrollment.order.forexRateSnapshot,
             paymentAmount: enrollment.order.paymentAmount,
             paymentProvider: enrollment.order.paymentProvider,
+
             status: enrollment.order.status,
             paidAt: enrollment.order.paidAt,
             refundedAt: enrollment.order.refundedAt,
+
+            providerSnapshot: enrollment.order.providerSnapshot
+              ? {
+                  id: enrollment.order.providerSnapshot.id,
+                  providerProductId:
+                    enrollment.order.providerSnapshot.providerProductId,
+                  provider: enrollment.order.providerSnapshot.provider,
+                  productId: enrollment.order.providerSnapshot.productId,
+                  productType: enrollment.order.providerSnapshot.productType,
+                  basePlanId: enrollment.order.providerSnapshot.basePlanId,
+                  offerId: enrollment.order.providerSnapshot.offerId,
+                  createdAt: enrollment.order.providerSnapshot.createdAt,
+                }
+              : null,
+
+            providerTransaction: enrollment.order.providerTransaction
+              ? {
+                  id: enrollment.order.providerTransaction.id,
+                  provider: enrollment.order.providerTransaction.provider,
+                  productId: enrollment.order.providerTransaction.productId,
+                  tokenHash: enrollment.order.providerTransaction.tokenHash,
+                  providerTransactionId:
+                    enrollment.order.providerTransaction.providerTransactionId,
+                  environment: enrollment.order.providerTransaction.environment,
+                  verificationStatus:
+                    enrollment.order.providerTransaction.verificationStatus,
+                  verifiedAt: enrollment.order.providerTransaction.verifiedAt,
+                  createdAt: enrollment.order.providerTransaction.createdAt,
+                  updatedAt: enrollment.order.providerTransaction.updatedAt,
+                }
+              : null,
+
+            refundOperation: refundOperation
+              ? {
+                  id: refundOperation.id,
+                  provider: refundOperation.provider,
+                  providerOrderId: refundOperation.providerOrderId,
+                  status: refundOperation.status,
+                  source: refundOperation.source,
+                  revoke: refundOperation.revoke,
+                  reason: refundOperation.reason,
+                  providerCompletedAt: refundOperation.providerCompletedAt,
+                  completedAt: refundOperation.completedAt,
+                  failureCode: refundOperation.failureCode,
+                  failureMessage: refundOperation.failureMessage,
+                  createdAt: refundOperation.createdAt,
+                  updatedAt: refundOperation.updatedAt,
+                }
+              : null,
           }
         : null,
+
       status: enrollment.status,
       accessType: enrollment.accessType,
       enrolledAt: enrollment.enrolledAt,
