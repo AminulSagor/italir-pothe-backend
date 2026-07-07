@@ -1152,14 +1152,15 @@ export class PackageStoreService {
     let storeProduct = this.mapProviderProduct(providerProduct);
 
     if (query.couponCode?.trim()) {
-      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
-        couponCode: query.couponCode,
-        productDomain: InfluencerCouponProductDomain.STORE_PACKAGE,
-        productId: storePackage.id,
-        provider: query.provider as unknown as InfluencerBillingProvider,
-        regularProviderProductId: providerProduct.productId,
-        basePriceEur: storePackage.commerce.priceEur,
-      });
+      couponResolution =
+        await this.influencerHubService.resolveCouponForCheckout({
+          couponCode: query.couponCode,
+          productDomain: InfluencerCouponProductDomain.STORE_PACKAGE,
+          productId: storePackage.id,
+          provider: query.provider as unknown as InfluencerBillingProvider,
+          regularProviderProductId: providerProduct.productId,
+          basePriceEur: storePackage.commerce.priceEur,
+        });
 
       quote = await this.buildStoreQuoteFromInfluencerResolution(
         couponResolution,
@@ -1191,7 +1192,8 @@ export class PackageStoreService {
         discountAmountEur: quote.discountAmountEur,
         payableAmountEur: quote.totalAmountEur,
         forexRate: quote.forexRate,
-        taxWarning: couponResolution?.taxWarning ??
+        taxWarning:
+          couponResolution?.taxWarning ??
           'Google Play or App Store controls the final localized amount charged.',
       },
       balances: await this.walletService.getBalances(userId),
@@ -1259,14 +1261,15 @@ export class PackageStoreService {
     let quote: StoreQuote;
 
     if (dto.couponCode?.trim()) {
-      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
-        couponCode: dto.couponCode,
-        productDomain: InfluencerCouponProductDomain.STORE_PACKAGE,
-        productId: storePackage.id,
-        provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
-        regularProviderProductId: regularProviderProduct.productId,
-        basePriceEur: storePackage.commerce.priceEur,
-      });
+      couponResolution =
+        await this.influencerHubService.resolveCouponForCheckout({
+          couponCode: dto.couponCode,
+          productDomain: InfluencerCouponProductDomain.STORE_PACKAGE,
+          productId: storePackage.id,
+          provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
+          regularProviderProductId: regularProviderProduct.productId,
+          basePriceEur: storePackage.commerce.priceEur,
+        });
 
       checkoutProductId = couponResolution.discountedProviderProductId;
       checkoutBasePlanId = couponResolution.providerBasePlanId;
@@ -1292,10 +1295,7 @@ export class PackageStoreService {
       checkoutBasePlanId = providerProduct.basePlanId;
       checkoutOfferId = providerProduct.offerId;
 
-      quote = await this.calculateStoreQuote(
-        storePackage,
-        selectedCurrency,
-      );
+      quote = await this.calculateStoreQuote(storePackage, selectedCurrency);
     }
 
     await this.assertProductNotMappedToCourse(
@@ -3506,7 +3506,8 @@ export class PackageStoreService {
       this.parseMoney(resolution.basePriceEur, 'Base price') * numericRate,
     );
     const totalBdtMinor = Math.round(
-      this.parseMoney(resolution.payableAmountEur, 'Payable amount') * numericRate,
+      this.parseMoney(resolution.payableAmountEur, 'Payable amount') *
+        numericRate,
     );
     const discountBdtMinor = originalBdtMinor - totalBdtMinor;
 
@@ -4078,15 +4079,37 @@ export class PackageStoreService {
     orderId: string,
     userId?: string,
   ) {
-    const order = await manager.getRepository(StoreOrder).findOne({
-      where: userId
-        ? {
-            id: orderId,
-            userId,
-          }
-        : {
-            id: orderId,
-          },
+    const orderRepository = manager.getRepository(StoreOrder);
+
+    const lockedOrderQuery = orderRepository
+      .createQueryBuilder('storeOrder')
+      .setLock('pessimistic_write')
+      .where('storeOrder.id = :orderId', {
+        orderId,
+      });
+
+    if (userId) {
+      lockedOrderQuery.andWhere('storeOrder.userId = :userId', {
+        userId,
+      });
+    }
+
+    const lockedOrder = await lockedOrderQuery.getOne();
+
+    if (!lockedOrder) {
+      throw new NotFoundException('Store order not found.');
+    }
+
+    /*
+     * Important:
+     * The main store_orders row is already locked above.
+     * Do not load nullable relations with FOR UPDATE, because
+     * PostgreSQL rejects FOR UPDATE on nullable outer joins.
+     */
+    const order = await orderRepository.findOne({
+      where: {
+        id: lockedOrder.id,
+      },
 
       relations: [
         'snapshot',
@@ -4099,10 +4122,6 @@ export class PackageStoreService {
         'package',
         'user',
       ],
-
-      lock: {
-        mode: 'pessimistic_write',
-      },
     });
 
     if (!order) {

@@ -20,6 +20,9 @@ import {
   NotificationType,
 } from 'src/notifications/entities/notification-event.entity';
 import { ExamVerdict } from 'src/module-2/final-exam/types/final-exam.type';
+import { CertificateGenerationService } from './certificate-generation.service';
+import { UserRole } from 'src/users/entities/user.entity';
+import { FilePurpose } from 'src/files/entities/file.entity';
 
 export interface IssueCertificatePayload {
   examAttemptId: string;
@@ -44,6 +47,8 @@ export class CertificatesService {
     private readonly notificationsService: NotificationsService,
 
     private readonly configService: ConfigService,
+
+    private readonly certificateGenerationService: CertificateGenerationService,
   ) {}
 
   async issueCertificate(payload: IssueCertificatePayload) {
@@ -57,6 +62,10 @@ export class CertificatesService {
       throw new BadRequestException(
         'Certificate already issued for this exam attempt',
       );
+    }
+
+    if (payload.pdfFileId) {
+      await this.filesService.findActiveFileById(payload.pdfFileId);
     }
 
     const attempt = await this.examAttemptRepository.findOne({
@@ -90,7 +99,6 @@ export class CertificatesService {
     const issuedAt = new Date();
 
     const courseTitle = attempt.course?.title ?? 'Deleted Course';
-
     const recipientName = attempt.user?.fullName ?? 'Deleted User';
 
     const courseLevel = this.extractLevelLabel(
@@ -101,46 +109,41 @@ export class CertificatesService {
 
     let certificate = this.certificateRepository.create({
       userId: attempt.userId,
-
       courseId: attempt.courseId,
-
       examAttemptId: attempt.id,
-
       certificateNumber: this.generateCertificateNumber(),
-
       pdfFileId: payload.pdfFileId ?? null,
-
       recipientNameSnapshot: recipientName,
-
       courseTitleSnapshot: courseTitle,
-
       courseLevelSnapshot: courseLevel,
-
       scorePercentSnapshot: finalScore.toFixed(2),
-
       issuedByAdminId: payload.issuedByAdminId ?? null,
-
       verificationUrl: null,
-
       status: CertificateStatus.ISSUED,
-
       issuedAt,
-
       revokedAt: null,
-
       revocationReason: null,
     });
 
     certificate = await this.certificateRepository.save(certificate);
 
-    const verificationBaseUrl = this.configService
-      .get<string>('CERTIFICATE_PUBLIC_VERIFY_BASE_URL')
-      ?.replace(/\/+$/, '');
-
-    if (verificationBaseUrl) {
-      certificate.verificationUrl = `${verificationBaseUrl}/${certificate.id}`;
+    try {
+      certificate.verificationUrl = this.buildVerificationUrl(certificate.id);
 
       certificate = await this.certificateRepository.save(certificate);
+
+      if (!certificate.pdfFileId) {
+        certificate.pdfFileId =
+          await this.generateAndStoreCertificatePdf(certificate);
+
+        certificate = await this.certificateRepository.save(certificate);
+      }
+    } catch (error) {
+      await this.certificateRepository.delete({
+        id: certificate.id,
+      });
+
+      throw error;
     }
 
     let notificationSent = false;
@@ -149,17 +152,12 @@ export class CertificatesService {
       try {
         await this.notificationsService.createSystemNotificationForUser({
           userId: certificate.userId,
-
           type: NotificationType.SYSTEM,
-
           title: 'Your official certificate is ready',
-
           body: `Your ${
             certificate.courseTitleSnapshot ?? 'course'
           } certificate has been issued.`,
-
           deepLink: `italirpothe://certificates/${certificate.id}`,
-
           priority: NotificationPriority.HIGH,
         });
 
@@ -174,13 +172,138 @@ export class CertificatesService {
 
     return {
       message: 'Certificate issued successfully',
-
       notificationRequested: payload.notifyStudent === true,
-
       notificationSent,
-
       certificate,
+      pdfDownload:
+        certificate.pdfFileId === null
+          ? null
+          : await this.filesService.createSignedReadUrl(certificate.pdfFileId),
     };
+  }
+
+  async getCertificateDownloadUrl(id: string, userId?: string) {
+    const certificate = await this.findById(id);
+
+    if (userId && certificate.userId !== userId) {
+      throw new ForbiddenException(
+        'You are not allowed to download this certificate',
+      );
+    }
+
+    if (certificate.status !== CertificateStatus.ISSUED) {
+      throw new BadRequestException('Certificate is not active');
+    }
+
+    if (!certificate.pdfFileId) {
+      throw new NotFoundException('Certificate PDF is not generated yet');
+    }
+
+    const signedFile = await this.filesService.createSignedReadUrl(
+      certificate.pdfFileId,
+    );
+
+    return {
+      certificateId: certificate.id,
+      certificateNumber: certificate.certificateNumber,
+      signedReadUrl: signedFile.signedReadUrl,
+      expiresInSeconds: signedFile.expiresInSeconds,
+      file: signedFile.file,
+    };
+  }
+
+  async regenerateCertificatePdf(id: string, adminId: string) {
+    const certificate = await this.findById(id);
+
+    if (certificate.status !== CertificateStatus.ISSUED) {
+      throw new BadRequestException(
+        'Only issued certificates can regenerate a PDF',
+      );
+    }
+
+    if (!certificate.verificationUrl) {
+      certificate.verificationUrl = this.buildVerificationUrl(certificate.id);
+    }
+
+    certificate.issuedByAdminId = certificate.issuedByAdminId ?? adminId;
+
+    certificate.pdfFileId =
+      await this.generateAndStoreCertificatePdf(certificate);
+
+    const savedCertificate = await this.certificateRepository.save(certificate);
+
+    return {
+      message: 'Certificate PDF regenerated successfully',
+      certificate: savedCertificate,
+      pdfDownload: await this.filesService.createSignedReadUrl(
+        savedCertificate.pdfFileId!,
+      ),
+    };
+  }
+
+  private async generateAndStoreCertificatePdf(
+    certificate: Certificate,
+  ): Promise<string> {
+    const verificationUrl =
+      certificate.verificationUrl ?? this.buildVerificationUrl(certificate.id);
+
+    const pdfBuffer = await this.certificateGenerationService.generatePdf({
+      certificateNumber: certificate.certificateNumber,
+      recipientName:
+        certificate.recipientNameSnapshot ??
+        certificate.user?.fullName ??
+        'Student',
+      courseTitle:
+        certificate.courseTitleSnapshot ??
+        certificate.course?.title ??
+        'Final Exam',
+      courseLevel: certificate.courseLevelSnapshot,
+      issuedAt: certificate.issuedAt,
+      verificationUrl,
+      scorePercent:
+        certificate.scorePercentSnapshot === null
+          ? null
+          : Number(certificate.scorePercentSnapshot),
+    });
+
+    const fileName = `${certificate.certificateNumber}.pdf`;
+
+    const createdFile = await this.filesService.createFileFromBuffer(
+      pdfBuffer,
+      fileName,
+      'application/pdf',
+      {
+        id: certificate.issuedByAdminId ?? certificate.userId,
+        role: certificate.issuedByAdminId ? UserRole.ADMIN : UserRole.USER,
+      },
+      FilePurpose.CERTIFICATE_PDF,
+    );
+
+    return createdFile.file.id;
+  }
+
+  private buildVerificationUrl(certificateId: string): string {
+    const explicitBaseUrl = this.configService
+      .get<string>('CERTIFICATE_PUBLIC_VERIFY_BASE_URL')
+      ?.trim();
+
+    if (explicitBaseUrl) {
+      return `${explicitBaseUrl.replace(/\/+$/, '')}/${certificateId}`;
+    }
+
+    const frontendBaseUrl =
+      this.configService.get<string>('FRONTEND_URL')?.trim() ??
+      this.configService.get<string>('APP_PUBLIC_URL')?.trim() ??
+      this.configService.get<string>('WEB_APP_URL')?.trim();
+
+    if (frontendBaseUrl) {
+      return `${frontendBaseUrl.replace(
+        /\/+$/,
+        '',
+      )}/certificates/public/verify/${certificateId}`;
+    }
+
+    return `https://italir-pothe-web.vercel.app/certificates/public/verify/${certificateId}`;
   }
 
   private extractLevelLabel(value: string): string | null {

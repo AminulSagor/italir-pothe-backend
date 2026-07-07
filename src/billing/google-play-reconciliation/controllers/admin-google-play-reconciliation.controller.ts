@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 
@@ -13,6 +14,8 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 
 import {
+  QueryGooglePlayRtdnEventsDto,
+  QueryGooglePlayVoidedRecordsDto,
   RetryGooglePlayFailuresDto,
   RunGooglePlayReconciliationDto,
 } from '../dto/google-play-reconciliation.dto';
@@ -34,6 +37,27 @@ export class AdminGooglePlayReconciliationController {
   @Get('status')
   async getStatus() {
     return this.reconciliationService.getStatus();
+  }
+
+  @Get('voided-purchases')
+  async findVoidedPurchases(
+    @Query()
+    query: QueryGooglePlayVoidedRecordsDto,
+  ) {
+    return this.reconciliationService.findVoidedPurchaseRecords(query);
+  }
+
+  @Get('voided-purchases/:recordId')
+  async findVoidedPurchaseById(
+    @Param(
+      'recordId',
+      new ParseUUIDPipe({
+        version: '4',
+      }),
+    )
+    recordId: string,
+  ) {
+    return this.reconciliationService.findVoidedPurchaseRecordById(recordId);
   }
 
   @Post('voided-purchases/run')
@@ -100,5 +124,26 @@ export class AdminGooglePlayReconciliationController {
     eventId: string,
   ) {
     return this.rtdnProcessorService.retryEvent(eventId);
+  }
+
+  @Get('rtdn/events')
+  async findRtdnEvents(
+    @Query()
+    query: QueryGooglePlayRtdnEventsDto,
+  ) {
+    return this.rtdnProcessorService.findEvents(query);
+  }
+
+  @Get('rtdn/events/:eventId')
+  async findRtdnEventById(
+    @Param(
+      'eventId',
+      new ParseUUIDPipe({
+        version: '4',
+      }),
+    )
+    eventId: string,
+  ) {
+    return this.rtdnProcessorService.findEventById(eventId);
   }
 }

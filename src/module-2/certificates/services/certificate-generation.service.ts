@@ -1,7 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { existsSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { join } from 'path';
+import { Injectable } from '@nestjs/common';
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import QRCode from 'qrcode';
 
@@ -18,50 +15,34 @@ export interface GenerateCertificatePdfPayload {
 @Injectable()
 export class CertificateGenerationService {
   async generatePdf(payload: GenerateCertificatePdfPayload): Promise<Buffer> {
-    const [logoBuffer, signatureBuffer, qrBuffer] = await Promise.all([
-      this.readAsset('italir_pothe_logo.png'),
-
-      this.readAsset('certificate_signature.png'),
-
-      QRCode.toBuffer(payload.verificationUrl, {
-        type: 'png',
-        width: 220,
-        margin: 1,
-
-        color: {
-          dark: '#005A34',
-          light: '#FFFFFF',
-        },
-      }),
-    ]);
-
     const document = await PDFDocument.create();
 
     const page = document.addPage([841.89, 595.28]);
 
-    const [regularFont, boldFont] = await Promise.all([
+    const [regularFont, boldFont, italicFont] = await Promise.all([
       document.embedFont(StandardFonts.Helvetica),
-
       document.embedFont(StandardFonts.HelveticaBold),
+      document.embedFont(StandardFonts.HelveticaOblique),
     ]);
 
-    const [logo, signature, qrCode] = await Promise.all([
-      document.embedPng(logoBuffer),
+    const qrBuffer = await QRCode.toBuffer(payload.verificationUrl, {
+      type: 'png',
+      width: 240,
+      margin: 1,
+      color: {
+        dark: '#005A34',
+        light: '#FFFFFF',
+      },
+    });
 
-      document.embedPng(signatureBuffer),
-
-      document.embedPng(qrBuffer),
-    ]);
+    const qrCode = await document.embedPng(qrBuffer);
 
     const green = rgb(0 / 255, 90 / 255, 52 / 255);
-
     const brightGreen = rgb(93 / 255, 247 / 255, 79 / 255);
-
     const dark = rgb(35 / 255, 42 / 255, 38 / 255);
-
     const muted = rgb(100 / 255, 108 / 255, 102 / 255);
-
     const pale = rgb(243 / 255, 248 / 255, 241 / 255);
+    const lightGreen = rgb(232 / 255, 251 / 255, 229 / 255);
 
     page.drawRectangle({
       x: 22,
@@ -82,12 +63,7 @@ export class CertificateGenerationService {
       borderColor: rgb(218 / 255, 227 / 255, 216 / 255),
     });
 
-    page.drawImage(logo, {
-      x: 68,
-      y: 451,
-      width: 76,
-      height: 76,
-    });
+    this.drawBrandMark(page, boldFont, green, lightGreen);
 
     page.drawText('Italir Pothe', {
       x: 156,
@@ -97,7 +73,7 @@ export class CertificateGenerationService {
       color: dark,
     });
 
-    page.drawText('Unlock Your Italian Career Path', {
+    page.drawText('Official Italian Language Institute', {
       x: 157,
       y: 468,
       size: 10,
@@ -128,12 +104,34 @@ export class CertificateGenerationService {
 
     this.drawCenteredText(
       page,
-      'CERTIFICATE OF COMPLETION',
-      regularFont,
-      18,
+      'CERTIFICATO DI COMPETENZA',
+      boldFont,
+      16,
       muted,
       80,
-      405,
+      418,
+      681,
+    );
+
+    this.drawCenteredText(
+      page,
+      `ID: ${payload.certificateNumber}`,
+      regularFont,
+      8,
+      muted,
+      80,
+      400,
+      681,
+    );
+
+    this.drawCenteredText(
+      page,
+      'This certificate is proudly presented to',
+      italicFont,
+      12,
+      muted,
+      80,
+      365,
       681,
     );
 
@@ -141,21 +139,21 @@ export class CertificateGenerationService {
       page,
       payload.recipientName,
       boldFont,
-      this.fitFontSize(payload.recipientName, 32, 22, 560),
+      this.fitFontSize(payload.recipientName, 34, 22, 560),
       green,
       80,
-      355,
+      318,
       681,
     );
 
     page.drawLine({
       start: {
-        x: 322,
-        y: 336,
+        x: 326,
+        y: 300,
       },
       end: {
-        x: 520,
-        y: 336,
+        x: 516,
+        y: 300,
       },
       thickness: 2,
       color: brightGreen,
@@ -163,31 +161,44 @@ export class CertificateGenerationService {
 
     this.drawCenteredText(
       page,
-      'has successfully attained the proficiency level of',
+      'has successfully completed',
       regularFont,
       12,
       muted,
       80,
-      309,
+      269,
       681,
     );
-
-    const levelText = payload.courseLevel
-      ? `Level ${payload.courseLevel}`
-      : 'Course Completion';
-
-    this.drawCenteredText(page, levelText, boldFont, 27, green, 80, 271, 681);
 
     this.drawCenteredText(
       page,
       payload.courseTitle,
       boldFont,
-      this.fitFontSize(payload.courseTitle, 16, 11, 540),
-      dark,
+      this.fitFontSize(payload.courseTitle, 23, 13, 585),
+      green,
       120,
-      232,
+      230,
       601,
     );
+
+    const levelText = payload.courseLevel
+      ? `Proficiency Level: ${payload.courseLevel}`
+      : 'Final Exam Certification';
+
+    this.drawCenteredText(page, levelText, boldFont, 15, dark, 120, 202, 601);
+
+    if (payload.scorePercent !== null) {
+      this.drawCenteredText(
+        page,
+        `Final Score: ${payload.scorePercent.toFixed(2)}%`,
+        regularFont,
+        11,
+        muted,
+        120,
+        181,
+        601,
+      );
+    }
 
     const issueDate = new Intl.DateTimeFormat('en', {
       year: 'numeric',
@@ -200,58 +211,14 @@ export class CertificateGenerationService {
       page,
       `Issued on ${issueDate}`,
       regularFont,
-      11,
+      10,
       muted,
       120,
-      207,
+      161,
       601,
     );
 
-    if (payload.scorePercent !== null) {
-      this.drawCenteredText(
-        page,
-        `Final score: ${payload.scorePercent.toFixed(2)}%`,
-        regularFont,
-        10,
-        muted,
-        120,
-        187,
-        601,
-      );
-    }
-
-    const signatureWidth = 140;
-
-    const signatureHeight =
-      signature.height * (signatureWidth / signature.width);
-
-    page.drawImage(signature, {
-      x: 100,
-      y: 78,
-      width: signatureWidth,
-      height: signatureHeight,
-    });
-
-    page.drawLine({
-      start: {
-        x: 88,
-        y: 75,
-      },
-      end: {
-        x: 255,
-        y: 75,
-      },
-      thickness: 0.8,
-      color: muted,
-    });
-
-    page.drawText('REGISTRAR SIGNATURE', {
-      x: 109,
-      y: 58,
-      size: 8,
-      font: regularFont,
-      color: muted,
-    });
+    this.drawSignature(page, italicFont, regularFont, green, muted);
 
     page.drawImage(qrCode, {
       x: 665,
@@ -268,21 +235,13 @@ export class CertificateGenerationService {
       color: muted,
     });
 
-    page.drawText(`Certificate ID: ${payload.certificateNumber}`, {
-      x: 300,
-      y: 90,
-      size: 10,
-      font: regularFont,
-      color: dark,
-    });
-
     page.drawText(payload.verificationUrl, {
-      x: 300,
-      y: 70,
+      x: 292,
+      y: 64,
       size: 6.5,
       font: regularFont,
       color: muted,
-      maxWidth: 330,
+      maxWidth: 340,
     });
 
     const bytes = await document.save({
@@ -290,6 +249,67 @@ export class CertificateGenerationService {
     });
 
     return Buffer.from(bytes);
+  }
+
+  private drawBrandMark(
+    page: PDFPage,
+    boldFont: PDFFont,
+    green: ReturnType<typeof rgb>,
+    lightGreen: ReturnType<typeof rgb>,
+  ): void {
+    page.drawCircle({
+      x: 105,
+      y: 489,
+      size: 38,
+      color: lightGreen,
+      borderColor: green,
+      borderWidth: 1.5,
+    });
+
+    page.drawText('IP', {
+      x: 87,
+      y: 477,
+      size: 24,
+      font: boldFont,
+      color: green,
+    });
+  }
+
+  private drawSignature(
+    page: PDFPage,
+    italicFont: PDFFont,
+    regularFont: PDFFont,
+    green: ReturnType<typeof rgb>,
+    muted: ReturnType<typeof rgb>,
+  ): void {
+    page.drawText('Authorized Registrar', {
+      x: 82,
+      y: 105,
+      size: 20,
+      font: italicFont,
+      color: green,
+    });
+
+    page.drawLine({
+      start: {
+        x: 82,
+        y: 87,
+      },
+      end: {
+        x: 262,
+        y: 87,
+      },
+      thickness: 0.8,
+      color: muted,
+    });
+
+    page.drawText('REGISTRAR SIGNATURE', {
+      x: 109,
+      y: 70,
+      size: 8,
+      font: regularFont,
+      color: muted,
+    });
   }
 
   private drawCenteredText(
@@ -331,35 +351,7 @@ export class CertificateGenerationService {
 
     return Math.max(
       minimumSize,
-
       Math.floor(maximumWidth / (text.length * approximateCharacterWidth)),
     );
-  }
-
-  private async readAsset(fileName: string): Promise<Buffer> {
-    const candidates = [
-      join(process.cwd(), 'assets', 'certificates', fileName),
-
-      join(
-        process.cwd(),
-        'src',
-        'module-2',
-        'certificates',
-        'assets',
-        fileName,
-      ),
-
-      join(__dirname, '..', 'assets', fileName),
-    ];
-
-    const assetPath = candidates.find((candidate) => existsSync(candidate));
-
-    if (!assetPath) {
-      throw new InternalServerErrorException(
-        `Certificate asset is missing: ${fileName}`,
-      );
-    }
-
-    return readFile(assetPath);
   }
 }

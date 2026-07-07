@@ -9,6 +9,9 @@ import { CoursesController } from './controllers/courses.controller';
 import { Course } from './entities/course.entity';
 import { AdminCoursesService } from './services/admin-courses.service';
 import { CoursesService } from './services/courses.service';
+import { CourseEnrollment } from '../course-commerce/entities/course-enrollment.entity';
+import { CoursePurchaseOrder } from '../course-commerce/entities/course-purchase-order.entity';
+import { UserCourseProgress } from '../progress/entities/user-course-progress.entity';
 
 @Module({
   imports: [
@@ -17,6 +20,9 @@ import { CoursesService } from './services/courses.service';
       CourseChapter,
       Lesson,
       CourseProviderProduct,
+      CourseEnrollment,
+      CoursePurchaseOrder,
+      UserCourseProgress,
     ]),
   ],
   controllers: [AdminCoursesController, CoursesController],

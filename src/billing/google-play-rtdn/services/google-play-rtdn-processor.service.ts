@@ -42,6 +42,7 @@ import {
   StorePaymentProvider,
 } from 'src/package-store/types/package-store.type';
 import { GooglePlaySubscriptionLifecycleService } from 'src/billing/google-play-subscriptions/services/google-play-subscription-lifecycle.service';
+import { QueryGooglePlayRtdnEventsDto } from 'src/billing/google-play-reconciliation/dto/google-play-reconciliation.dto';
 
 type InternalPurchaseMatch =
   | {
@@ -237,6 +238,110 @@ export class GooglePlayRtdnProcessorService {
         id: event.id,
       },
     });
+  }
+
+  async findEvents(query: QueryGooglePlayRtdnEventsDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const queryBuilder = this.eventRepository
+      .createQueryBuilder('event')
+      .orderBy('event.receivedAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (query.status) {
+      queryBuilder.andWhere('event.status = :status', {
+        status: query.status,
+      });
+    }
+
+    if (query.kind) {
+      queryBuilder.andWhere('event.notificationKind = :kind', {
+        kind: query.kind,
+      });
+    }
+
+    const search = query.search?.trim();
+
+    if (search) {
+      queryBuilder.andWhere(
+        `(
+        CAST(event.id AS TEXT) ILIKE :search
+        OR event.messageId ILIKE :search
+        OR event.productId ILIKE :search
+        OR event.providerOrderId ILIKE :search
+        OR event.purchaseTokenHash ILIKE :search
+      )`,
+        {
+          search: `%${search}%`,
+        },
+      );
+    }
+
+    const [events, total] = await queryBuilder.getManyAndCount();
+
+    return {
+      items: events.map((event) => this.mapRtdnEvent(event)),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async findEventById(eventId: string) {
+    const event = await this.eventRepository.findOne({
+      where: {
+        id: eventId,
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Google Play RTDN event not found.');
+    }
+
+    return this.mapRtdnEvent(event, true);
+  }
+
+  private mapRtdnEvent(event: GooglePlayRtdnEvent, includeDetails = false) {
+    return {
+      id: event.id,
+
+      messageId: event.messageId,
+      pubsubSubscription: event.pubsubSubscription,
+      publishTime: event.publishTime,
+
+      packageName: event.packageName,
+      eventTime: event.eventTime,
+
+      notificationKind: event.notificationKind,
+      notificationType: event.notificationType,
+
+      productId: event.productId,
+      providerOrderId: event.providerOrderId,
+      purchaseTokenHash: event.purchaseTokenHash,
+
+      status: event.status,
+      attemptCount: event.attemptCount,
+
+      lastErrorCode: event.lastErrorCode,
+      lastErrorMessage: event.lastErrorMessage,
+      nextAttemptAt: event.nextAttemptAt,
+      processingStartedAt: event.processingStartedAt,
+      processedAt: event.processedAt,
+
+      receivedAt: event.receivedAt,
+      updatedAt: event.updatedAt,
+
+      pubsubAttributes: includeDetails ? event.pubsubAttributes : undefined,
+      authoritativePayload: includeDetails
+        ? event.authoritativePayload
+        : undefined,
+      processingResult: includeDetails ? event.processingResult : undefined,
+    };
   }
 
   async getProcessingSummary() {

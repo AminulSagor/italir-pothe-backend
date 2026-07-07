@@ -67,6 +67,36 @@ export class AdminCertificatesController {
     return this.certificatesService.verifyCertificate(identifier);
   }
 
+  @Get(':id/download-url')
+  async getCertificateDownloadUrl(
+    @Param(
+      'id',
+      new ParseUUIDPipe({
+        version: '4',
+      }),
+    )
+    id: string,
+  ) {
+    return this.certificatesService.getCertificateDownloadUrl(id);
+  }
+
+  @Post(':id/regenerate-pdf')
+  async regenerateCertificatePdf(
+    @Param(
+      'id',
+      new ParseUUIDPipe({
+        version: '4',
+      }),
+    )
+    id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.certificatesService.regenerateCertificatePdf(
+      id,
+      this.getAdminId(request),
+    );
+  }
+
   @Get(':id')
   async findById(
     @Param(

@@ -44,6 +44,12 @@ import { QuizQuestion } from 'src/module-2/quizzes/entities/quiz-question.entity
 import { Quiz } from 'src/module-2/quizzes/entities/quiz.entity';
 import { UserLessonProgress } from 'src/module-2/progress/entities/user-lesson-progress.entity';
 import { UserCourseProgress } from 'src/module-2/progress/entities/user-course-progress.entity';
+import { CourseEnrollment } from 'src/module-2/course-commerce/entities/course-enrollment.entity';
+import { CoursePurchaseOrder } from 'src/module-2/course-commerce/entities/course-purchase-order.entity';
+import {
+  CourseEnrollmentStatus,
+  CoursePurchaseStatus,
+} from 'src/module-2/course-commerce/types/course-commerce.type';
 
 @Injectable()
 export class AdminCoursesService {
@@ -56,6 +62,15 @@ export class AdminCoursesService {
 
     @InjectRepository(Lesson)
     private readonly lessonRepository: Repository<Lesson>,
+
+    @InjectRepository(CourseEnrollment)
+    private readonly enrollmentRepository: Repository<CourseEnrollment>,
+
+    @InjectRepository(CoursePurchaseOrder)
+    private readonly purchaseOrderRepository: Repository<CoursePurchaseOrder>,
+
+    @InjectRepository(UserCourseProgress)
+    private readonly courseProgressRepository: Repository<UserCourseProgress>,
 
     private readonly dataSource: DataSource,
   ) {}
@@ -111,10 +126,9 @@ export class AdminCoursesService {
 
     const [courses, total] = await queryBuilder.getManyAndCount();
 
-    const studentEnrollmentCounts =
-      await this.getCourseStudentEnrollmentCountsMock(
-        courses.map((course) => course.id),
-      );
+    const studentEnrollmentCounts = await this.getCourseStudentEnrollmentCounts(
+      courses.map((course) => course.id),
+    );
 
     return {
       items: courses.map((course) => ({
@@ -125,6 +139,7 @@ export class AdminCoursesService {
         price: course.price,
         isFree: course.isFree,
         couponCode: course.couponCode,
+        finalExamTemplateId: course.finalExamTemplateId,
         totalStudentEnrollments: studentEnrollmentCounts.get(course.id) ?? 0,
       })),
       meta: {
@@ -136,14 +151,43 @@ export class AdminCoursesService {
     };
   }
 
-  private async getCourseStudentEnrollmentCountsMock(courseIds: string[]) {
-    const result = new Map<string, number>();
+  async getCourseDirectorySummary() {
+    const totalCourses = await this.courseRepository.count({
+      where: {
+        status: Not(CourseStatus.ARCHIVED),
+      },
+    });
 
-    for (const courseId of courseIds) {
-      result.set(courseId, 0);
-    }
+    const activeStudentsResult = await this.enrollmentRepository
+      .createQueryBuilder('enrollment')
+      .select('COUNT(DISTINCT enrollment.userId)', 'count')
+      .where('enrollment.status = :status', {
+        status: CourseEnrollmentStatus.ACTIVE,
+      })
+      .getRawOne<{ count: string }>();
 
-    return result;
+    const completionResult = await this.courseProgressRepository
+      .createQueryBuilder('progress')
+      .innerJoin(
+        CourseEnrollment,
+        'enrollment',
+        `
+        enrollment.userId = progress.userId
+        AND enrollment.courseId = progress.courseId
+        AND enrollment.status = :status
+      `,
+        {
+          status: CourseEnrollmentStatus.ACTIVE,
+        },
+      )
+      .select('COALESCE(ROUND(AVG(progress.completionPercent)), 0)', 'average')
+      .getRawOne<{ average: string }>();
+
+    return {
+      totalCourses,
+      activeStudents: Number(activeStudentsResult?.count ?? 0),
+      averageCompletionRate: Number(completionResult?.average ?? 0),
+    };
   }
 
   //   private async getCourseStudentEnrollmentCounts(courseIds: string[]) {
@@ -550,13 +594,13 @@ export class AdminCoursesService {
 
   private async buildPermanentDeleteDependencyReport(courseId: string) {
     const studentEnrollmentCount =
-      await this.getCourseStudentEnrollmentCountMock(courseId);
+      await this.getCourseStudentEnrollmentCount(courseId);
 
     const purchaseHistoryCount =
-      await this.getCoursePurchaseHistoryCountMock(courseId);
+      await this.getCoursePurchaseHistoryCount(courseId);
 
     const revenueHistoryCount =
-      await this.getCourseRevenueHistoryCountMock(courseId);
+      await this.getCourseRevenueHistoryCount(courseId);
 
     const hasBlockingDependencies =
       studentEnrollmentCount > 0 ||
@@ -619,19 +663,59 @@ export class AdminCoursesService {
     } as any);
   }
 
-  private async getCourseStudentEnrollmentCountMock(courseId: string) {
-    void courseId;
-    return 0;
+  private async getCourseStudentEnrollmentCounts(courseIds: string[]) {
+    const result = new Map<string, number>();
+
+    for (const courseId of courseIds) {
+      result.set(courseId, 0);
+    }
+
+    if (courseIds.length === 0) {
+      return result;
+    }
+
+    const rows = await this.enrollmentRepository
+      .createQueryBuilder('enrollment')
+      .select('enrollment.courseId', 'courseId')
+      .addSelect('COUNT(DISTINCT enrollment.userId)', 'count')
+      .where('enrollment.courseId IN (:...courseIds)', { courseIds })
+      .andWhere('enrollment.status = :status', {
+        status: CourseEnrollmentStatus.ACTIVE,
+      })
+      .groupBy('enrollment.courseId')
+      .getRawMany<{ courseId: string; count: string }>();
+
+    rows.forEach((row) => {
+      result.set(row.courseId, Number(row.count));
+    });
+
+    return result;
   }
 
-  private async getCoursePurchaseHistoryCountMock(courseId: string) {
-    void courseId;
-    return 0;
+  private async getCourseStudentEnrollmentCount(courseId: string) {
+    return this.enrollmentRepository.count({
+      where: {
+        courseId,
+        status: CourseEnrollmentStatus.ACTIVE,
+      },
+    });
   }
 
-  private async getCourseRevenueHistoryCountMock(courseId: string) {
-    void courseId;
-    return 0;
+  private async getCoursePurchaseHistoryCount(courseId: string) {
+    return this.purchaseOrderRepository.count({
+      where: {
+        courseId,
+      },
+    });
+  }
+
+  private async getCourseRevenueHistoryCount(courseId: string) {
+    return this.purchaseOrderRepository.count({
+      where: {
+        courseId,
+        status: In([CoursePurchaseStatus.PAID, CoursePurchaseStatus.REFUNDED]),
+      },
+    });
   }
 
   private async buildCourseOwnedRecordIds(course: Course) {
