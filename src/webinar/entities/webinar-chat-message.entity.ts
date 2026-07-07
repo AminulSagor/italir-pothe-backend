@@ -39,7 +39,7 @@ export class WebinarChatMessage {
     createForeignKeyConstraints: false,
   })
   @JoinColumn({
-    name: 'senderId',
+    name: 'senderUserId',
   })
   sender: User | null;
 
