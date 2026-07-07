@@ -172,10 +172,10 @@ export class AdminCoursesService {
         CourseEnrollment,
         'enrollment',
         `
-        enrollment.userId = progress.userId
-        AND enrollment.courseId = progress.courseId
-        AND enrollment.status = :status
-      `,
+          "enrollment"."userId" = "progress"."userId"
+          AND "enrollment"."courseId" = "progress"."courseId"
+          AND "enrollment"."status" = :status
+        `,
         {
           status: CourseEnrollmentStatus.ACTIVE,
         },
