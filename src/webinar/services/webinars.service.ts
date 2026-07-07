@@ -625,7 +625,7 @@ export class WebinarsService {
     const pagination = this.normalizePagination(query);
     const baseQuery = this.webinarChatMessageRepository
       .createQueryBuilder('chatMessage')
-      .innerJoin('chatMessage.sender', 'senderUser')
+      .leftJoin('chatMessage.sender', 'senderUser')
       .leftJoin(
         File,
         'profileFile',
@@ -953,7 +953,7 @@ export class WebinarsService {
   private async findChatMessageResponse(chatMessageId: string) {
     const chatMessage = await this.webinarChatMessageRepository
       .createQueryBuilder('chatMessage')
-      .innerJoin('chatMessage.sender', 'senderUser')
+      .leftJoin('chatMessage.sender', 'senderUser')
       .leftJoin(
         File,
         'profileFile',
@@ -1199,7 +1199,8 @@ export class WebinarsService {
       id: chatMessage.id,
       webinarId: chatMessage.webinarId,
       senderUserId: chatMessage.senderUserId,
-      senderFullName: chatMessage.senderFullName,
+      senderFullName:
+        chatMessage.senderFullName ?? (chatMessage.isHost ? 'Host' : 'User'),
       senderRole: chatMessage.senderRole,
       senderProfilePhoto: chatMessage.senderProfilePhotoStorageKey
         ? this.s3Service.createPublicUrl(chatMessage.senderProfilePhotoStorageKey)
