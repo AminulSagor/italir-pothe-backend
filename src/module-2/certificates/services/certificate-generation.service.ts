@@ -1,6 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import {
-  degrees,
   PDFDocument,
   PDFFont,
   PDFImage,
@@ -101,6 +100,8 @@ export class CertificateGenerationService {
     const qrCode = await document.embedPng(qrBuffer);
 
     this.drawBackground(page, logo);
+
+    // Draw the continuous thin borders first so the thick corners overlap them seamlessly
     this.drawGreenFrame(page);
     this.drawGreenCornerFrame(page);
 
@@ -240,14 +241,8 @@ export class CertificateGenerationService {
         const nextY = y + Math.sin(step / 5) * 1.25;
 
         page.drawLine({
-          start: {
-            x: previousX,
-            y: previousY,
-          },
-          end: {
-            x,
-            y: nextY,
-          },
+          start: { x: previousX, y: previousY },
+          end: { x, y: nextY },
           thickness: 0.32,
           color: waveColor,
           opacity: 0.22,
@@ -266,22 +261,20 @@ export class CertificateGenerationService {
     const darkBorder = rgb(48 / 255, 125 / 255, 60 / 255);
     const lightBorder = rgb(88 / 255, 174 / 255, 64 / 255);
 
-    // Outer continuous thin border
     page.drawRectangle({
       x: 18,
       y: 18,
       width: width - 36,
       height: height - 36,
-      borderWidth: 2,
+      borderWidth: 1.5,
       borderColor: darkBorder,
     });
 
-    // Inner continuous thin border
     page.drawRectangle({
-      x: 24,
-      y: 24,
-      width: width - 48,
-      height: height - 48,
+      x: 26,
+      y: 26,
+      width: width - 52,
+      height: height - 52,
       borderWidth: 1,
       borderColor: lightBorder,
     });
@@ -291,59 +284,50 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    // Matching exact frame colors
     const lightGreen = rgb(88 / 255, 174 / 255, 64 / 255);
     const darkGreen = rgb(48 / 255, 125 / 255, 60 / 255);
     const shadow = rgb(0, 0, 0);
 
-    /**
-     * BOTTOM-LEFT CORNER
-     * Based on exact layout from "Certificate Frame and Border Structure.png"
-     */
+    // ==========================================
+    // BOTTOM-LEFT CORNER (Perfect L + 45° angle)
+    // ==========================================
 
-    // Bottom-Left Outer (Dark Green)
-    page.drawSvgPath('M 0 350 L 45 305 L 45 45 L 355 45 L 400 0 L 0 0 Z', {
+    // Bottom-Left Background (Dark Green - Touches edges)
+    page.drawSvgPath('M 0 0 L 320 0 L 270 50 L 50 50 L 50 420 L 0 470 Z', {
       color: darkGreen,
     });
 
-    // Bottom-Left Inner subtle drop shadow
-    page.drawSvgPath('M 22 328 L 67 283 L 67 63 L 337 63 L 382 18 L 22 18 Z', {
+    // Bottom-Left Inner Shadow
+    page.drawSvgPath('M 18 18 L 298 18 L 258 58 L 58 58 L 58 398 L 18 438 Z', {
       color: shadow,
       opacity: 0.15,
     });
 
-    // Bottom-Left Inner (Light Green)
-    page.drawSvgPath('M 20 330 L 65 285 L 65 65 L 335 65 L 380 20 L 20 20 Z', {
+    // Bottom-Left Foreground (Light Green - Slightly inset)
+    page.drawSvgPath('M 15 15 L 295 15 L 255 55 L 55 55 L 55 395 L 15 435 Z', {
       color: lightGreen,
     });
 
-    /**
-     * TOP-RIGHT CORNER
-     */
+    // ==========================================
+    // TOP-RIGHT CORNER (Perfect L + 45° angle)
+    // ==========================================
 
-    // Top-Right Outer (Light Green)
+    // Top-Right Background (Dark Green - Touches edges)
     page.drawSvgPath(
-      `M ${width} ${height - 350} L ${width - 45} ${height - 305} L ${width - 45} ${height - 45} L ${width - 355} ${height - 45} L ${width - 400} ${height} L ${width} ${height} Z`,
-      {
-        color: lightGreen,
-      },
+      `M ${width} ${height} L ${width - 320} ${height} L ${width - 270} ${height - 50} L ${width - 50} ${height - 50} L ${width - 50} ${height - 420} L ${width} ${height - 470} Z`,
+      { color: darkGreen },
     );
 
-    // Top-Right Inner subtle drop shadow
+    // Top-Right Inner Shadow
     page.drawSvgPath(
-      `M ${width - 22} ${height - 328} L ${width - 67} ${height - 283} L ${width - 67} ${height - 63} L ${width - 337} ${height - 63} L ${width - 382} ${height - 18} L ${width - 22} ${height - 18} Z`,
-      {
-        color: shadow,
-        opacity: 0.15,
-      },
+      `M ${width - 18} ${height - 18} L ${width - 298} ${height - 18} L ${width - 258} ${height - 58} L ${width - 58} ${height - 58} L ${width - 58} ${height - 398} L ${width - 18} ${height - 438} Z`,
+      { color: shadow, opacity: 0.15 },
     );
 
-    // Top-Right Inner (Dark Green)
+    // Top-Right Foreground (Light Green - Slightly inset)
     page.drawSvgPath(
-      `M ${width - 20} ${height - 330} L ${width - 65} ${height - 285} L ${width - 65} ${height - 65} L ${width - 335} ${height - 65} L ${width - 380} ${height - 20} L ${width - 20} ${height - 20} Z`,
-      {
-        color: darkGreen,
-      },
+      `M ${width - 15} ${height - 15} L ${width - 295} ${height - 15} L ${width - 255} ${height - 55} L ${width - 55} ${height - 55} L ${width - 55} ${height - 395} L ${width - 15} ${height - 435} Z`,
+      { color: lightGreen },
     );
   }
 
@@ -355,28 +339,37 @@ export class CertificateGenerationService {
   ): void {
     const dark = rgb(22 / 255, 28 / 255, 25 / 255);
 
+    // Shifted Certificate ID slightly higher
     page.drawText(`Certificate ID: ${certificateNumber}`, {
       x: 48,
-      y: 714,
+      y: 745,
       size: 16,
       font: fonts.bold,
       color: dark,
     });
 
-    const logoBoxX = 430;
+    // Calculate dynamic width to perfectly center the logo AND text
+    const textStr = 'Italir Pothe';
+    const textSize = 31;
+    const textWidth = fonts.bold.widthOfTextAtSize(textStr, textSize);
+    const logoWidth = 64;
+    const gap = 16;
+    const totalCenterWidth = logoWidth + gap + textWidth;
+
+    const startX = (page.getWidth() - totalCenterWidth) / 2;
     const logoBoxY = 645;
 
     this.drawImageContain(page, logo, {
-      x: logoBoxX,
+      x: startX,
       y: logoBoxY,
-      maxWidth: 64,
-      maxHeight: 64,
+      maxWidth: logoWidth,
+      maxHeight: logoWidth,
     });
 
-    page.drawText('Italir Pothe', {
-      x: logoBoxX + 76,
+    page.drawText(textStr, {
+      x: startX + logoWidth + gap,
       y: logoBoxY + 17,
-      size: 31,
+      size: textSize,
       font: fonts.bold,
       color: dark,
     });
@@ -578,16 +571,19 @@ export class CertificateGenerationService {
       color: dark,
     });
 
-    const maxWidth = 430;
-    const fontSize = 6.4;
+    // Verification link shifted to true bottom-center
+    const fontSize = 8;
+    const linkWidth = fonts.regular.widthOfTextAtSize(
+      verificationUrl,
+      fontSize,
+    );
 
     page.drawText(verificationUrl, {
-      x: (page.getWidth() - maxWidth) / 2,
-      y: 78,
+      x: (page.getWidth() - linkWidth) / 2,
+      y: 40,
       size: fontSize,
       font: fonts.regular,
       color: rgb(70 / 255, 80 / 255, 75 / 255),
-      maxWidth,
     });
   }
 
