@@ -18,7 +18,10 @@ export class StreakService {
     private readonly userStreakRepository: Repository<UserStreak>,
   ) {}
 
-  async getUserStreak(userId: string) {
+  async getUserStreak(
+    userId: string,
+    currentDate?: string,
+  ): Promise<UserStreak> {
     let streak = await this.userStreakRepository.findOne({
       where: { userId },
     });
@@ -36,17 +39,24 @@ export class StreakService {
       );
     }
 
-    return streak;
+    return this.resetExpiredStreakIfNeeded(
+      streak,
+      this.resolveActivityDate(currentDate),
+    );
   }
 
-  async getUserStreakSummary(userId: string): Promise<UserStreakSummary> {
-    const streak = await this.getUserStreak(userId);
+  async getUserStreakSummary(
+    userId: string,
+    currentDate?: string,
+  ): Promise<UserStreakSummary> {
+    const resolvedDate = this.resolveActivityDate(currentDate);
+    const streak = await this.getUserStreak(userId, resolvedDate);
 
     return {
       currentDays: streak.currentDays,
       longestDays: streak.longestDays,
       lastActivityDate: streak.lastActivityDate,
-      isUpdatedToday: streak.lastActivityDate === this.resolveActivityDate(),
+      isUpdatedToday: streak.lastActivityDate === resolvedDate,
     };
   }
 
@@ -56,19 +66,15 @@ export class StreakService {
     activityAt = new Date(),
   ): Promise<UserStreakSummary> {
     const resolvedActivityDate = this.resolveActivityDate(activityDate);
-    const streak = await this.getUserStreak(userId);
+
+    const streak = await this.getUserStreak(userId, resolvedActivityDate);
 
     if (streak.lastActivityDate === resolvedActivityDate) {
       streak.lastActivityAt = activityAt;
 
       const savedStreak = await this.userStreakRepository.save(streak);
 
-      return {
-        currentDays: savedStreak.currentDays,
-        longestDays: savedStreak.longestDays,
-        lastActivityDate: savedStreak.lastActivityDate,
-        isUpdatedToday: true,
-      };
+      return this.toSummary(savedStreak, resolvedActivityDate);
     }
 
     if (!streak.lastActivityDate) {
@@ -79,27 +85,21 @@ export class StreakService {
 
       const savedStreak = await this.userStreakRepository.save(streak);
 
-      return {
-        currentDays: savedStreak.currentDays,
-        longestDays: savedStreak.longestDays,
-        lastActivityDate: savedStreak.lastActivityDate,
-        isUpdatedToday: true,
-      };
+      return this.toSummary(savedStreak, resolvedActivityDate);
     }
 
     const lastDate = this.parseDate(streak.lastActivityDate);
     const currentDate = this.parseDate(resolvedActivityDate);
     const diffDays = this.diffDays(lastDate, currentDate);
 
+    if (diffDays < 0) {
+      return this.toSummary(streak, resolvedActivityDate);
+    }
+
     if (diffDays === 1) {
       streak.currentDays += 1;
-    } else if (diffDays > 1) {
-      if (streak.streakFreezeCount > 0 && diffDays === 2) {
-        streak.streakFreezeCount -= 1;
-        streak.currentDays += 1;
-      } else {
-        streak.currentDays = 1;
-      }
+    } else {
+      streak.currentDays = 1;
     }
 
     streak.longestDays = Math.max(streak.longestDays, streak.currentDays);
@@ -108,12 +108,7 @@ export class StreakService {
 
     const savedStreak = await this.userStreakRepository.save(streak);
 
-    return {
-      currentDays: savedStreak.currentDays,
-      longestDays: savedStreak.longestDays,
-      lastActivityDate: savedStreak.lastActivityDate,
-      isUpdatedToday: true,
-    };
+    return this.toSummary(savedStreak, resolvedActivityDate);
   }
 
   async addStreakFreeze(userId: string, count = 1) {
@@ -134,6 +129,71 @@ export class StreakService {
     streak.streakFreezeCount -= 1;
 
     return this.userStreakRepository.save(streak);
+  }
+
+  private async resetExpiredStreakIfNeeded(
+    streak: UserStreak,
+    currentDate: string,
+  ): Promise<UserStreak> {
+    if (!streak.lastActivityDate || streak.currentDays <= 0) {
+      return streak;
+    }
+
+    const lastDate = this.parseDate(streak.lastActivityDate);
+    const today = this.parseDate(currentDate);
+    const diffDays = this.diffDays(lastDate, today);
+
+    if (diffDays <= 1) {
+      return streak;
+    }
+
+    const missedDays = diffDays - 1;
+
+    if (streak.streakFreezeCount > 0) {
+      const freezeDaysToUse = Math.min(streak.streakFreezeCount, missedDays);
+
+      streak.currentDays += freezeDaysToUse;
+      streak.streakFreezeCount -= freezeDaysToUse;
+
+      const protectedDate = this.addDays(lastDate, freezeDaysToUse);
+
+      streak.lastActivityDate = this.formatDate(protectedDate);
+      streak.lastActivityAt = protectedDate;
+
+      const remainingMissedDays = missedDays - freezeDaysToUse;
+
+      if (remainingMissedDays <= 0) {
+        return this.userStreakRepository.save(streak);
+      }
+    }
+
+    streak.currentDays = 0;
+    streak.lastActivityDate = null;
+    streak.lastActivityAt = null;
+
+    return this.userStreakRepository.save(streak);
+  }
+
+  private addDays(date: Date, days: number): Date {
+    const nextDate = new Date(date);
+    nextDate.setUTCDate(nextDate.getUTCDate() + days);
+    return nextDate;
+  }
+
+  private formatDate(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private toSummary(
+    streak: UserStreak,
+    currentDate: string,
+  ): UserStreakSummary {
+    return {
+      currentDays: streak.currentDays,
+      longestDays: streak.longestDays,
+      lastActivityDate: streak.lastActivityDate,
+      isUpdatedToday: streak.lastActivityDate === currentDate,
+    };
   }
 
   private resolveActivityDate(activityDate?: string) {

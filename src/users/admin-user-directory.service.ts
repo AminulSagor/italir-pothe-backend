@@ -515,11 +515,7 @@ export class AdminUserDirectoryService {
       user.totalXp ?? 0,
     );
 
-    const currentStreakDays = Math.max(
-      streak?.currentDays ?? 0,
-      leaderboardProfile?.streakDays ?? 0,
-      user.currentStreakDays ?? 0,
-    );
+    const currentStreakDays = Math.max(0, streak?.currentDays ?? 0);
 
     return {
       user: {
