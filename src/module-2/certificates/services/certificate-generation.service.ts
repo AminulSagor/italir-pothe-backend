@@ -303,198 +303,131 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const lightGreen = rgb(86 / 255, 176 / 255, 64 / 255);
-    const brightGreen = rgb(105 / 255, 194 / 255, 77 / 255);
-    const midGreen = rgb(55 / 255, 128 / 255, 66 / 255);
-    const deepGreen = rgb(0 / 255, 92 / 255, 40 / 255);
+    const lightGreen = rgb(88 / 255, 174 / 255, 64 / 255);
+    const midGreen = rgb(52 / 255, 126 / 255, 63 / 255);
+    const deepGreen = rgb(0 / 255, 86 / 255, 39 / 255);
     const shadowGreen = rgb(0 / 255, 55 / 255, 28 / 255);
 
     /**
-     * TOP-RIGHT FRAME
-     * Shape exactly like the sample:
-     * - horizontal top bar
-     * - right vertical bar
-     * - diagonal/chamfered edges
+     * Bottom-left L frame like sample.
      */
-
-    // Top-right outer light frame
-    page.drawSvgPath(
-      `
-      M ${width - 285} ${height}
-      L ${width} ${height}
-      L ${width} ${height - 270}
-      L ${width - 36} ${height - 330}
-      L ${width - 36} ${height - 72}
-      L ${width - 250} ${height - 72}
-      Z
-    `,
-      {
-        color: lightGreen,
-        opacity: 1,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [0, 0],
+        [425, 0],
+        [370, 76],
+        [74, 76],
+        [74, 360],
+        [0, 455],
+      ],
+      lightGreen,
+      1,
     );
 
-    // Top-right dark inner frame
-    page.drawSvgPath(
-      `
-      M ${width - 230} ${height - 28}
-      L ${width - 36} ${height - 28}
-      L ${width - 36} ${height - 300}
-      L ${width - 5} ${height - 350}
-      L ${width - 5} ${height - 55}
-      L ${width - 255} ${height - 55}
-      Z
-    `,
-      {
-        color: deepGreen,
-        opacity: 0.82,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [42, 38],
+        [385, 38],
+        [350, 92],
+        [96, 92],
+        [96, 350],
+        [42, 425],
+      ],
+      deepGreen,
+      0.86,
     );
 
-    // Top bar highlight
-    page.drawSvgPath(
-      `
-      M ${width - 315} ${height - 8}
-      L ${width - 70} ${height - 8}
-      L ${width - 70} ${height - 48}
-      L ${width - 285} ${height - 48}
-      Z
-    `,
-      {
-        color: brightGreen,
-        opacity: 0.55,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [74, 12],
+        [405, 12],
+        [366, 58],
+        [88, 58],
+      ],
+      midGreen,
+      0.82,
     );
 
-    // Top-right diagonal dark fold
-    page.drawSvgPath(
-      `
-      M ${width - 92} ${height - 250}
-      L ${width - 5} ${height - 350}
-      L ${width - 5} ${height - 245}
-      L ${width - 62} ${height - 178}
-      Z
-    `,
-      {
-        color: shadowGreen,
-        opacity: 0.72,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [0, 55],
+        [58, 55],
+        [58, 374],
+        [0, 448],
+      ],
+      midGreen,
+      0.7,
     );
 
-    // Top-right small corner diamond/fold
-    page.drawSvgPath(
-      `
-      M ${width - 330} ${height}
-      L ${width - 285} ${height - 45}
-      L ${width - 240} ${height}
-      L ${width - 285} ${height + 45}
-      Z
-    `,
-      {
-        color: brightGreen,
-        opacity: 1,
-      },
-    );
-
-    page.drawSvgPath(
-      `
-      M ${width - 285} ${height}
-      L ${width - 245} ${height - 40}
-      L ${width - 205} ${height}
-      L ${width - 245} ${height + 40}
-      Z
-    `,
-      {
-        color: deepGreen,
-        opacity: 0.72,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [0, 270],
+        [74, 175],
+        [74, 88],
+        [0, 185],
+      ],
+      shadowGreen,
+      0.68,
     );
 
     /**
-     * BOTTOM-LEFT FRAME
-     * Shape exactly like the sample:
-     * - left vertical bar
-     * - bottom horizontal bar
-     * - diagonal/chamfered ends
+     * Top-right L frame like sample.
      */
-
-    // Bottom-left outer light frame
-    page.drawSvgPath(
-      `
-      M 0 0
-      L 420 0
-      L 365 76
-      L 74 76
-      L 74 360
-      L 0 455
-      Z
-    `,
-      {
-        color: lightGreen,
-        opacity: 1,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [width - 285, height],
+        [width, height],
+        [width, height - 270],
+        [width - 36, height - 330],
+        [width - 36, height - 72],
+        [width - 250, height - 72],
+      ],
+      lightGreen,
+      1,
     );
 
-    // Bottom-left dark inner frame
-    page.drawSvgPath(
-      `
-      M 42 40
-      L 380 40
-      L 350 92
-      L 96 92
-      L 96 360
-      L 42 430
-      Z
-    `,
-      {
-        color: deepGreen,
-        opacity: 0.84,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [width - 230, height - 28],
+        [width - 36, height - 28],
+        [width - 36, height - 300],
+        [width - 5, height - 350],
+        [width - 5, height - 55],
+        [width - 255, height - 55],
+      ],
+      deepGreen,
+      0.84,
     );
 
-    // Bottom horizontal highlight
-    page.drawSvgPath(
-      `
-      M 70 10
-      L 405 10
-      L 368 58
-      L 86 58
-      Z
-    `,
-      {
-        color: brightGreen,
-        opacity: 0.55,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [width - 315, height - 8],
+        [width - 70, height - 8],
+        [width - 70, height - 48],
+        [width - 285, height - 48],
+      ],
+      midGreen,
+      0.82,
     );
 
-    // Left vertical highlight
-    page.drawSvgPath(
-      `
-      M 0 55
-      L 58 55
-      L 58 375
-      L 0 450
-      Z
-    `,
-      {
-        color: brightGreen,
-        opacity: 0.45,
-      },
-    );
-
-    // Bottom-left diagonal dark fold
-    page.drawSvgPath(
-      `
-      M 0 265
-      L 75 170
-      L 75 82
-      L 0 180
-      Z
-    `,
-      {
-        color: shadowGreen,
-        opacity: 0.72,
-      },
+    this.drawFilledPolygon(
+      page,
+      [
+        [width - 92, height - 250],
+        [width - 5, height - 350],
+        [width - 5, height - 245],
+        [width - 62, height - 178],
+      ],
+      shadowGreen,
+      0.7,
     );
   }
 
@@ -549,15 +482,15 @@ export class CertificateGenerationService {
   ): void {
     const green = rgb(0 / 255, 105 / 255, 55 / 255);
 
-    const badgeBoxX = 878;
-    const badgeBoxY = 565;
-    const badgeBoxWidth = 150;
+    const badgeCenterX = 930;
+    const awardSize = 92;
+    const awardY = 590;
 
     this.drawImageContain(page, award, {
-      x: badgeBoxX + 25,
-      y: badgeBoxY + 42,
-      maxWidth: 96,
-      maxHeight: 96,
+      x: badgeCenterX - awardSize / 2,
+      y: awardY,
+      maxWidth: awardSize,
+      maxHeight: awardSize,
     });
 
     const text = 'CERTIFIED';
@@ -565,8 +498,8 @@ export class CertificateGenerationService {
     const textWidth = fonts.bold.widthOfTextAtSize(text, textSize);
 
     page.drawText(text, {
-      x: badgeBoxX + (badgeBoxWidth - textWidth) / 2,
-      y: badgeBoxY + 19,
+      x: badgeCenterX - textWidth / 2,
+      y: awardY - 24,
       size: textSize,
       font: fonts.bold,
       color: green,
@@ -840,6 +773,42 @@ export class CertificateGenerationService {
       width: scaled.width,
       height: scaled.height,
       opacity: params.opacity ?? 1,
+    });
+  }
+
+  private drawFilledPolygon(
+    page: PDFPage,
+    points: Array<[number, number]>,
+    color: ReturnType<typeof rgb>,
+    opacity = 1,
+  ): void {
+    if (points.length < 3) {
+      return;
+    }
+
+    const normalizedPoints = points.map(([x, y]) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new InternalServerErrorException(
+          `Invalid certificate frame coordinate: x=${x}, y=${y}`,
+        );
+      }
+
+      return [Math.round(x * 100) / 100, Math.round(y * 100) / 100];
+    });
+
+    const [firstX, firstY] = normalizedPoints[0];
+
+    const path =
+      `M ${firstX},${firstY} ` +
+      normalizedPoints
+        .slice(1)
+        .map(([x, y]) => `L ${x},${y}`)
+        .join(' ') +
+      ' Z';
+
+    page.drawSvgPath(path, {
+      color,
+      opacity,
     });
   }
 }
