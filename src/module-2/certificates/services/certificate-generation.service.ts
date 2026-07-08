@@ -199,12 +199,12 @@ export class CertificateGenerationService {
 
     const watermarkSize = 510;
 
-    page.drawImage(logo, {
-      x: (width - watermarkSize) / 2,
-      y: 145,
-      width: watermarkSize,
-      height: watermarkSize,
-      opacity: 0.045,
+    this.drawImageContain(page, logo, {
+      x: (width - 520) / 2,
+      y: 140,
+      maxWidth: 520,
+      maxHeight: 520,
+      opacity: 0.035,
     });
 
     const smallSize = 130;
@@ -264,36 +264,37 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const green = rgb(0 / 255, 105 / 255, 55 / 255);
-    const lightGreen = rgb(120 / 255, 255 / 255, 86 / 255);
-    const softGreen = rgb(212 / 255, 255 / 255, 202 / 255);
+    const deepGreen = rgb(0 / 255, 95 / 255, 52 / 255);
+    const lightGreen = rgb(107 / 255, 255 / 255, 77 / 255);
+    const softGreen = rgb(205 / 255, 247 / 255, 197 / 255);
 
     page.drawRectangle({
       x: 26,
       y: 26,
       width: width - 52,
       height: height - 52,
-      borderWidth: 2.3,
-      borderColor: green,
+      borderWidth: 2.4,
+      borderColor: deepGreen,
     });
 
     page.drawRectangle({
-      x: 42,
-      y: 42,
-      width: width - 84,
-      height: height - 84,
-      borderWidth: 1,
-      borderColor: softGreen,
-    });
-
-    page.drawRectangle({
-      x: 34,
-      y: 34,
-      width: width - 68,
-      height: height - 68,
-      borderWidth: 1,
+      x: 36,
+      y: 36,
+      width: width - 72,
+      height: height - 72,
+      borderWidth: 1.3,
       borderColor: lightGreen,
-      opacity: 0.55,
+      opacity: 0.78,
+    });
+
+    page.drawRectangle({
+      x: 48,
+      y: 48,
+      width: width - 96,
+      height: height - 96,
+      borderWidth: 0.8,
+      borderColor: softGreen,
+      opacity: 0.9,
     });
   }
 
@@ -301,76 +302,145 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const deepGreen = rgb(0 / 255, 78 / 255, 42 / 255);
-    const brightGreen = rgb(61 / 255, 242 / 255, 34 / 255);
-    const lightGreen = rgb(128 / 255, 255 / 255, 92 / 255);
+    const deepGreen = rgb(0 / 255, 94 / 255, 56 / 255);
+    const midGreen = rgb(0 / 255, 150 / 255, 78 / 255);
+    const brightGreen = rgb(43 / 255, 244 / 255, 20 / 255);
+    const lightGreen = rgb(110 / 255, 255 / 255, 74 / 255);
 
+    // Bottom-left vertical frame
     page.drawRectangle({
       x: 0,
-      y: 0,
-      width: 83,
-      height: 250,
-      color: deepGreen,
+      y: 45,
+      width: 70,
+      height: 330,
+      color: brightGreen,
       opacity: 0.96,
     });
 
     page.drawRectangle({
       x: 28,
-      y: 12,
-      width: 70,
-      height: 216,
+      y: 70,
+      width: 58,
+      height: 285,
+      color: deepGreen,
+      opacity: 0.72,
+    });
+
+    page.drawRectangle({
+      x: 55,
+      y: 62,
+      width: 46,
+      height: 265,
+      color: midGreen,
+      rotate: degrees(38),
+      opacity: 0.78,
+    });
+
+    // Bottom-left horizontal frame
+    page.drawRectangle({
+      x: 55,
+      y: 0,
+      width: 395,
+      height: 74,
       color: brightGreen,
-      rotate: degrees(35),
       opacity: 0.98,
     });
 
     page.drawRectangle({
-      x: 12,
-      y: -10,
-      width: 50,
-      height: 190,
-      color: lightGreen,
-      rotate: degrees(-20),
+      x: 74,
+      y: 32,
+      width: 335,
+      height: 48,
+      color: deepGreen,
+      opacity: 0.68,
+    });
+
+    page.drawRectangle({
+      x: 335,
+      y: 1,
+      width: 86,
+      height: 86,
+      color: midGreen,
+      rotate: degrees(45),
+      opacity: 0.9,
+    });
+
+    // Top-right horizontal frame
+    page.drawRectangle({
+      x: width - 370,
+      y: height - 70,
+      width: 360,
+      height: 56,
+      color: midGreen,
+      opacity: 0.92,
+    });
+
+    page.drawRectangle({
+      x: width - 335,
+      y: height - 84,
+      width: 310,
+      height: 43,
+      color: brightGreen,
+      opacity: 0.7,
+    });
+
+    page.drawRectangle({
+      x: width - 426,
+      y: height - 70,
+      width: 76,
+      height: 76,
+      color: brightGreen,
+      rotate: degrees(45),
+      opacity: 0.98,
+    });
+
+    page.drawRectangle({
+      x: width - 380,
+      y: height - 65,
+      width: 65,
+      height: 65,
+      color: deepGreen,
+      rotate: degrees(45),
+      opacity: 0.78,
+    });
+
+    // Top-right vertical frame
+    page.drawRectangle({
+      x: width - 74,
+      y: height - 370,
+      width: 74,
+      height: 330,
+      color: brightGreen,
       opacity: 0.9,
     });
 
     page.drawRectangle({
-      x: width - 282,
-      y: height - 36,
-      width: 288,
-      height: 43,
-      color: brightGreen,
-      opacity: 0.98,
-    });
-
-    page.drawRectangle({
-      x: width - 232,
-      y: height - 67,
-      width: 260,
-      height: 38,
-      color: lightGreen,
-      rotate: degrees(-2),
-      opacity: 0.95,
-    });
-
-    page.drawRectangle({
-      x: width - 100,
-      y: height - 332,
-      width: 72,
+      x: width - 65,
+      y: height - 315,
+      width: 60,
       height: 270,
-      color: deepGreen,
-      rotate: degrees(-23),
-      opacity: 0.95,
+      color: midGreen,
+      opacity: 0.86,
     });
 
     page.drawRectangle({
-      x: width - 76,
+      x: width - 98,
+      y: height - 365,
+      width: 85,
+      height: 85,
+      color: lightGreen,
+      rotate: degrees(45),
+      opacity: 0.88,
+    });
+
+    page.drawRectangle({
+      x: width - 105,
       y: height - 300,
-      width: 48,
-      height: 218,
-      color: brightGreen,
+      width: 62,
+      height: 210,
+      color: deepGreen,
       rotate: degrees(-35),
-      opacity: 0.92,
+      opacity: 0.72,
     });
   }
 
@@ -390,14 +460,11 @@ export class CertificateGenerationService {
       color: dark,
     });
 
-    const logoWidth = 285;
-    const logoHeight = 72;
-
-    page.drawImage(logo, {
-      x: (page.getWidth() - logoWidth) / 2,
-      y: 681,
-      width: logoWidth,
-      height: logoHeight,
+    this.drawImageContain(page, logo, {
+      x: 458,
+      y: 680,
+      maxWidth: 215,
+      maxHeight: 72,
     });
   }
 
@@ -407,31 +474,17 @@ export class CertificateGenerationService {
     award: PDFImage,
   ): void {
     const green = rgb(0 / 255, 105 / 255, 55 / 255);
-    const badgeX = 898;
-    const badgeY = 594;
 
-    page.drawRectangle({
-      x: badgeX - 17,
-      y: badgeY - 23,
-      width: 126,
-      height: 142,
-      borderColor: green,
-      borderWidth: 1.3,
-      color: rgb(1, 1, 1),
-      opacity: 0.62,
-    });
-
-    page.drawImage(award, {
-      x: badgeX + 16,
-      y: badgeY + 37,
-      width: 56,
-      height: 56,
-      opacity: 0.98,
+    this.drawImageContain(page, award, {
+      x: 905,
+      y: 595,
+      maxWidth: 88,
+      maxHeight: 88,
     });
 
     page.drawText('CERTIFIED', {
-      x: badgeX + 4,
-      y: badgeY + 13,
+      x: 896,
+      y: 577,
       size: 16,
       font: fonts.bold,
       color: green,
@@ -700,5 +753,27 @@ export class CertificateGenerationService {
     }
 
     return size;
+  }
+
+  private drawImageContain(
+    page: PDFPage,
+    image: PDFImage,
+    params: {
+      x: number;
+      y: number;
+      maxWidth: number;
+      maxHeight: number;
+      opacity?: number;
+    },
+  ): void {
+    const scaled = image.scaleToFit(params.maxWidth, params.maxHeight);
+
+    page.drawImage(image, {
+      x: params.x + (params.maxWidth - scaled.width) / 2,
+      y: params.y + (params.maxHeight - scaled.height) / 2,
+      width: scaled.width,
+      height: scaled.height,
+      opacity: params.opacity ?? 1,
+    });
   }
 }
