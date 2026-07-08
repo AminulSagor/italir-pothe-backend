@@ -449,97 +449,54 @@ export class CertificatesService {
   }
 
   async verifyCertificate(identifier: string) {
-    const normalized = identifier.trim();
+    const cleanIdentifier = identifier.trim();
 
     const queryBuilder = this.certificateRepository
       .createQueryBuilder('certificate')
       .leftJoinAndSelect('certificate.user', 'user')
       .leftJoinAndSelect('certificate.course', 'course')
       .leftJoinAndSelect('certificate.examAttempt', 'examAttempt')
-      .leftJoinAndSelect('certificate.pdfFile', 'pdfFile');
+      .leftJoinAndSelect('certificate.pdfFile', 'pdfFile')
+      .where('certificate.certificateNumber = :certificateNumber', {
+        certificateNumber: cleanIdentifier,
+      });
 
-    if (this.isUuid(normalized)) {
-      queryBuilder.where(
-        `(
-        certificate.id =
-          :identifier
-
-        OR certificate.certificateNumber =
-          :identifier
-      )`,
-        {
-          identifier: normalized,
-        },
-      );
-    } else {
-      queryBuilder.where(
-        `certificate.certificateNumber =
-       :identifier`,
-        {
-          identifier: normalized,
-        },
-      );
+    if (this.isUuid(cleanIdentifier)) {
+      queryBuilder.orWhere('certificate.id = :certificateId', {
+        certificateId: cleanIdentifier,
+      });
     }
 
     const certificate = await queryBuilder.getOne();
 
     if (!certificate) {
-      return {
-        isValid: false,
-        reason: 'not_found',
-        certificate: null,
-      };
+      throw new NotFoundException('Certificate not found');
     }
 
-    const pdfUrl = certificate.pdfFileId
-      ? (await this.filesService.createSignedReadUrl(certificate.pdfFileId))
-          .signedReadUrl
-      : null;
-
     return {
+      id: certificate.id,
+      certificateNumber: certificate.certificateNumber,
+      recipientName: certificate.recipientNameSnapshot,
+      courseTitle: certificate.courseTitleSnapshot,
+      courseLevel: certificate.courseLevelSnapshot,
+      verificationUrl: certificate.verificationUrl,
+      status: certificate.status,
+      issuedAt: certificate.issuedAt,
+      revokedAt: certificate.revokedAt,
+      revocationReason: certificate.revocationReason,
       isValid: certificate.status === CertificateStatus.ISSUED,
-
-      reason:
-        certificate.status === CertificateStatus.ISSUED ? null : 'revoked',
-
-      certificate: {
-        id: certificate.id,
-
-        certificateNumber: certificate.certificateNumber,
-
-        recipientName:
-          certificate.recipientNameSnapshot ??
-          certificate.user?.fullName ??
-          'Deleted User',
-
-        courseTitle:
-          certificate.courseTitleSnapshot ??
-          certificate.course?.title ??
-          'Deleted Course',
-
-        courseLevel: certificate.courseLevelSnapshot,
-
-        scorePercent:
-          certificate.scorePercentSnapshot === null
-            ? null
-            : Number(certificate.scorePercentSnapshot),
-
-        status: certificate.status,
-
-        issuedAt: certificate.issuedAt,
-
-        revokedAt: certificate.revokedAt,
-
-        revocationReason: certificate.revocationReason,
-
-        verificationUrl: certificate.verificationUrl,
-
-        pdfUrl,
-      },
+      pdfFile: certificate.pdfFile
+        ? {
+            id: certificate.pdfFile.id,
+            originalName: certificate.pdfFile.originalName,
+            mimeType: certificate.pdfFile.mimeType,
+            sizeBytes: certificate.pdfFile.sizeBytes,
+          }
+        : null,
     };
   }
 
-  private isUuid(value: string) {
+  private isUuid(value: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       value,
     );

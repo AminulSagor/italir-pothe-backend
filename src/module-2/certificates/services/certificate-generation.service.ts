@@ -8,6 +8,7 @@ import {
   rgb,
   StandardFonts,
 } from 'pdf-lib';
+import * as fontkit from '@pdf-lib/fontkit';
 import QRCode from 'qrcode';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -18,6 +19,14 @@ export interface GenerateCertificatePdfPayload {
   courseTitle: string;
   issuedAt: Date;
   verificationUrl: string;
+}
+
+interface CertificateFonts {
+  regular: PDFFont;
+  bold: PDFFont;
+  italic: PDFFont;
+  certificate: PDFFont;
+  studentName: PDFFont;
 }
 
 @Injectable()
@@ -40,17 +49,26 @@ export class CertificateGenerationService {
     'certificate_signature.png',
   );
 
+  private readonly rengkoxFontPath = join(
+    this.assetDirectory,
+    'fonts',
+    'Rengkox.ttf',
+  );
+
+  private readonly silenthaFontPath = join(
+    this.assetDirectory,
+    'fonts',
+    'Silentha.ttf',
+  );
+
   async generatePdf(payload: GenerateCertificatePdfPayload): Promise<Buffer> {
     const document = await PDFDocument.create();
 
+    document.registerFontkit(fontkit);
+
     const page = document.addPage([1123, 794]);
 
-    const fonts = {
-      regular: await document.embedFont(StandardFonts.Helvetica),
-      bold: await document.embedFont(StandardFonts.HelveticaBold),
-      italic: await document.embedFont(StandardFonts.TimesRomanItalic),
-      boldItalic: await document.embedFont(StandardFonts.TimesRomanBoldItalic),
-    };
+    const fonts = await this.loadFonts(document);
 
     const logo = await this.embedRequiredPng(
       document,
@@ -75,7 +93,7 @@ export class CertificateGenerationService {
       width: 260,
       margin: 1,
       color: {
-        dark: '#111111',
+        dark: '#005A34',
         light: '#FFFFFF',
       },
     });
@@ -83,14 +101,14 @@ export class CertificateGenerationService {
     const qrCode = await document.embedPng(qrBuffer);
 
     this.drawBackground(page, logo);
-    this.drawCertificateFrame(page);
-    this.drawCornerShapes(page);
+    this.drawGreenFrame(page);
+    this.drawGreenCornerFrame(page);
     this.drawHeader(page, fonts, logo, payload.certificateNumber);
+    this.drawCertifiedBadge(page, fonts, award);
     this.drawTitle(page, fonts);
     this.drawRecipient(page, fonts, payload.recipientName);
     this.drawCourseInfo(page, fonts, payload.courseTitle);
-    this.drawAwardBadge(page, fonts, award);
-    this.drawFooterSignatures(page, fonts, signature, payload.issuedAt);
+    this.drawFooterSignature(page, fonts, signature, payload.issuedAt);
     this.drawQrVerification(page, fonts, qrCode, payload.verificationUrl);
 
     const bytes = await document.save({
@@ -98,6 +116,48 @@ export class CertificateGenerationService {
     });
 
     return Buffer.from(bytes);
+  }
+
+  private async loadFonts(document: PDFDocument): Promise<CertificateFonts> {
+    const [regular, bold, italic] = await Promise.all([
+      document.embedFont(StandardFonts.Helvetica),
+      document.embedFont(StandardFonts.HelveticaBold),
+      document.embedFont(StandardFonts.HelveticaOblique),
+    ]);
+
+    const certificate = await this.embedRequiredFont(
+      document,
+      this.rengkoxFontPath,
+      'Rengkox.ttf',
+    );
+
+    const studentName = await this.embedRequiredFont(
+      document,
+      this.silenthaFontPath,
+      'Silentha.ttf',
+    );
+
+    return {
+      regular,
+      bold,
+      italic,
+      certificate,
+      studentName,
+    };
+  }
+
+  private async embedRequiredFont(
+    document: PDFDocument,
+    path: string,
+    fileName: string,
+  ): Promise<PDFFont> {
+    if (!existsSync(path)) {
+      throw new InternalServerErrorException(
+        `Certificate font missing: ${fileName}. Expected path: ${path}`,
+      );
+    }
+
+    return document.embedFont(readFileSync(path));
   }
 
   private async embedRequiredPng(
@@ -115,70 +175,70 @@ export class CertificateGenerationService {
   }
 
   private drawBackground(page: PDFPage, logo: PDFImage): void {
-    const pageWidth = page.getWidth();
-    const pageHeight = page.getHeight();
+    const width = page.getWidth();
+    const height = page.getHeight();
 
     page.drawRectangle({
       x: 0,
       y: 0,
-      width: pageWidth,
-      height: pageHeight,
-      color: rgb(1, 1, 1),
+      width,
+      height,
+      color: rgb(247 / 255, 255 / 255, 244 / 255),
     });
 
     page.drawRectangle({
       x: 0,
       y: 0,
-      width: pageWidth,
-      height: pageHeight,
-      color: rgb(255 / 255, 249 / 255, 237 / 255),
-      opacity: 0.45,
+      width,
+      height,
+      color: rgb(225 / 255, 255 / 255, 218 / 255),
+      opacity: 0.28,
     });
 
-    this.drawWaves(page);
+    this.drawWaveTexture(page);
 
-    const watermarkSize = 470;
+    const watermarkSize = 510;
 
     page.drawImage(logo, {
-      x: (pageWidth - watermarkSize) / 2,
-      y: 160,
+      x: (width - watermarkSize) / 2,
+      y: 145,
       width: watermarkSize,
       height: watermarkSize,
-      opacity: 0.055,
+      opacity: 0.045,
     });
 
-    const smallLogoSize = 120;
+    const smallSize = 130;
 
-    const positions = [
-      { x: 110, y: 510 },
-      { x: 850, y: 470 },
-      { x: 180, y: 145 },
-      { x: 790, y: 120 },
+    const texturePositions = [
+      { x: 120, y: 500, opacity: 0.025 },
+      { x: 855, y: 505, opacity: 0.024 },
+      { x: 165, y: 130, opacity: 0.022 },
+      { x: 790, y: 118, opacity: 0.022 },
     ];
 
-    for (const position of positions) {
+    for (const item of texturePositions) {
       page.drawImage(logo, {
-        x: position.x,
-        y: position.y,
-        width: smallLogoSize,
-        height: smallLogoSize,
-        opacity: 0.025,
+        x: item.x,
+        y: item.y,
+        width: smallSize,
+        height: smallSize,
+        opacity: item.opacity,
       });
     }
   }
 
-  private drawWaves(page: PDFPage): void {
-    const waveColor = rgb(232 / 255, 224 / 255, 210 / 255);
+  private drawWaveTexture(page: PDFPage): void {
+    const waveColor = rgb(166 / 255, 198 / 255, 158 / 255);
 
     for (let row = 0; row < 58; row += 1) {
-      const y = 42 + row * 12;
+      const y = 52 + row * 11.5;
 
-      let previousX = 42;
+      let previousX = 48;
       let previousY = y;
 
-      for (let step = 1; step <= 180; step += 1) {
-        const x = 42 + step * 5.8;
-        const nextY = y + Math.sin(step / 5) * 1.4;
+      for (let step = 1; step <= 178; step += 1) {
+        const x = 48 + step * 5.8;
+        const nextY = y + Math.sin(step / 5) * 1.25;
 
         page.drawLine({
           start: {
@@ -189,9 +249,9 @@ export class CertificateGenerationService {
             x,
             y: nextY,
           },
-          thickness: 0.35,
+          thickness: 0.32,
           color: waveColor,
-          opacity: 0.45,
+          opacity: 0.22,
         });
 
         previousX = x;
@@ -200,148 +260,196 @@ export class CertificateGenerationService {
     }
   }
 
-  private drawCertificateFrame(page: PDFPage): void {
-    const pageWidth = page.getWidth();
-    const pageHeight = page.getHeight();
+  private drawGreenFrame(page: PDFPage): void {
+    const width = page.getWidth();
+    const height = page.getHeight();
 
-    const dark = rgb(30 / 255, 33 / 255, 35 / 255);
-    const gold = rgb(249 / 255, 184 / 255, 28 / 255);
-    const lightBorder = rgb(230 / 255, 221 / 255, 205 / 255);
+    const green = rgb(0 / 255, 105 / 255, 55 / 255);
+    const lightGreen = rgb(120 / 255, 255 / 255, 86 / 255);
+    const softGreen = rgb(212 / 255, 255 / 255, 202 / 255);
 
     page.drawRectangle({
-      x: 24,
-      y: 24,
-      width: pageWidth - 48,
-      height: pageHeight - 48,
-      borderWidth: 2.2,
-      borderColor: gold,
-      opacity: 0.95,
+      x: 26,
+      y: 26,
+      width: width - 52,
+      height: height - 52,
+      borderWidth: 2.3,
+      borderColor: green,
     });
 
     page.drawRectangle({
-      x: 47,
-      y: 47,
-      width: pageWidth - 94,
-      height: pageHeight - 94,
+      x: 42,
+      y: 42,
+      width: width - 84,
+      height: height - 84,
       borderWidth: 1,
-      borderColor: lightBorder,
-      opacity: 0.9,
+      borderColor: softGreen,
     });
+
+    page.drawRectangle({
+      x: 34,
+      y: 34,
+      width: width - 68,
+      height: height - 68,
+      borderWidth: 1,
+      borderColor: lightGreen,
+      opacity: 0.55,
+    });
+  }
+
+  private drawGreenCornerFrame(page: PDFPage): void {
+    const width = page.getWidth();
+    const height = page.getHeight();
+
+    const deepGreen = rgb(0 / 255, 78 / 255, 42 / 255);
+    const brightGreen = rgb(61 / 255, 242 / 255, 34 / 255);
+    const lightGreen = rgb(128 / 255, 255 / 255, 92 / 255);
 
     page.drawRectangle({
       x: 0,
       y: 0,
-      width: 86,
+      width: 83,
       height: 250,
-      color: dark,
+      color: deepGreen,
+      opacity: 0.96,
     });
 
     page.drawRectangle({
       x: 28,
-      y: 18,
+      y: 12,
       width: 70,
+      height: 216,
+      color: brightGreen,
+      rotate: degrees(35),
+      opacity: 0.98,
+    });
+
+    page.drawRectangle({
+      x: 12,
+      y: -10,
+      width: 50,
       height: 190,
-      color: gold,
-      rotate: degrees(34),
+      color: lightGreen,
+      rotate: degrees(-20),
+      opacity: 0.9,
     });
 
     page.drawRectangle({
-      x: pageWidth - 78,
-      y: pageHeight - 290,
-      width: 92,
-      height: 315,
-      color: gold,
-      rotate: degrees(-26),
+      x: width - 282,
+      y: height - 36,
+      width: 288,
+      height: 43,
+      color: brightGreen,
+      opacity: 0.98,
     });
 
     page.drawRectangle({
-      x: pageWidth - 45,
-      y: pageHeight - 250,
-      width: 60,
-      height: 220,
-      color: rgb(255 / 255, 204 / 255, 52 / 255),
-      rotate: degrees(-39),
+      x: width - 232,
+      y: height - 67,
+      width: 260,
+      height: 38,
+      color: lightGreen,
+      rotate: degrees(-2),
       opacity: 0.95,
     });
-  }
 
-  private drawCornerShapes(page: PDFPage): void {
-    const paleGold = rgb(255 / 255, 232 / 255, 176 / 255);
-
-    page.drawCircle({
-      x: 172,
-      y: 603,
-      size: 215,
-      color: paleGold,
-      opacity: 0.16,
+    page.drawRectangle({
+      x: width - 100,
+      y: height - 332,
+      width: 72,
+      height: 270,
+      color: deepGreen,
+      rotate: degrees(-23),
+      opacity: 0.95,
     });
 
-    page.drawCircle({
-      x: 916,
-      y: 238,
-      size: 260,
-      color: paleGold,
-      opacity: 0.14,
+    page.drawRectangle({
+      x: width - 76,
+      y: height - 300,
+      width: 48,
+      height: 218,
+      color: brightGreen,
+      rotate: degrees(-35),
+      opacity: 0.92,
     });
   }
 
   private drawHeader(
     page: PDFPage,
-    fonts: {
-      regular: PDFFont;
-      bold: PDFFont;
-      italic: PDFFont;
-      boldItalic: PDFFont;
-    },
+    fonts: CertificateFonts,
     logo: PDFImage,
     certificateNumber: string,
   ): void {
-    const dark = rgb(30 / 255, 33 / 255, 35 / 255);
+    const dark = rgb(22 / 255, 28 / 255, 25 / 255);
 
     page.drawText(`Certificate ID: ${certificateNumber}`, {
-      x: 38,
-      y: 746,
+      x: 48,
+      y: 733,
       size: 16,
       font: fonts.bold,
       color: dark,
     });
 
-    page.drawImage(logo, {
-      x: 475,
-      y: 708,
-      width: 58,
-      height: 58,
-    });
+    const logoWidth = 285;
+    const logoHeight = 72;
 
-    page.drawText('Italir Pothe', {
-      x: 545,
-      y: 724,
-      size: 32,
-      font: fonts.bold,
-      color: dark,
+    page.drawImage(logo, {
+      x: (page.getWidth() - logoWidth) / 2,
+      y: 681,
+      width: logoWidth,
+      height: logoHeight,
     });
   }
 
-  private drawTitle(
+  private drawCertifiedBadge(
     page: PDFPage,
-    fonts: {
-      regular: PDFFont;
-      bold: PDFFont;
-      italic: PDFFont;
-      boldItalic: PDFFont;
-    },
+    fonts: CertificateFonts,
+    award: PDFImage,
   ): void {
-    const dark = rgb(30 / 255, 33 / 255, 35 / 255);
-    const gold = rgb(249 / 255, 184 / 255, 28 / 255);
+    const green = rgb(0 / 255, 105 / 255, 55 / 255);
+    const badgeX = 898;
+    const badgeY = 594;
+
+    page.drawRectangle({
+      x: badgeX - 17,
+      y: badgeY - 23,
+      width: 126,
+      height: 142,
+      borderColor: green,
+      borderWidth: 1.3,
+      color: rgb(1, 1, 1),
+      opacity: 0.62,
+    });
+
+    page.drawImage(award, {
+      x: badgeX + 16,
+      y: badgeY + 37,
+      width: 56,
+      height: 56,
+      opacity: 0.98,
+    });
+
+    page.drawText('CERTIFIED', {
+      x: badgeX + 4,
+      y: badgeY + 13,
+      size: 16,
+      font: fonts.bold,
+      color: green,
+    });
+  }
+
+  private drawTitle(page: PDFPage, fonts: CertificateFonts): void {
+    const dark = rgb(18 / 255, 24 / 255, 22 / 255);
+    const greenShadow = rgb(85 / 255, 222 / 255, 55 / 255);
 
     this.drawCenteredTextWithShadow({
       page,
       text: 'CERTIFICATE',
-      font: fonts.bold,
-      size: 69,
-      y: 618,
+      font: fonts.certificate,
+      size: 74,
+      y: 592,
       color: dark,
-      shadowColor: gold,
+      shadowColor: greenShadow,
       shadowOffsetX: 4,
       shadowOffsetY: -4,
     });
@@ -350,75 +458,65 @@ export class CertificateGenerationService {
       page,
       text: 'OF COMPLETION',
       font: fonts.regular,
-      size: 45,
-      y: 565,
+      size: 42,
+      y: 543,
       color: dark,
     });
   }
 
   private drawRecipient(
     page: PDFPage,
-    fonts: {
-      regular: PDFFont;
-      bold: PDFFont;
-      italic: PDFFont;
-      boldItalic: PDFFont;
-    },
+    fonts: CertificateFonts,
     recipientName: string,
   ): void {
-    const dark = rgb(30 / 255, 33 / 255, 35 / 255);
+    const dark = rgb(22 / 255, 28 / 255, 25 / 255);
 
     this.drawCenteredText({
       page,
       text: 'This is to certify that',
       font: fonts.bold,
-      size: 25,
-      y: 505,
+      size: 24,
+      y: 488,
       color: dark,
     });
 
     this.drawCenteredText({
       page,
       text: recipientName,
-      font: fonts.boldItalic,
-      size: this.fitFontSize(recipientName, 55, 34, 850, fonts.boldItalic),
-      y: 418,
+      font: fonts.studentName,
+      size: this.fitFontSize(recipientName, 60, 34, 800, fonts.studentName),
+      y: 410,
       color: rgb(0, 0, 0),
     });
 
     page.drawLine({
       start: {
-        x: 290,
-        y: 405,
+        x: 365,
+        y: 396,
       },
       end: {
-        x: 833,
-        y: 405,
+        x: 758,
+        y: 396,
       },
       thickness: 1,
-      color: rgb(218 / 255, 210 / 255, 196 / 255),
-      opacity: 0.65,
+      color: rgb(150 / 255, 205 / 255, 137 / 255),
+      opacity: 0.8,
     });
   }
 
   private drawCourseInfo(
     page: PDFPage,
-    fonts: {
-      regular: PDFFont;
-      bold: PDFFont;
-      italic: PDFFont;
-      boldItalic: PDFFont;
-    },
+    fonts: CertificateFonts,
     courseTitle: string,
   ): void {
-    const dark = rgb(30 / 255, 33 / 255, 35 / 255);
+    const dark = rgb(22 / 255, 28 / 255, 25 / 255);
 
     this.drawCenteredText({
       page,
       text: 'has successfully completed the course of',
       font: fonts.bold,
-      size: 25,
-      y: 354,
+      size: 23,
+      y: 350,
       color: dark,
     });
 
@@ -426,52 +524,19 @@ export class CertificateGenerationService {
       page,
       text: courseTitle,
       font: fonts.bold,
-      size: this.fitFontSize(courseTitle, 34, 22, 960, fonts.bold),
+      size: this.fitFontSize(courseTitle, 31, 21, 900, fonts.bold),
       y: 302,
       color: rgb(0, 0, 0),
     });
   }
 
-  private drawAwardBadge(
+  private drawFooterSignature(
     page: PDFPage,
-    fonts: {
-      regular: PDFFont;
-      bold: PDFFont;
-      italic: PDFFont;
-      boldItalic: PDFFont;
-    },
-    award: PDFImage,
-  ): void {
-    page.drawImage(award, {
-      x: 510,
-      y: 205,
-      width: 96,
-      height: 96,
-      opacity: 0.96,
-    });
-
-    this.drawCenteredText({
-      page,
-      text: 'VERIFIED',
-      font: fonts.bold,
-      size: 11,
-      y: 191,
-      color: rgb(90 / 255, 90 / 255, 90 / 255),
-    });
-  }
-
-  private drawFooterSignatures(
-    page: PDFPage,
-    fonts: {
-      regular: PDFFont;
-      bold: PDFFont;
-      italic: PDFFont;
-      boldItalic: PDFFont;
-    },
+    fonts: CertificateFonts,
     signature: PDFImage,
     issuedAt: Date,
   ): void {
-    const dark = rgb(30 / 255, 33 / 255, 35 / 255);
+    const dark = rgb(22 / 255, 28 / 255, 25 / 255);
 
     const issueDate = new Intl.DateTimeFormat('en', {
       year: 'numeric',
@@ -480,87 +545,90 @@ export class CertificateGenerationService {
       timeZone: 'UTC',
     }).format(issuedAt);
 
-    page.drawText(`Issued on ${issueDate}`, {
-      x: 487,
-      y: 132,
-      size: 12,
-      font: fonts.regular,
-      color: dark,
-    });
-
     page.drawImage(signature, {
-      x: 115,
-      y: 113,
-      width: 190,
-      height: 62,
+      x: 128,
+      y: 111,
+      width: 200,
+      height: 66,
     });
 
     page.drawLine({
       start: {
         x: 126,
-        y: 108,
+        y: 104,
       },
       end: {
-        x: 318,
-        y: 108,
+        x: 320,
+        y: 104,
       },
       thickness: 1,
       color: dark,
-      opacity: 0.65,
+      opacity: 0.7,
     });
 
     page.drawText('REGISTRAR SIGNATURE', {
       x: 151,
-      y: 86,
+      y: 82,
       size: 10,
       font: fonts.bold,
       color: dark,
     });
 
     page.drawText('Italir Pothe Registrar', {
-      x: 149,
-      y: 69,
+      x: 151,
+      y: 66,
       size: 10,
       font: fonts.regular,
+      color: dark,
+    });
+
+    this.drawCenteredText({
+      page,
+      text: `Issued on ${issueDate}`,
+      font: fonts.regular,
+      size: 12,
+      y: 126,
       color: dark,
     });
   }
 
   private drawQrVerification(
     page: PDFPage,
-    fonts: {
-      regular: PDFFont;
-      bold: PDFFont;
-      italic: PDFFont;
-      boldItalic: PDFFont;
-    },
+    fonts: CertificateFonts,
     qrCode: PDFImage,
     verificationUrl: string,
   ): void {
-    const dark = rgb(30 / 255, 33 / 255, 35 / 255);
+    const dark = rgb(22 / 255, 28 / 255, 25 / 255);
 
     page.drawImage(qrCode, {
-      x: 902,
-      y: 79,
-      width: 105,
-      height: 105,
+      x: 893,
+      y: 82,
+      width: 108,
+      height: 108,
     });
 
     page.drawText('Scan to verify', {
-      x: 924,
-      y: 61,
+      x: 918,
+      y: 62,
       size: 10,
       font: fonts.bold,
       color: dark,
     });
 
+    const maxWidth = 430;
+    const urlFontSize = 6.4;
+    const urlWidth = Math.min(
+      fonts.regular.widthOfTextAtSize(verificationUrl, urlFontSize),
+      maxWidth,
+    );
+
     page.drawText(verificationUrl, {
-      x: 377,
-      y: 67,
-      size: 6.5,
+      x: (page.getWidth() - urlWidth) / 2,
+      y: 57,
+      size: urlFontSize,
       font: fonts.regular,
-      color: rgb(80 / 255, 80 / 255, 80 / 255),
-      maxWidth: 355,
+      color: rgb(70 / 255, 80 / 255, 75 / 255),
+      maxWidth,
     });
   }
 
@@ -572,11 +640,10 @@ export class CertificateGenerationService {
     y: number;
     color: ReturnType<typeof rgb>;
   }): void {
-    const pageWidth = params.page.getWidth();
     const textWidth = params.font.widthOfTextAtSize(params.text, params.size);
 
     params.page.drawText(params.text, {
-      x: Math.max(30, (pageWidth - textWidth) / 2),
+      x: Math.max(58, (params.page.getWidth() - textWidth) / 2),
       y: params.y,
       size: params.size,
       font: params.font,
@@ -595,10 +662,9 @@ export class CertificateGenerationService {
     shadowOffsetX: number;
     shadowOffsetY: number;
   }): void {
-    const pageWidth = params.page.getWidth();
     const textWidth = params.font.widthOfTextAtSize(params.text, params.size);
 
-    const x = Math.max(30, (pageWidth - textWidth) / 2);
+    const x = Math.max(58, (params.page.getWidth() - textWidth) / 2);
 
     params.page.drawText(params.text, {
       x: x + params.shadowOffsetX,
