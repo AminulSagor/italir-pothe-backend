@@ -256,14 +256,9 @@ export class CertificatesService {
       courseTitle:
         certificate.courseTitleSnapshot ??
         certificate.course?.title ??
-        'Final Exam',
-      courseLevel: certificate.courseLevelSnapshot,
+        'Course',
       issuedAt: certificate.issuedAt,
       verificationUrl,
-      scorePercent:
-        certificate.scorePercentSnapshot === null
-          ? null
-          : Number(certificate.scorePercentSnapshot),
     });
 
     const fileName = `${certificate.certificateNumber}.pdf`;
