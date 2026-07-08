@@ -198,8 +198,6 @@ export class CertificateGenerationService {
 
     this.drawWaveTexture(page);
 
-    const watermarkSize = 510;
-
     this.drawImageContain(page, logo, {
       x: (width - 520) / 2,
       y: 140,
@@ -265,37 +263,27 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const deepGreen = rgb(0 / 255, 95 / 255, 52 / 255);
-    const lightGreen = rgb(107 / 255, 255 / 255, 77 / 255);
-    const softGreen = rgb(205 / 255, 247 / 255, 197 / 255);
+    const darkBorder = rgb(48 / 255, 125 / 255, 60 / 255);
+    const lightBorder = rgb(88 / 255, 174 / 255, 64 / 255);
 
+    // Outer continuous thin border
     page.drawRectangle({
-      x: 26,
-      y: 26,
-      width: width - 52,
-      height: height - 52,
-      borderWidth: 2.4,
-      borderColor: deepGreen,
+      x: 18,
+      y: 18,
+      width: width - 36,
+      height: height - 36,
+      borderWidth: 2,
+      borderColor: darkBorder,
     });
 
+    // Inner continuous thin border
     page.drawRectangle({
-      x: 36,
-      y: 36,
-      width: width - 72,
-      height: height - 72,
-      borderWidth: 1.3,
-      borderColor: lightGreen,
-      opacity: 0.78,
-    });
-
-    page.drawRectangle({
-      x: 48,
-      y: 48,
-      width: width - 96,
-      height: height - 96,
-      borderWidth: 0.8,
-      borderColor: softGreen,
-      opacity: 0.9,
+      x: 24,
+      y: 24,
+      width: width - 48,
+      height: height - 48,
+      borderWidth: 1,
+      borderColor: lightBorder,
     });
   }
 
@@ -303,170 +291,60 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const outerGreen = rgb(88 / 255, 174 / 255, 64 / 255);
-    const innerGreen = rgb(48 / 255, 125 / 255, 60 / 255);
-    const deepGreen = rgb(0 / 255, 88 / 255, 40 / 255);
-    const darkShadow = rgb(0 / 255, 55 / 255, 28 / 255);
+    // Matching exact frame colors
+    const lightGreen = rgb(88 / 255, 174 / 255, 64 / 255);
+    const darkGreen = rgb(48 / 255, 125 / 255, 60 / 255);
+    const shadow = rgb(0, 0, 0);
 
     /**
-     * Bottom-left frame like sample
-     * Main vertical + bottom horizontal L shape
+     * BOTTOM-LEFT CORNER
+     * Based on exact layout from "Certificate Frame and Border Structure.png"
      */
 
-    page.drawRectangle({
-      x: 0,
-      y: 0,
-      width: 70,
-      height: 445,
-      color: outerGreen,
-      opacity: 1,
+    // Bottom-Left Outer (Dark Green)
+    page.drawSvgPath('M 0 350 L 45 305 L 45 45 L 355 45 L 400 0 L 0 0 Z', {
+      color: darkGreen,
     });
 
-    page.drawRectangle({
-      x: 42,
-      y: 58,
-      width: 54,
-      height: 325,
-      color: deepGreen,
-      opacity: 0.9,
+    // Bottom-Left Inner subtle drop shadow
+    page.drawSvgPath('M 22 328 L 67 283 L 67 63 L 337 63 L 382 18 L 22 18 Z', {
+      color: shadow,
+      opacity: 0.15,
     });
 
-    page.drawRectangle({
-      x: 70,
-      y: 0,
-      width: 360,
-      height: 68,
-      color: outerGreen,
-      opacity: 1,
-    });
-
-    page.drawRectangle({
-      x: 90,
-      y: 38,
-      width: 295,
-      height: 42,
-      color: innerGreen,
-      opacity: 0.9,
+    // Bottom-Left Inner (Light Green)
+    page.drawSvgPath('M 20 330 L 65 285 L 65 65 L 335 65 L 380 20 L 20 20 Z', {
+      color: lightGreen,
     });
 
     /**
-     * Bottom-left slanted ends / folds
+     * TOP-RIGHT CORNER
      */
 
-    page.drawRectangle({
-      x: 28,
-      y: 310,
-      width: 62,
-      height: 150,
-      color: darkShadow,
-      rotate: degrees(34),
-      opacity: 0.75,
-    });
+    // Top-Right Outer (Light Green)
+    page.drawSvgPath(
+      `M ${width} ${height - 350} L ${width - 45} ${height - 305} L ${width - 45} ${height - 45} L ${width - 355} ${height - 45} L ${width - 400} ${height} L ${width} ${height} Z`,
+      {
+        color: lightGreen,
+      },
+    );
 
-    page.drawRectangle({
-      x: 340,
-      y: 8,
-      width: 74,
-      height: 74,
-      color: innerGreen,
-      rotate: degrees(45),
-      opacity: 0.95,
-    });
+    // Top-Right Inner subtle drop shadow
+    page.drawSvgPath(
+      `M ${width - 22} ${height - 328} L ${width - 67} ${height - 283} L ${width - 67} ${height - 63} L ${width - 337} ${height - 63} L ${width - 382} ${height - 18} L ${width - 22} ${height - 18} Z`,
+      {
+        color: shadow,
+        opacity: 0.15,
+      },
+    );
 
-    page.drawRectangle({
-      x: 360,
-      y: -18,
-      width: 56,
-      height: 125,
-      color: outerGreen,
-      rotate: degrees(28),
-      opacity: 0.95,
-    });
-
-    /**
-     * Top-right frame like sample
-     * Main top horizontal + right vertical L shape
-     */
-
-    page.drawRectangle({
-      x: width - 330,
-      y: height - 68,
-      width: 330,
-      height: 68,
-      color: outerGreen,
-      opacity: 1,
-    });
-
-    page.drawRectangle({
-      x: width - 280,
-      y: height - 44,
-      width: 250,
-      height: 42,
-      color: innerGreen,
-      opacity: 0.9,
-    });
-
-    page.drawRectangle({
-      x: width - 70,
-      y: height - 350,
-      width: 70,
-      height: 350,
-      color: outerGreen,
-      opacity: 1,
-    });
-
-    page.drawRectangle({
-      x: width - 95,
-      y: height - 300,
-      width: 56,
-      height: 255,
-      color: deepGreen,
-      opacity: 0.9,
-    });
-
-    /**
-     * Top-right slanted ends / folds
-     */
-
-    page.drawRectangle({
-      x: width - 410,
-      y: height - 52,
-      width: 72,
-      height: 72,
-      color: outerGreen,
-      rotate: degrees(45),
-      opacity: 1,
-    });
-
-    page.drawRectangle({
-      x: width - 365,
-      y: height - 44,
-      width: 58,
-      height: 58,
-      color: innerGreen,
-      rotate: degrees(45),
-      opacity: 0.9,
-    });
-
-    page.drawRectangle({
-      x: width - 94,
-      y: height - 335,
-      width: 78,
-      height: 150,
-      color: darkShadow,
-      rotate: degrees(-34),
-      opacity: 0.75,
-    });
-
-    page.drawRectangle({
-      x: width - 118,
-      y: height - 310,
-      width: 72,
-      height: 72,
-      color: innerGreen,
-      rotate: degrees(45),
-      opacity: 0.9,
-    });
+    // Top-Right Inner (Dark Green)
+    page.drawSvgPath(
+      `M ${width - 20} ${height - 330} L ${width - 65} ${height - 285} L ${width - 65} ${height - 65} L ${width - 335} ${height - 65} L ${width - 380} ${height - 20} L ${width - 20} ${height - 20} Z`,
+      {
+        color: darkGreen,
+      },
+    );
   }
 
   private drawHeader(
@@ -476,7 +354,6 @@ export class CertificateGenerationService {
     certificateNumber: string,
   ): void {
     const dark = rgb(22 / 255, 28 / 255, 25 / 255);
-    const green = rgb(0 / 255, 105 / 255, 55 / 255);
 
     page.drawText(`Certificate ID: ${certificateNumber}`, {
       x: 48,
@@ -502,14 +379,6 @@ export class CertificateGenerationService {
       size: 31,
       font: fonts.bold,
       color: dark,
-    });
-
-    page.drawLine({
-      start: { x: logoBoxX + 76, y: logoBoxY + 11 },
-      end: { x: logoBoxX + 245, y: logoBoxY + 11 },
-      thickness: 1.2,
-      color: green,
-      opacity: 0.45,
     });
   }
 
