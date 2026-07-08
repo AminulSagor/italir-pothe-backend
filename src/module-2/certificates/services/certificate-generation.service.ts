@@ -103,6 +103,7 @@ export class CertificateGenerationService {
     this.drawBackground(page, logo);
     this.drawGreenFrame(page);
     this.drawGreenCornerFrame(page);
+
     this.drawHeader(page, fonts, logo, payload.certificateNumber);
     this.drawCertifiedBadge(page, fonts, award);
     this.drawTitle(page, fonts);
@@ -302,145 +303,139 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const deepGreen = rgb(0 / 255, 94 / 255, 56 / 255);
-    const midGreen = rgb(0 / 255, 150 / 255, 78 / 255);
-    const brightGreen = rgb(43 / 255, 244 / 255, 20 / 255);
-    const lightGreen = rgb(110 / 255, 255 / 255, 74 / 255);
+    const deepGreen = rgb(0 / 255, 86 / 255, 43 / 255);
+    const midGreen = rgb(15 / 255, 145 / 255, 64 / 255);
+    const lightGreen = rgb(89 / 255, 185 / 255, 67 / 255);
+    const brightGreen = rgb(104 / 255, 240 / 255, 74 / 255);
 
-    // Bottom-left vertical frame
+    /**
+     * Bottom-left L frame.
+     * Kept below the signature safe zone.
+     */
     page.drawRectangle({
       x: 0,
-      y: 45,
-      width: 70,
-      height: 330,
-      color: brightGreen,
-      opacity: 0.96,
-    });
-
-    page.drawRectangle({
-      x: 28,
-      y: 70,
-      width: 58,
-      height: 285,
-      color: deepGreen,
-      opacity: 0.72,
-    });
-
-    page.drawRectangle({
-      x: 55,
-      y: 62,
-      width: 46,
-      height: 265,
-      color: midGreen,
-      rotate: degrees(38),
-      opacity: 0.78,
-    });
-
-    // Bottom-left horizontal frame
-    page.drawRectangle({
-      x: 55,
       y: 0,
-      width: 395,
-      height: 74,
-      color: brightGreen,
-      opacity: 0.98,
-    });
-
-    page.drawRectangle({
-      x: 74,
-      y: 32,
-      width: 335,
-      height: 48,
-      color: deepGreen,
-      opacity: 0.68,
-    });
-
-    page.drawRectangle({
-      x: 335,
-      y: 1,
-      width: 86,
-      height: 86,
-      color: midGreen,
-      rotate: degrees(45),
-      opacity: 0.9,
-    });
-
-    // Top-right horizontal frame
-    page.drawRectangle({
-      x: width - 370,
-      y: height - 70,
-      width: 360,
-      height: 56,
-      color: midGreen,
-      opacity: 0.92,
-    });
-
-    page.drawRectangle({
-      x: width - 335,
-      y: height - 84,
-      width: 310,
-      height: 43,
-      color: brightGreen,
-      opacity: 0.7,
-    });
-
-    page.drawRectangle({
-      x: width - 426,
-      y: height - 70,
-      width: 76,
-      height: 76,
-      color: brightGreen,
-      rotate: degrees(45),
-      opacity: 0.98,
-    });
-
-    page.drawRectangle({
-      x: width - 380,
-      y: height - 65,
-      width: 65,
-      height: 65,
-      color: deepGreen,
-      rotate: degrees(45),
-      opacity: 0.78,
-    });
-
-    // Top-right vertical frame
-    page.drawRectangle({
-      x: width - 74,
-      y: height - 370,
-      width: 74,
-      height: 330,
-      color: brightGreen,
-      opacity: 0.9,
-    });
-
-    page.drawRectangle({
-      x: width - 65,
-      y: height - 315,
-      width: 60,
-      height: 270,
-      color: midGreen,
-      opacity: 0.86,
-    });
-
-    page.drawRectangle({
-      x: width - 98,
-      y: height - 365,
-      width: 85,
-      height: 85,
+      width: 82,
+      height: 360,
       color: lightGreen,
-      rotate: degrees(45),
+      opacity: 0.98,
+    });
+
+    page.drawRectangle({
+      x: 27,
+      y: 48,
+      width: 62,
+      height: 300,
+      color: deepGreen,
       opacity: 0.88,
     });
 
     page.drawRectangle({
-      x: width - 105,
-      y: height - 300,
-      width: 62,
-      height: 210,
+      x: 70,
+      y: 0,
+      width: 330,
+      height: 70,
+      color: lightGreen,
+      opacity: 0.98,
+    });
+
+    page.drawRectangle({
+      x: 87,
+      y: 35,
+      width: 285,
+      height: 45,
       color: deepGreen,
-      rotate: degrees(-35),
       opacity: 0.72,
+    });
+
+    page.drawRectangle({
+      x: 30,
+      y: 250,
+      width: 54,
+      height: 150,
+      color: midGreen,
+      rotate: degrees(38),
+      opacity: 0.8,
+    });
+
+    page.drawRectangle({
+      x: 335,
+      y: 9,
+      width: 76,
+      height: 76,
+      color: midGreen,
+      rotate: degrees(45),
+      opacity: 0.9,
+    });
+
+    /**
+     * Top-right L frame.
+     * Kept outside main certificate content.
+     */
+    page.drawRectangle({
+      x: width - 340,
+      y: height - 64,
+      width: 330,
+      height: 56,
+      color: lightGreen,
+      opacity: 0.98,
+    });
+
+    page.drawRectangle({
+      x: width - 285,
+      y: height - 45,
+      width: 250,
+      height: 38,
+      color: deepGreen,
+      opacity: 0.72,
+    });
+
+    page.drawRectangle({
+      x: width - 82,
+      y: height - 345,
+      width: 82,
+      height: 320,
+      color: lightGreen,
+      opacity: 0.98,
+    });
+
+    page.drawRectangle({
+      x: width - 62,
+      y: height - 295,
+      width: 58,
+      height: 250,
+      color: deepGreen,
+      opacity: 0.78,
+    });
+
+    page.drawRectangle({
+      x: width - 420,
+      y: height - 65,
+      width: 72,
+      height: 72,
+      color: brightGreen,
+      rotate: degrees(45),
+      opacity: 0.96,
+    });
+
+    page.drawRectangle({
+      x: width - 370,
+      y: height - 57,
+      width: 62,
+      height: 62,
+      color: deepGreen,
+      rotate: degrees(45),
+      opacity: 0.72,
+    });
+
+    page.drawRectangle({
+      x: width - 105,
+      y: height - 350,
+      width: 74,
+      height: 145,
+      color: midGreen,
+      rotate: degrees(-35),
+      opacity: 0.82,
     });
   }
 
@@ -451,20 +446,40 @@ export class CertificateGenerationService {
     certificateNumber: string,
   ): void {
     const dark = rgb(22 / 255, 28 / 255, 25 / 255);
+    const green = rgb(0 / 255, 105 / 255, 55 / 255);
 
     page.drawText(`Certificate ID: ${certificateNumber}`, {
       x: 48,
-      y: 733,
+      y: 714,
       size: 16,
       font: fonts.bold,
       color: dark,
     });
 
+    const logoBoxX = 430;
+    const logoBoxY = 645;
+
     this.drawImageContain(page, logo, {
-      x: 458,
-      y: 680,
-      maxWidth: 215,
-      maxHeight: 72,
+      x: logoBoxX,
+      y: logoBoxY,
+      maxWidth: 64,
+      maxHeight: 64,
+    });
+
+    page.drawText('Italir Pothe', {
+      x: logoBoxX + 76,
+      y: logoBoxY + 17,
+      size: 31,
+      font: fonts.bold,
+      color: dark,
+    });
+
+    page.drawLine({
+      start: { x: logoBoxX + 76, y: logoBoxY + 11 },
+      end: { x: logoBoxX + 245, y: logoBoxY + 11 },
+      thickness: 1.2,
+      color: green,
+      opacity: 0.45,
     });
   }
 
@@ -476,15 +491,15 @@ export class CertificateGenerationService {
     const green = rgb(0 / 255, 105 / 255, 55 / 255);
 
     this.drawImageContain(page, award, {
-      x: 905,
-      y: 595,
-      maxWidth: 88,
-      maxHeight: 88,
+      x: 910,
+      y: 588,
+      maxWidth: 92,
+      maxHeight: 92,
     });
 
     page.drawText('CERTIFIED', {
-      x: 896,
-      y: 577,
+      x: 905,
+      y: 566,
       size: 16,
       font: fonts.bold,
       color: green,
@@ -499,20 +514,20 @@ export class CertificateGenerationService {
       page,
       text: 'CERTIFICATE',
       font: fonts.certificate,
-      size: 74,
-      y: 592,
+      size: 68,
+      y: 560,
       color: dark,
       shadowColor: greenShadow,
-      shadowOffsetX: 4,
-      shadowOffsetY: -4,
+      shadowOffsetX: 3,
+      shadowOffsetY: -3,
     });
 
     this.drawCenteredText({
       page,
       text: 'OF COMPLETION',
       font: fonts.regular,
-      size: 42,
-      y: 543,
+      size: 39,
+      y: 514,
       color: dark,
     });
   }
@@ -529,7 +544,7 @@ export class CertificateGenerationService {
       text: 'This is to certify that',
       font: fonts.bold,
       size: 24,
-      y: 488,
+      y: 455,
       color: dark,
     });
 
@@ -537,20 +552,14 @@ export class CertificateGenerationService {
       page,
       text: recipientName,
       font: fonts.studentName,
-      size: this.fitFontSize(recipientName, 60, 34, 800, fonts.studentName),
-      y: 410,
+      size: this.fitFontSize(recipientName, 58, 34, 800, fonts.studentName),
+      y: 382,
       color: rgb(0, 0, 0),
     });
 
     page.drawLine({
-      start: {
-        x: 365,
-        y: 396,
-      },
-      end: {
-        x: 758,
-        y: 396,
-      },
+      start: { x: 365, y: 365 },
+      end: { x: 758, y: 365 },
       thickness: 1,
       color: rgb(150 / 255, 205 / 255, 137 / 255),
       opacity: 0.8,
@@ -569,7 +578,7 @@ export class CertificateGenerationService {
       text: 'has successfully completed the course of',
       font: fonts.bold,
       size: 23,
-      y: 350,
+      y: 322,
       color: dark,
     });
 
@@ -578,7 +587,7 @@ export class CertificateGenerationService {
       text: courseTitle,
       font: fonts.bold,
       size: this.fitFontSize(courseTitle, 31, 21, 900, fonts.bold),
-      y: 302,
+      y: 276,
       color: rgb(0, 0, 0),
     });
   }
@@ -599,37 +608,31 @@ export class CertificateGenerationService {
     }).format(issuedAt);
 
     page.drawImage(signature, {
-      x: 128,
-      y: 111,
+      x: 142,
+      y: 124,
       width: 200,
       height: 66,
     });
 
     page.drawLine({
-      start: {
-        x: 126,
-        y: 104,
-      },
-      end: {
-        x: 320,
-        y: 104,
-      },
+      start: { x: 140, y: 118 },
+      end: { x: 335, y: 118 },
       thickness: 1,
       color: dark,
       opacity: 0.7,
     });
 
     page.drawText('REGISTRAR SIGNATURE', {
-      x: 151,
-      y: 82,
+      x: 163,
+      y: 97,
       size: 10,
       font: fonts.bold,
       color: dark,
     });
 
     page.drawText('Italir Pothe Registrar', {
-      x: 151,
-      y: 66,
+      x: 164,
+      y: 81,
       size: 10,
       font: fonts.regular,
       color: dark,
@@ -640,7 +643,7 @@ export class CertificateGenerationService {
       text: `Issued on ${issueDate}`,
       font: fonts.regular,
       size: 12,
-      y: 126,
+      y: 123,
       color: dark,
     });
   }
@@ -654,31 +657,27 @@ export class CertificateGenerationService {
     const dark = rgb(22 / 255, 28 / 255, 25 / 255);
 
     page.drawImage(qrCode, {
-      x: 893,
-      y: 82,
-      width: 108,
-      height: 108,
+      x: 902,
+      y: 112,
+      width: 105,
+      height: 105,
     });
 
     page.drawText('Scan to verify', {
-      x: 918,
-      y: 62,
+      x: 925,
+      y: 92,
       size: 10,
       font: fonts.bold,
       color: dark,
     });
 
     const maxWidth = 430;
-    const urlFontSize = 6.4;
-    const urlWidth = Math.min(
-      fonts.regular.widthOfTextAtSize(verificationUrl, urlFontSize),
-      maxWidth,
-    );
+    const fontSize = 6.4;
 
     page.drawText(verificationUrl, {
-      x: (page.getWidth() - urlWidth) / 2,
-      y: 57,
-      size: urlFontSize,
+      x: (page.getWidth() - maxWidth) / 2,
+      y: 78,
+      size: fontSize,
       font: fonts.regular,
       color: rgb(70 / 255, 80 / 255, 75 / 255),
       maxWidth,
