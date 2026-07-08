@@ -174,12 +174,8 @@ export class UsersService {
       }),
     ]);
 
-    const currentStreakDays = Math.max(
-      0,
-      streak?.currentDays ?? 0,
-      leaderboardProfile?.streakDays ?? 0,
-      user.currentStreakDays ?? 0,
-    );
+    const currentStreakDays = Math.max(0, streak?.currentDays ?? 0);
+
     const totalXp = Math.max(
       0,
       leaderboardProfile?.totalXp ?? 0,
