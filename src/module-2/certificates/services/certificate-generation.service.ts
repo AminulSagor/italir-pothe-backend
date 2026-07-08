@@ -303,132 +303,170 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const lightGreen = rgb(88 / 255, 174 / 255, 64 / 255);
-    const midGreen = rgb(52 / 255, 126 / 255, 63 / 255);
-    const deepGreen = rgb(0 / 255, 86 / 255, 39 / 255);
-    const shadowGreen = rgb(0 / 255, 55 / 255, 28 / 255);
+    const outerGreen = rgb(88 / 255, 174 / 255, 64 / 255);
+    const innerGreen = rgb(48 / 255, 125 / 255, 60 / 255);
+    const deepGreen = rgb(0 / 255, 88 / 255, 40 / 255);
+    const darkShadow = rgb(0 / 255, 55 / 255, 28 / 255);
 
     /**
-     * Bottom-left L frame like sample.
+     * Bottom-left frame like sample
+     * Main vertical + bottom horizontal L shape
      */
-    this.drawFilledPolygon(
-      page,
-      [
-        [0, 0],
-        [425, 0],
-        [370, 76],
-        [74, 76],
-        [74, 360],
-        [0, 455],
-      ],
-      lightGreen,
-      1,
-    );
 
-    this.drawFilledPolygon(
-      page,
-      [
-        [42, 38],
-        [385, 38],
-        [350, 92],
-        [96, 92],
-        [96, 350],
-        [42, 425],
-      ],
-      deepGreen,
-      0.86,
-    );
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: 70,
+      height: 445,
+      color: outerGreen,
+      opacity: 1,
+    });
 
-    this.drawFilledPolygon(
-      page,
-      [
-        [74, 12],
-        [405, 12],
-        [366, 58],
-        [88, 58],
-      ],
-      midGreen,
-      0.82,
-    );
+    page.drawRectangle({
+      x: 42,
+      y: 58,
+      width: 54,
+      height: 325,
+      color: deepGreen,
+      opacity: 0.9,
+    });
 
-    this.drawFilledPolygon(
-      page,
-      [
-        [0, 55],
-        [58, 55],
-        [58, 374],
-        [0, 448],
-      ],
-      midGreen,
-      0.7,
-    );
+    page.drawRectangle({
+      x: 70,
+      y: 0,
+      width: 360,
+      height: 68,
+      color: outerGreen,
+      opacity: 1,
+    });
 
-    this.drawFilledPolygon(
-      page,
-      [
-        [0, 270],
-        [74, 175],
-        [74, 88],
-        [0, 185],
-      ],
-      shadowGreen,
-      0.68,
-    );
+    page.drawRectangle({
+      x: 90,
+      y: 38,
+      width: 295,
+      height: 42,
+      color: innerGreen,
+      opacity: 0.9,
+    });
 
     /**
-     * Top-right L frame like sample.
+     * Bottom-left slanted ends / folds
      */
-    this.drawFilledPolygon(
-      page,
-      [
-        [width - 285, height],
-        [width, height],
-        [width, height - 270],
-        [width - 36, height - 330],
-        [width - 36, height - 72],
-        [width - 250, height - 72],
-      ],
-      lightGreen,
-      1,
-    );
 
-    this.drawFilledPolygon(
-      page,
-      [
-        [width - 230, height - 28],
-        [width - 36, height - 28],
-        [width - 36, height - 300],
-        [width - 5, height - 350],
-        [width - 5, height - 55],
-        [width - 255, height - 55],
-      ],
-      deepGreen,
-      0.84,
-    );
+    page.drawRectangle({
+      x: 28,
+      y: 310,
+      width: 62,
+      height: 150,
+      color: darkShadow,
+      rotate: degrees(34),
+      opacity: 0.75,
+    });
 
-    this.drawFilledPolygon(
-      page,
-      [
-        [width - 315, height - 8],
-        [width - 70, height - 8],
-        [width - 70, height - 48],
-        [width - 285, height - 48],
-      ],
-      midGreen,
-      0.82,
-    );
+    page.drawRectangle({
+      x: 340,
+      y: 8,
+      width: 74,
+      height: 74,
+      color: innerGreen,
+      rotate: degrees(45),
+      opacity: 0.95,
+    });
 
-    this.drawFilledPolygon(
-      page,
-      [
-        [width - 92, height - 250],
-        [width - 5, height - 350],
-        [width - 5, height - 245],
-        [width - 62, height - 178],
-      ],
-      shadowGreen,
-      0.7,
-    );
+    page.drawRectangle({
+      x: 360,
+      y: -18,
+      width: 56,
+      height: 125,
+      color: outerGreen,
+      rotate: degrees(28),
+      opacity: 0.95,
+    });
+
+    /**
+     * Top-right frame like sample
+     * Main top horizontal + right vertical L shape
+     */
+
+    page.drawRectangle({
+      x: width - 330,
+      y: height - 68,
+      width: 330,
+      height: 68,
+      color: outerGreen,
+      opacity: 1,
+    });
+
+    page.drawRectangle({
+      x: width - 280,
+      y: height - 44,
+      width: 250,
+      height: 42,
+      color: innerGreen,
+      opacity: 0.9,
+    });
+
+    page.drawRectangle({
+      x: width - 70,
+      y: height - 350,
+      width: 70,
+      height: 350,
+      color: outerGreen,
+      opacity: 1,
+    });
+
+    page.drawRectangle({
+      x: width - 95,
+      y: height - 300,
+      width: 56,
+      height: 255,
+      color: deepGreen,
+      opacity: 0.9,
+    });
+
+    /**
+     * Top-right slanted ends / folds
+     */
+
+    page.drawRectangle({
+      x: width - 410,
+      y: height - 52,
+      width: 72,
+      height: 72,
+      color: outerGreen,
+      rotate: degrees(45),
+      opacity: 1,
+    });
+
+    page.drawRectangle({
+      x: width - 365,
+      y: height - 44,
+      width: 58,
+      height: 58,
+      color: innerGreen,
+      rotate: degrees(45),
+      opacity: 0.9,
+    });
+
+    page.drawRectangle({
+      x: width - 94,
+      y: height - 335,
+      width: 78,
+      height: 150,
+      color: darkShadow,
+      rotate: degrees(-34),
+      opacity: 0.75,
+    });
+
+    page.drawRectangle({
+      x: width - 118,
+      y: height - 310,
+      width: 72,
+      height: 72,
+      color: innerGreen,
+      rotate: degrees(45),
+      opacity: 0.9,
+    });
   }
 
   private drawHeader(
@@ -484,7 +522,7 @@ export class CertificateGenerationService {
 
     const badgeCenterX = 930;
     const awardSize = 92;
-    const awardY = 590;
+    const awardY = 604;
 
     this.drawImageContain(page, award, {
       x: badgeCenterX - awardSize / 2,
@@ -773,42 +811,6 @@ export class CertificateGenerationService {
       width: scaled.width,
       height: scaled.height,
       opacity: params.opacity ?? 1,
-    });
-  }
-
-  private drawFilledPolygon(
-    page: PDFPage,
-    points: Array<[number, number]>,
-    color: ReturnType<typeof rgb>,
-    opacity = 1,
-  ): void {
-    if (points.length < 3) {
-      return;
-    }
-
-    const normalizedPoints = points.map(([x, y]) => {
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        throw new InternalServerErrorException(
-          `Invalid certificate frame coordinate: x=${x}, y=${y}`,
-        );
-      }
-
-      return [Math.round(x * 100) / 100, Math.round(y * 100) / 100];
-    });
-
-    const [firstX, firstY] = normalizedPoints[0];
-
-    const path =
-      `M ${firstX},${firstY} ` +
-      normalizedPoints
-        .slice(1)
-        .map(([x, y]) => `L ${x},${y}`)
-        .join(' ') +
-      ' Z';
-
-    page.drawSvgPath(path, {
-      color,
-      opacity,
     });
   }
 }
