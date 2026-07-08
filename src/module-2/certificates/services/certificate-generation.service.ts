@@ -531,14 +531,6 @@ export class CertificateGenerationService {
       color: dark,
     });
 
-    page.drawText('Italir Pothe Registrar', {
-      x: 164,
-      y: 81,
-      size: 10,
-      font: fonts.regular,
-      color: dark,
-    });
-
     this.drawCenteredText({
       page,
       text: `Issued on ${issueDate}`,
