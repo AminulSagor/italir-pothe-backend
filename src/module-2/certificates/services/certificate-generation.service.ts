@@ -303,140 +303,199 @@ export class CertificateGenerationService {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const deepGreen = rgb(0 / 255, 86 / 255, 43 / 255);
-    const midGreen = rgb(15 / 255, 145 / 255, 64 / 255);
-    const lightGreen = rgb(89 / 255, 185 / 255, 67 / 255);
-    const brightGreen = rgb(104 / 255, 240 / 255, 74 / 255);
+    const lightGreen = rgb(86 / 255, 176 / 255, 64 / 255);
+    const brightGreen = rgb(105 / 255, 194 / 255, 77 / 255);
+    const midGreen = rgb(55 / 255, 128 / 255, 66 / 255);
+    const deepGreen = rgb(0 / 255, 92 / 255, 40 / 255);
+    const shadowGreen = rgb(0 / 255, 55 / 255, 28 / 255);
 
     /**
-     * Bottom-left L frame.
-     * Kept below the signature safe zone.
+     * TOP-RIGHT FRAME
+     * Shape exactly like the sample:
+     * - horizontal top bar
+     * - right vertical bar
+     * - diagonal/chamfered edges
      */
-    page.drawRectangle({
-      x: 0,
-      y: 0,
-      width: 82,
-      height: 360,
-      color: lightGreen,
-      opacity: 0.98,
-    });
 
-    page.drawRectangle({
-      x: 27,
-      y: 48,
-      width: 62,
-      height: 300,
-      color: deepGreen,
-      opacity: 0.88,
-    });
+    // Top-right outer light frame
+    page.drawSvgPath(
+      `
+      M ${width - 285} ${height}
+      L ${width} ${height}
+      L ${width} ${height - 270}
+      L ${width - 36} ${height - 330}
+      L ${width - 36} ${height - 72}
+      L ${width - 250} ${height - 72}
+      Z
+    `,
+      {
+        color: lightGreen,
+        opacity: 1,
+      },
+    );
 
-    page.drawRectangle({
-      x: 70,
-      y: 0,
-      width: 330,
-      height: 70,
-      color: lightGreen,
-      opacity: 0.98,
-    });
+    // Top-right dark inner frame
+    page.drawSvgPath(
+      `
+      M ${width - 230} ${height - 28}
+      L ${width - 36} ${height - 28}
+      L ${width - 36} ${height - 300}
+      L ${width - 5} ${height - 350}
+      L ${width - 5} ${height - 55}
+      L ${width - 255} ${height - 55}
+      Z
+    `,
+      {
+        color: deepGreen,
+        opacity: 0.82,
+      },
+    );
 
-    page.drawRectangle({
-      x: 87,
-      y: 35,
-      width: 285,
-      height: 45,
-      color: deepGreen,
-      opacity: 0.72,
-    });
+    // Top bar highlight
+    page.drawSvgPath(
+      `
+      M ${width - 315} ${height - 8}
+      L ${width - 70} ${height - 8}
+      L ${width - 70} ${height - 48}
+      L ${width - 285} ${height - 48}
+      Z
+    `,
+      {
+        color: brightGreen,
+        opacity: 0.55,
+      },
+    );
 
-    page.drawRectangle({
-      x: 30,
-      y: 250,
-      width: 54,
-      height: 150,
-      color: midGreen,
-      rotate: degrees(38),
-      opacity: 0.8,
-    });
+    // Top-right diagonal dark fold
+    page.drawSvgPath(
+      `
+      M ${width - 92} ${height - 250}
+      L ${width - 5} ${height - 350}
+      L ${width - 5} ${height - 245}
+      L ${width - 62} ${height - 178}
+      Z
+    `,
+      {
+        color: shadowGreen,
+        opacity: 0.72,
+      },
+    );
 
-    page.drawRectangle({
-      x: 335,
-      y: 9,
-      width: 76,
-      height: 76,
-      color: midGreen,
-      rotate: degrees(45),
-      opacity: 0.9,
-    });
+    // Top-right small corner diamond/fold
+    page.drawSvgPath(
+      `
+      M ${width - 330} ${height}
+      L ${width - 285} ${height - 45}
+      L ${width - 240} ${height}
+      L ${width - 285} ${height + 45}
+      Z
+    `,
+      {
+        color: brightGreen,
+        opacity: 1,
+      },
+    );
+
+    page.drawSvgPath(
+      `
+      M ${width - 285} ${height}
+      L ${width - 245} ${height - 40}
+      L ${width - 205} ${height}
+      L ${width - 245} ${height + 40}
+      Z
+    `,
+      {
+        color: deepGreen,
+        opacity: 0.72,
+      },
+    );
 
     /**
-     * Top-right L frame.
-     * Kept outside main certificate content.
+     * BOTTOM-LEFT FRAME
+     * Shape exactly like the sample:
+     * - left vertical bar
+     * - bottom horizontal bar
+     * - diagonal/chamfered ends
      */
-    page.drawRectangle({
-      x: width - 340,
-      y: height - 64,
-      width: 330,
-      height: 56,
-      color: lightGreen,
-      opacity: 0.98,
-    });
 
-    page.drawRectangle({
-      x: width - 285,
-      y: height - 45,
-      width: 250,
-      height: 38,
-      color: deepGreen,
-      opacity: 0.72,
-    });
+    // Bottom-left outer light frame
+    page.drawSvgPath(
+      `
+      M 0 0
+      L 420 0
+      L 365 76
+      L 74 76
+      L 74 360
+      L 0 455
+      Z
+    `,
+      {
+        color: lightGreen,
+        opacity: 1,
+      },
+    );
 
-    page.drawRectangle({
-      x: width - 82,
-      y: height - 345,
-      width: 82,
-      height: 320,
-      color: lightGreen,
-      opacity: 0.98,
-    });
+    // Bottom-left dark inner frame
+    page.drawSvgPath(
+      `
+      M 42 40
+      L 380 40
+      L 350 92
+      L 96 92
+      L 96 360
+      L 42 430
+      Z
+    `,
+      {
+        color: deepGreen,
+        opacity: 0.84,
+      },
+    );
 
-    page.drawRectangle({
-      x: width - 62,
-      y: height - 295,
-      width: 58,
-      height: 250,
-      color: deepGreen,
-      opacity: 0.78,
-    });
+    // Bottom horizontal highlight
+    page.drawSvgPath(
+      `
+      M 70 10
+      L 405 10
+      L 368 58
+      L 86 58
+      Z
+    `,
+      {
+        color: brightGreen,
+        opacity: 0.55,
+      },
+    );
 
-    page.drawRectangle({
-      x: width - 420,
-      y: height - 65,
-      width: 72,
-      height: 72,
-      color: brightGreen,
-      rotate: degrees(45),
-      opacity: 0.96,
-    });
+    // Left vertical highlight
+    page.drawSvgPath(
+      `
+      M 0 55
+      L 58 55
+      L 58 375
+      L 0 450
+      Z
+    `,
+      {
+        color: brightGreen,
+        opacity: 0.45,
+      },
+    );
 
-    page.drawRectangle({
-      x: width - 370,
-      y: height - 57,
-      width: 62,
-      height: 62,
-      color: deepGreen,
-      rotate: degrees(45),
-      opacity: 0.72,
-    });
-
-    page.drawRectangle({
-      x: width - 105,
-      y: height - 350,
-      width: 74,
-      height: 145,
-      color: midGreen,
-      rotate: degrees(-35),
-      opacity: 0.82,
-    });
+    // Bottom-left diagonal dark fold
+    page.drawSvgPath(
+      `
+      M 0 265
+      L 75 170
+      L 75 82
+      L 0 180
+      Z
+    `,
+      {
+        color: shadowGreen,
+        opacity: 0.72,
+      },
+    );
   }
 
   private drawHeader(
@@ -490,17 +549,25 @@ export class CertificateGenerationService {
   ): void {
     const green = rgb(0 / 255, 105 / 255, 55 / 255);
 
+    const badgeBoxX = 878;
+    const badgeBoxY = 565;
+    const badgeBoxWidth = 150;
+
     this.drawImageContain(page, award, {
-      x: 910,
-      y: 588,
-      maxWidth: 92,
-      maxHeight: 92,
+      x: badgeBoxX + 25,
+      y: badgeBoxY + 42,
+      maxWidth: 96,
+      maxHeight: 96,
     });
 
-    page.drawText('CERTIFIED', {
-      x: 905,
-      y: 566,
-      size: 16,
+    const text = 'CERTIFIED';
+    const textSize = 16;
+    const textWidth = fonts.bold.widthOfTextAtSize(text, textSize);
+
+    page.drawText(text, {
+      x: badgeBoxX + (badgeBoxWidth - textWidth) / 2,
+      y: badgeBoxY + 19,
+      size: textSize,
       font: fonts.bold,
       color: green,
     });
