@@ -60,6 +60,16 @@ export class CertificateGenerationService {
     'Silentha.ttf',
   );
 
+  private readonly leftFramePath = join(
+    this.assetDirectory,
+    'Left side L frame.png',
+  );
+
+  private readonly rightFramePath = join(
+    this.assetDirectory,
+    'Right side L frame.png',
+  );
+
   async generatePdf(payload: GenerateCertificatePdfPayload): Promise<Buffer> {
     const document = await PDFDocument.create();
 
@@ -87,6 +97,18 @@ export class CertificateGenerationService {
       'certificate_signature.png',
     );
 
+    const leftFrame = await this.embedRequiredPng(
+      document,
+      this.leftFramePath,
+      'Left side L frame.png',
+    );
+
+    const rightFrame = await this.embedRequiredPng(
+      document,
+      this.rightFramePath,
+      'Right side L frame.png',
+    );
+
     const qrBuffer = await QRCode.toBuffer(payload.verificationUrl, {
       type: 'png',
       width: 260,
@@ -101,9 +123,9 @@ export class CertificateGenerationService {
 
     this.drawBackground(page, logo);
 
-    // Draw the continuous thin borders first so the thick corners overlap them seamlessly
+    // Draw the continuous thin borders first so the thick image corners overlap them perfectly
     this.drawGreenFrame(page);
-    this.drawGreenCornerFrame(page);
+    this.drawGreenCornerFrame(page, leftFrame, rightFrame);
 
     this.drawHeader(page, fonts, logo, payload.certificateNumber);
     this.drawCertifiedBadge(page, fonts, award);
@@ -280,55 +302,34 @@ export class CertificateGenerationService {
     });
   }
 
-  private drawGreenCornerFrame(page: PDFPage): void {
+  private drawGreenCornerFrame(
+    page: PDFPage,
+    leftFrame: PDFImage,
+    rightFrame: PDFImage,
+  ): void {
     const width = page.getWidth();
     const height = page.getHeight();
 
-    const lightGreen = rgb(88 / 255, 174 / 255, 64 / 255);
-    const darkGreen = rgb(48 / 255, 125 / 255, 60 / 255);
-    const shadow = rgb(0, 0, 0);
+    // Target width for the corner images (adjust this if you want them bigger/smaller)
+    const targetCornerWidth = 340;
 
-    // ==========================================
-    // BOTTOM-LEFT CORNER (Perfect L + 45° angle)
-    // ==========================================
-
-    // Bottom-Left Background (Dark Green - Touches edges)
-    page.drawSvgPath('M 0 0 L 320 0 L 270 50 L 50 50 L 50 420 L 0 470 Z', {
-      color: darkGreen,
+    // Scale and place Left Frame
+    const scaledLeft = leftFrame.scaleToFit(targetCornerWidth, height);
+    page.drawImage(leftFrame, {
+      x: 0,
+      y: 0,
+      width: scaledLeft.width,
+      height: scaledLeft.height,
     });
 
-    // Bottom-Left Inner Shadow
-    page.drawSvgPath('M 18 18 L 298 18 L 258 58 L 58 58 L 58 398 L 18 438 Z', {
-      color: shadow,
-      opacity: 0.15,
+    // Scale and place Right Frame
+    const scaledRight = rightFrame.scaleToFit(targetCornerWidth, height);
+    page.drawImage(rightFrame, {
+      x: width - scaledRight.width,
+      y: height - scaledRight.height,
+      width: scaledRight.width,
+      height: scaledRight.height,
     });
-
-    // Bottom-Left Foreground (Light Green - Slightly inset)
-    page.drawSvgPath('M 15 15 L 295 15 L 255 55 L 55 55 L 55 395 L 15 435 Z', {
-      color: lightGreen,
-    });
-
-    // ==========================================
-    // TOP-RIGHT CORNER (Perfect L + 45° angle)
-    // ==========================================
-
-    // Top-Right Background (Dark Green - Touches edges)
-    page.drawSvgPath(
-      `M ${width} ${height} L ${width - 320} ${height} L ${width - 270} ${height - 50} L ${width - 50} ${height - 50} L ${width - 50} ${height - 420} L ${width} ${height - 470} Z`,
-      { color: darkGreen },
-    );
-
-    // Top-Right Inner Shadow
-    page.drawSvgPath(
-      `M ${width - 18} ${height - 18} L ${width - 298} ${height - 18} L ${width - 258} ${height - 58} L ${width - 58} ${height - 58} L ${width - 58} ${height - 398} L ${width - 18} ${height - 438} Z`,
-      { color: shadow, opacity: 0.15 },
-    );
-
-    // Top-Right Foreground (Light Green - Slightly inset)
-    page.drawSvgPath(
-      `M ${width - 15} ${height - 15} L ${width - 295} ${height - 15} L ${width - 255} ${height - 55} L ${width - 55} ${height - 55} L ${width - 55} ${height - 395} L ${width - 15} ${height - 435} Z`,
-      { color: lightGreen },
-    );
   }
 
   private drawHeader(
