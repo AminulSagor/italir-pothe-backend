@@ -942,11 +942,19 @@ export class CourseCommerceService {
         throw new NotFoundException('Purchase order not found.');
       }
 
+      if (!order.courseId) {
+        throw new ConflictException(
+          'This course order is detached from its course because the course was permanently deleted. It cannot be completed.',
+        );
+      }
+
+      const courseId = order.courseId;
+
       const [course, providerSnapshot, providerTransaction] = await Promise.all(
         [
           manager.getRepository(Course).findOne({
             where: {
-              id: order.courseId,
+              id: courseId,
             },
           }),
 
@@ -1008,7 +1016,7 @@ export class CourseCommerceService {
         const existingEnrollment = await enrollmentRepository.findOne({
           where: {
             userId: order.userId,
-            courseId: order.courseId,
+            courseId,
             status: CourseEnrollmentStatus.ACTIVE,
           },
         });
@@ -1081,14 +1089,14 @@ export class CourseCommerceService {
       let enrollment = await enrollmentRepository.findOne({
         where: {
           userId: order.userId,
-          courseId: order.courseId,
+          courseId,
         },
       });
 
       if (!enrollment) {
         enrollment = enrollmentRepository.create({
           userId: order.userId,
-          courseId: order.courseId,
+          courseId,
           orderId: order.id,
           status: CourseEnrollmentStatus.ACTIVE,
           accessType: CourseAccessType.LIFETIME,
@@ -1472,11 +1480,13 @@ export class CourseCommerceService {
   private async buildOrderResponse(order: CoursePurchaseOrder) {
     const course =
       order.course ??
-      (await this.courseRepository.findOne({
-        where: {
-          id: order.courseId,
-        },
-      }));
+      (order.courseId
+        ? await this.courseRepository.findOne({
+            where: {
+              id: order.courseId,
+            },
+          })
+        : null);
 
     return {
       ...this.mapOrderResponse(order),
@@ -1484,6 +1494,7 @@ export class CourseCommerceService {
         id: order.courseId,
         title: course?.title ?? null,
         subtitle: course?.subtitle ?? null,
+        isFree: course?.isFree ?? null,
       },
     };
   }

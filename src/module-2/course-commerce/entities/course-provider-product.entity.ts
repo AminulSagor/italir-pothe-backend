@@ -26,8 +26,9 @@ export class CourseProviderProduct {
 
   @Column({
     type: 'uuid',
+    nullable: true,
   })
-  courseId: string;
+  courseId: string | null;
 
   @Column({
     type: 'enum',
@@ -86,10 +87,11 @@ export class CourseProviderProduct {
   updatedAt: Date;
 
   @ManyToOne(() => Course, (course) => course.providerProducts, {
-    onDelete: 'CASCADE',
+    nullable: true,
+    onDelete: 'SET NULL',
   })
   @JoinColumn({
     name: 'courseId',
   })
-  course: Course;
+  course: Course | null;
 }

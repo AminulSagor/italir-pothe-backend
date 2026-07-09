@@ -28,8 +28,8 @@ export class Lesson {
   id: string;
 
   @Index()
-  @Column({ type: 'uuid' })
-  courseId: string;
+  @Column({ type: 'uuid', nullable: true })
+  courseId: string | null;
 
   @Index()
   @Column({ type: 'uuid' })
@@ -76,10 +76,11 @@ export class Lesson {
   updatedAt: Date;
 
   @ManyToOne(() => Course, (course) => course.lessons, {
-    onDelete: 'CASCADE',
+    nullable: true,
+    onDelete: 'SET NULL',
   })
   @JoinColumn({ name: 'courseId' })
-  course: Course;
+  course: Course | null;
 
   @ManyToOne(() => CourseChapter, (chapter) => chapter.lessons, {
     onDelete: 'CASCADE',

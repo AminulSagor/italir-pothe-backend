@@ -35,10 +35,8 @@ export class Certificate {
   })
   userId: string;
 
-  @Column({
-    type: 'uuid',
-  })
-  courseId: string;
+  @Column({ type: 'uuid', nullable: true })
+  courseId: string | null;
 
   @Column({
     type: 'uuid',
@@ -143,12 +141,13 @@ export class Certificate {
   user: User | null;
 
   @ManyToOne(() => Course, {
-    onDelete: 'RESTRICT',
+    nullable: true,
+    onDelete: 'SET NULL',
   })
   @JoinColumn({
     name: 'courseId',
   })
-  course: Course;
+  course: Course | null;
 
   @ManyToOne(() => ExamAttempt, {
     onDelete: 'RESTRICT',
