@@ -914,27 +914,16 @@ export class AdminUserDirectoryService {
         startDate: analytics.startDate,
         endDate: analytics.endDate,
       },
-
       currentStreakDays: Math.max(0, streak?.currentDays ?? 0),
-
       longestStreakDays: Math.max(0, streak?.longestDays ?? 0),
-
       totalSeconds: analytics.totalSeconds,
-
       totalHours: analytics.totalHours,
-
       rangeTotalSeconds: analytics.rangeTotalSeconds,
-
       rangeTotalHours: analytics.rangeTotalHours,
-
       activeDays: analytics.activeDays,
-
       averageMinutesPerActiveDay: analytics.averageMinutesPerActiveDay,
-
       maxDailyDurationSeconds: analytics.maxDailyDurationSeconds,
-
       days: analytics.daily,
-
       activityTypeBreakdown: analytics.activityTypeBreakdown,
     };
   }
