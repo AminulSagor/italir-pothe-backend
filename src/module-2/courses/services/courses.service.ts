@@ -410,7 +410,11 @@ export class CoursesService {
       },
     });
 
-    return new Map(providerProducts.map((item) => [item.courseId, item]));
+    return new Map(
+      providerProducts
+        .filter((item) => Boolean(item.courseId))
+        .map((item) => [item.courseId as string, item]),
+    );
   }
 
   private mapCourse(

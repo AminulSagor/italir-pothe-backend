@@ -81,6 +81,12 @@ export class AdminSyllabusService {
   async findChapterLessons(chapterId: string) {
     const chapter = await this.getChapterById(chapterId);
 
+    if (!chapter.courseId) {
+      throw new BadRequestException(
+        'This chapter is detached from a deleted course.',
+      );
+    }
+
     await this.ensureActiveCourseExists(chapter.courseId);
 
     const lessons = await this.lessonRepository.find({

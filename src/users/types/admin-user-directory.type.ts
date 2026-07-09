@@ -130,7 +130,7 @@ export interface AdminUserExamResultItem {
   attemptId: string;
   referenceCode: string;
   title: string;
-  courseId: string;
+  courseId: string | null;
   courseTitle: string;
   levelLabel: string | null;
   scorePercent: number;
@@ -148,10 +148,10 @@ export interface AdminUserExamResultsResponse {
 export interface AdminUserCourseItem {
   enrollmentId: string;
   enrollmentSource: 'commerce' | 'legacy';
-  courseId: string;
+  courseId: string | null;
   title: string;
   subtitle: string | null;
-  isFree: boolean;
+  isFree: boolean | null;
   enrollmentStatus: string;
   enrolledAt: string;
   completionPercent: number;

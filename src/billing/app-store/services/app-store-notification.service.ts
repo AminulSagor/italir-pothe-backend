@@ -847,9 +847,6 @@ export class AppStoreNotificationService {
       const enrollment = await enrollmentRepository.findOne({
         where: {
           userId: order.userId,
-
-          courseId: order.courseId,
-
           orderId: order.id,
         },
 
@@ -968,11 +965,21 @@ export class AppStoreNotificationService {
 
       await orderRepository.save(order);
 
+      if (!order.courseId) {
+        return {
+          action: 'course_refund_reversal_not_restored_course_deleted',
+          matched: true,
+          orderId: order.id,
+          status: order.status,
+        };
+      }
+
+      const courseId = order.courseId;
+
       let enrollment = await enrollmentRepository.findOne({
         where: {
           userId: order.userId,
-
-          courseId: order.courseId,
+          courseId,
         },
 
         lock: {
@@ -984,7 +991,7 @@ export class AppStoreNotificationService {
         enrollment = enrollmentRepository.create({
           userId: order.userId,
 
-          courseId: order.courseId,
+          courseId,
 
           orderId: order.id,
 

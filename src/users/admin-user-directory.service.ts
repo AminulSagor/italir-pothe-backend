@@ -752,9 +752,13 @@ export class AdminUserDirectoryService {
 
     const courseIds = Array.from(
       new Set([
-        ...commerceEnrollments.map((item) => item.courseId),
+        ...commerceEnrollments
+          .map((item) => item.courseId)
+          .filter((courseId): courseId is string => Boolean(courseId)),
 
-        ...legacyEnrollments.map((item) => item.courseId),
+        ...legacyEnrollments
+          .map((item) => item.courseId)
+          .filter((courseId): courseId is string => Boolean(courseId)),
       ]),
     );
 
@@ -775,20 +779,22 @@ export class AdminUserDirectoryService {
     const merged = new Map<string, AdminUserCourseItem>();
 
     for (const enrollment of legacyEnrollments) {
-      const progress = progressByCourseId.get(enrollment.courseId);
+      const courseId = enrollment.courseId;
+      const progress = courseId ? progressByCourseId.get(courseId) : null;
+      const mapKey = courseId ?? `legacy:${enrollment.id}`;
 
-      merged.set(enrollment.courseId, {
+      merged.set(mapKey, {
         enrollmentId: enrollment.id,
 
         enrollmentSource: 'legacy',
 
-        courseId: enrollment.courseId,
+        courseId,
 
-        title: enrollment.course.title,
+        title: enrollment.course?.title ?? 'Deleted course',
 
-        subtitle: enrollment.course.subtitle,
+        subtitle: enrollment.course?.subtitle ?? null,
 
-        isFree: enrollment.course.isFree,
+        isFree: enrollment.course?.isFree ?? null,
 
         enrollmentStatus: enrollment.status,
 
@@ -805,20 +811,22 @@ export class AdminUserDirectoryService {
     }
 
     for (const enrollment of commerceEnrollments) {
-      const progress = progressByCourseId.get(enrollment.courseId);
+      const courseId = enrollment.courseId;
+      const progress = courseId ? progressByCourseId.get(courseId) : null;
+      const mapKey = courseId ?? `commerce:${enrollment.id}`;
 
-      merged.set(enrollment.courseId, {
+      merged.set(mapKey, {
         enrollmentId: enrollment.id,
 
         enrollmentSource: 'commerce',
 
-        courseId: enrollment.courseId,
+        courseId,
 
-        title: enrollment.course.title,
+        title: enrollment.course?.title ?? 'Deleted course',
 
-        subtitle: enrollment.course.subtitle,
+        subtitle: enrollment.course?.subtitle ?? null,
 
-        isFree: enrollment.course.isFree,
+        isFree: enrollment.course?.isFree ?? null,
 
         enrollmentStatus: enrollment.status,
 
@@ -830,10 +838,7 @@ export class AdminUserDirectoryService {
 
         totalLessons: progress?.totalLessons ?? 0,
 
-        lastActivityAt:
-          progress?.lastActivityAt?.toISOString() ??
-          enrollment.lastAccessedAt?.toISOString() ??
-          null,
+        lastActivityAt: progress?.lastActivityAt?.toISOString() ?? null,
       });
     }
 
@@ -865,7 +870,10 @@ export class AdminUserDirectoryService {
       }
 
       if (comparison === 0) {
-        return left.courseId.localeCompare(right.courseId);
+        const leftCourseId = left.courseId ?? left.enrollmentId;
+        const rightCourseId = right.courseId ?? right.enrollmentId;
+
+        return leftCourseId.localeCompare(rightCourseId);
       }
 
       return comparison * direction;

@@ -65,6 +65,12 @@ export class AdminQuizzesService {
   async createQuiz(lessonId: string, dto: CreateQuizDto) {
     const lesson = await this.getLessonById(lessonId);
 
+    if (!lesson.courseId) {
+      throw new BadRequestException(
+        'Cannot create quiz for a lesson detached from a deleted course.',
+      );
+    }
+
     const existingQuiz = await this.quizRepository.findOne({
       where: {
         lessonId: lesson.id,
