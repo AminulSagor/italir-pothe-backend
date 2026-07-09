@@ -148,13 +148,14 @@ export class AdminPackageStoreController {
   }
 
   @Delete('packages/:packageId/provider-products/:providerProductId')
-  async deactivateProviderProduct(
+  async deleteProviderProduct(
     @Param('packageId', new ParseUUIDPipe({ version: '4' }))
     packageId: string,
+
     @Param('providerProductId', new ParseUUIDPipe({ version: '4' }))
     providerProductId: string,
   ) {
-    return this.packageStoreService.deactivateProviderProduct(
+    return this.packageStoreService.deleteProviderProduct(
       packageId,
       providerProductId,
     );

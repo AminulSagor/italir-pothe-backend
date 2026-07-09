@@ -114,23 +114,6 @@ export class AdminCourseCommerceService {
 
       const isActive = dto.isActive ?? true;
 
-      if (isActive) {
-        await repository
-          .createQueryBuilder()
-          .update(CourseProviderProduct)
-          .set({
-            isActive: false,
-          })
-          .where('"courseId" = :courseId', {
-            courseId,
-          })
-          .andWhere('provider = :provider', {
-            provider: dto.provider,
-          })
-          .andWhere('"isActive" = true')
-          .execute();
-      }
-
       const saved = await repository.save(
         repository.create({
           courseId,
@@ -258,26 +241,6 @@ export class AdminCourseCommerceService {
         manager,
       );
 
-      if (isActive) {
-        await repository
-          .createQueryBuilder()
-          .update(CourseProviderProduct)
-          .set({
-            isActive: false,
-          })
-          .where('"courseId" = :courseId', {
-            courseId,
-          })
-          .andWhere('provider = :provider', {
-            provider: current.provider,
-          })
-          .andWhere('id != :mappingId', {
-            mappingId,
-          })
-          .andWhere('"isActive" = true')
-          .execute();
-      }
-
       current.productId = productId;
       current.productType = productType;
       current.basePlanId = basePlanId;
@@ -290,18 +253,32 @@ export class AdminCourseCommerceService {
     return this.getProviderProductById(courseId, mappingId);
   }
 
-  async deactivateProviderProduct(courseId: string, mappingId: string) {
+  async deleteProviderProduct(courseId: string, mappingId: string) {
     const providerProduct = await this.getProviderProductEntity(
       courseId,
       mappingId,
     );
 
-    providerProduct.isActive = false;
-    await this.providerProductRepository.save(providerProduct);
+    const referencedOrderCount = await this.providerSnapshotRepository.count({
+      where: {
+        providerProductId: providerProduct.id,
+      },
+    });
+
+    if (referencedOrderCount > 0) {
+      throw new ConflictException(
+        'This course provider product mapping is already used by an order. Deactivate it instead of deleting it.',
+      );
+    }
+
+    await this.providerProductRepository.delete({
+      id: providerProduct.id,
+      courseId,
+    });
 
     return {
-      message: 'Course provider product mapping deactivated successfully.',
-      providerProduct: this.mapProviderProduct(providerProduct),
+      message: 'Course provider product mapping deleted successfully.',
+      providerProductId: mappingId,
     };
   }
 

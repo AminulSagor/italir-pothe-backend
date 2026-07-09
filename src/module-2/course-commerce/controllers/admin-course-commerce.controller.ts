@@ -67,13 +67,14 @@ export class AdminCourseCommerceController {
   }
 
   @Delete('courses/:courseId/provider-products/:mappingId')
-  async deactivateProviderProduct(
+  async deleteProviderProduct(
     @Param('courseId', new ParseUUIDPipe({ version: '4' }))
     courseId: string,
+
     @Param('mappingId', new ParseUUIDPipe({ version: '4' }))
     mappingId: string,
   ) {
-    return this.adminCourseCommerceService.deactivateProviderProduct(
+    return this.adminCourseCommerceService.deleteProviderProduct(
       courseId,
       mappingId,
     );

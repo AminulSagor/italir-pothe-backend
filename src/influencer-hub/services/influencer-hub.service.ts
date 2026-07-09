@@ -90,7 +90,9 @@ export class InfluencerHubService {
       (item) => item.status === InfluencerAttributionStatus.CONVERTED,
     );
 
-    const totalSales = this.sumMoney(converted.map((item) => item.payableAmountEur));
+    const totalSales = this.sumMoney(
+      converted.map((item) => item.payableAmountEur),
+    );
     const lifetimeCommissionEarned = this.sumMoney(
       converted.map((item) => item.commissionAmountEur),
     );
@@ -239,7 +241,9 @@ export class InfluencerHubService {
     });
 
     if (existing) {
-      throw new ConflictException('An influencer partner already uses this email.');
+      throw new ConflictException(
+        'An influencer partner already uses this email.',
+      );
     }
 
     const partnerId = await this.partnerRepository.manager.transaction(
@@ -305,7 +309,9 @@ export class InfluencerHubService {
       const partnerRepository = manager.getRepository(InfluencerPartner);
       const handleRepository = manager.getRepository(InfluencerSocialHandle);
 
-      const partner = await partnerRepository.findOne({ where: { id: partnerId } });
+      const partner = await partnerRepository.findOne({
+        where: { id: partnerId },
+      });
 
       if (!partner) {
         throw new NotFoundException('Influencer partner not found.');
@@ -326,14 +332,18 @@ export class InfluencerHubService {
 
       if (dto.fullName !== undefined) partner.fullName = dto.fullName.trim();
       if (dto.title !== undefined) partner.title = dto.title ?? null;
-      if (dto.avatarUrl !== undefined) partner.avatarUrl = dto.avatarUrl ?? null;
+      if (dto.avatarUrl !== undefined)
+        partner.avatarUrl = dto.avatarUrl ?? null;
       if (dto.status !== undefined) partner.status = dto.status;
-      if (dto.paymentMethod !== undefined) partner.paymentMethod = dto.paymentMethod;
-      if (dto.paymentDetails !== undefined) partner.paymentDetails = dto.paymentDetails ?? null;
+      if (dto.paymentMethod !== undefined)
+        partner.paymentMethod = dto.paymentMethod;
+      if (dto.paymentDetails !== undefined)
+        partner.paymentDetails = dto.paymentDetails ?? null;
       if (dto.paymentDisplayLabel !== undefined) {
         partner.paymentDisplayLabel = dto.paymentDisplayLabel ?? null;
       }
-      if (dto.currency !== undefined) partner.currency = dto.currency.toUpperCase();
+      if (dto.currency !== undefined)
+        partner.currency = dto.currency.toUpperCase();
       if (dto.administrativeNotes !== undefined) {
         partner.administrativeNotes = dto.administrativeNotes ?? null;
       }
@@ -371,7 +381,9 @@ export class InfluencerHubService {
   }
 
   async archivePartner(partnerId: string) {
-    const partner = await this.partnerRepository.findOne({ where: { id: partnerId } });
+    const partner = await this.partnerRepository.findOne({
+      where: { id: partnerId },
+    });
 
     if (!partner) {
       throw new NotFoundException('Influencer partner not found.');
@@ -393,13 +405,17 @@ export class InfluencerHubService {
   }
 
   async createLedgerEntry(partnerId: string, dto: AddManualLedgerEntryDto) {
-    const partner = await this.partnerRepository.findOne({ where: { id: partnerId } });
+    const partner = await this.partnerRepository.findOne({
+      where: { id: partnerId },
+    });
 
     if (!partner) {
       throw new NotFoundException('Influencer partner not found.');
     }
 
-    const amountEur = this.formatMoney(this.parseMoney(dto.amountEur, 'Amount'));
+    const amountEur = this.formatMoney(
+      this.parseMoney(dto.amountEur, 'Amount'),
+    );
     const transactionType =
       dto.transactionType ?? InfluencerLedgerTransactionType.MANUAL_ADJUSTMENT;
 
@@ -415,7 +431,9 @@ export class InfluencerHubService {
         amountEur,
         status: dto.status ?? InfluencerLedgerStatus.PENDING,
         notes: dto.notes ?? null,
-        transactionDate: dto.transactionDate ? new Date(dto.transactionDate) : new Date(),
+        transactionDate: dto.transactionDate
+          ? new Date(dto.transactionDate)
+          : new Date(),
       }),
     );
 
@@ -467,7 +485,9 @@ export class InfluencerHubService {
         summary: {
           totalUsers: new Set(converted.map((item) => item.userId)).size,
           totalConversions: converted.length,
-          totalSalesEur: this.sumMoney(converted.map((item) => item.payableAmountEur)),
+          totalSalesEur: this.sumMoney(
+            converted.map((item) => item.payableAmountEur),
+          ),
           lifetimeEarningsEur: this.sumMoney(
             converted.map((item) => item.commissionAmountEur),
           ),
@@ -627,7 +647,9 @@ export class InfluencerHubService {
       paidAt?: Date;
     },
   ) {
-    const attributionRepository = manager.getRepository(InfluencerOrderAttribution);
+    const attributionRepository = manager.getRepository(
+      InfluencerOrderAttribution,
+    );
     const ledgerRepository = manager.getRepository(InfluencerLedgerEntry);
 
     const attribution = await attributionRepository.findOne({
@@ -670,16 +692,19 @@ export class InfluencerHubService {
           referenceId: this.generateReference('COM'),
           amountEur: attribution.commissionAmountEur,
           status: InfluencerLedgerStatus.PENDING,
-          notes: 'Commission generated after successful store purchase verification.',
+          notes:
+            'Commission generated after successful store purchase verification.',
           transactionDate: attribution.convertedAt,
         }),
       );
     }
 
-    await manager.getRepository(InfluencerPartner).update(
-      { id: attribution.partnerId },
-      { lastActivityAt: attribution.convertedAt },
-    );
+    await manager
+      .getRepository(InfluencerPartner)
+      .update(
+        { id: attribution.partnerId },
+        { lastActivityAt: attribution.convertedAt },
+      );
 
     return attribution;
   }
@@ -693,7 +718,9 @@ export class InfluencerHubService {
       notes?: string;
     },
   ) {
-    const attributionRepository = manager.getRepository(InfluencerOrderAttribution);
+    const attributionRepository = manager.getRepository(
+      InfluencerOrderAttribution,
+    );
     const ledgerRepository = manager.getRepository(InfluencerLedgerEntry);
 
     const attribution = await attributionRepository.findOne({
@@ -721,9 +748,12 @@ export class InfluencerHubService {
         orderId: params.orderId,
         transactionType: InfluencerLedgerTransactionType.REVERSAL,
         referenceId: this.generateReference('REV'),
-        amountEur: this.formatMoney(-this.parseMoney(attribution.commissionAmountEur, 'Commission')),
+        amountEur: this.formatMoney(
+          -this.parseMoney(attribution.commissionAmountEur, 'Commission'),
+        ),
         status: InfluencerLedgerStatus.PENDING,
-        notes: params.notes ?? 'Commission reversed after refunded store purchase.',
+        notes:
+          params.notes ?? 'Commission reversed after refunded store purchase.',
         transactionDate: attribution.reversedAt,
       }),
     );
@@ -793,6 +823,11 @@ export class InfluencerHubService {
       );
     }
 
+    this.assertCouponProviderProductPrefix({
+      regularProviderProductId: mapping.regularProviderProductId,
+      discountedProviderProductId: mapping.discountedProviderProductId,
+    });
+
     return this.buildResolution({
       coupon,
       mapping,
@@ -836,7 +871,6 @@ export class InfluencerHubService {
       }
 
       const discountPercentage = this.parseCouponPercentage(params.couponCode);
-      const suffix = String(discountPercentage).padStart(2, '0');
 
       const createdCoupon = await this.couponRepository.manager.transaction(
         async (manager) => {
@@ -876,7 +910,9 @@ export class InfluencerHubService {
                   : null,
               provider: params.provider,
               regularProviderProductId,
-              discountedProviderProductId: `${regularProviderProductId}_${suffix}`,
+              discountedProviderProductId: this.buildCouponProviderProductId(
+                regularProviderProductId,
+              ),
               providerBasePlanId: null,
               providerOfferId: null,
               isActive: true,
@@ -901,30 +937,31 @@ export class InfluencerHubService {
     }
 
     if (coupon.ownerType === InfluencerCouponOwnerType.PRODUCT) {
-      const hasMatchingMapping = (coupon.providerMappings ?? []).some((item) => {
-        const productMatches =
-          params.productDomain === InfluencerCouponProductDomain.COURSE
-            ? item.courseId === params.productId
-            : item.storePackageId === params.productId;
+      const hasMatchingMapping = (coupon.providerMappings ?? []).some(
+        (item) => {
+          const productMatches =
+            params.productDomain === InfluencerCouponProductDomain.COURSE
+              ? item.courseId === params.productId
+              : item.storePackageId === params.productId;
 
-        return (
-          item.isActive &&
-          item.productDomain === params.productDomain &&
-          productMatches &&
-          item.provider === params.provider
-        );
-      });
+          return (
+            item.isActive &&
+            item.productDomain === params.productDomain &&
+            productMatches &&
+            item.provider === params.provider
+          );
+        },
+      );
 
       if (!hasMatchingMapping) {
-        const regularProviderProductId = params.regularProviderProductId?.trim();
+        const regularProviderProductId =
+          params.regularProviderProductId?.trim();
 
         if (!regularProviderProductId) {
           throw new BadRequestException(
             'regularProviderProductId is required to resolve a product-owned coupon.',
           );
         }
-
-        const suffix = String(coupon.userDiscountPercentage).padStart(2, '0');
 
         await this.mappingRepository.save(
           this.mappingRepository.create({
@@ -935,12 +972,15 @@ export class InfluencerHubService {
                 ? params.productId
                 : null,
             storePackageId:
-              params.productDomain === InfluencerCouponProductDomain.STORE_PACKAGE
+              params.productDomain ===
+              InfluencerCouponProductDomain.STORE_PACKAGE
                 ? params.productId
                 : null,
             provider: params.provider,
             regularProviderProductId,
-            discountedProviderProductId: `${regularProviderProductId}_${suffix}`,
+            discountedProviderProductId: this.buildCouponProviderProductId(
+              regularProviderProductId,
+            ),
             providerBasePlanId: null,
             providerOfferId: null,
             isActive: true,
@@ -968,7 +1008,9 @@ export class InfluencerHubService {
     productId: string,
   ) {
     if (productDomain === InfluencerCouponProductDomain.COURSE) {
-      const course = await this.courseRepository.findOne({ where: { id: productId } });
+      const course = await this.courseRepository.findOne({
+        where: { id: productId },
+      });
       return course?.couponCode?.trim().toUpperCase() ?? null;
     }
 
@@ -982,18 +1024,24 @@ export class InfluencerHubService {
 
   private async resolveBasePrice(dto: ValidateInfluencerCouponDto) {
     if (dto.orderSubtotalEur) {
-      return this.formatMoney(this.parseMoney(dto.orderSubtotalEur, 'Subtotal'));
+      return this.formatMoney(
+        this.parseMoney(dto.orderSubtotalEur, 'Subtotal'),
+      );
     }
 
     if (dto.productDomain === InfluencerCouponProductDomain.COURSE) {
-      const course = await this.courseRepository.findOne({ where: { id: dto.productId } });
+      const course = await this.courseRepository.findOne({
+        where: { id: dto.productId },
+      });
 
       if (!course) {
         throw new NotFoundException('Course not found.');
       }
 
       if (!course.price) {
-        throw new BadRequestException('This course has no paid price configured.');
+        throw new BadRequestException(
+          'This course has no paid price configured.',
+        );
       }
 
       return this.formatMoney(this.parseMoney(course.price, 'Course price'));
@@ -1074,13 +1122,15 @@ export class InfluencerHubService {
     this.assertValidDateWindow(dto.startsAt, dto.expiresAt);
 
     const couponRepository = manager.getRepository(InfluencerCoupon);
-    const mappingRepository = manager.getRepository(InfluencerCouponProviderMapping);
+    const mappingRepository = manager.getRepository(
+      InfluencerCouponProviderMapping,
+    );
 
     const couponCode = dto.couponCode.trim().toUpperCase();
 
     if (this.parseCouponPercentage(couponCode) !== dto.userDiscountPercentage) {
       throw new BadRequestException(
-        'Coupon code suffix must match the user discount percentage. Example: RAHIM20 must use 20%.',
+        'Coupon code prefix must match the user discount percentage. Example: RAHIM20 must use 20%.',
       );
     }
 
@@ -1089,7 +1139,9 @@ export class InfluencerHubService {
     });
 
     if (existingByCode && existingByCode.partnerId !== partnerId) {
-      throw new ConflictException('Coupon code is already used by another partner or product.');
+      throw new ConflictException(
+        'Coupon code is already used by another partner or product.',
+      );
     }
 
     const coupon = existingByCode ?? couponRepository.create({ couponCode });
@@ -1122,28 +1174,37 @@ export class InfluencerHubService {
   }
 
   private normalizeProviderMapping(item: InfluencerProviderMappingDto) {
-    const courseId = item.productDomain === InfluencerCouponProductDomain.COURSE ? item.courseId : null;
+    const courseId =
+      item.productDomain === InfluencerCouponProductDomain.COURSE
+        ? item.courseId
+        : null;
     const storePackageId =
       item.productDomain === InfluencerCouponProductDomain.STORE_PACKAGE
         ? item.storePackageId
         : null;
 
-    if (item.productDomain === InfluencerCouponProductDomain.COURSE && !courseId) {
-      throw new BadRequestException('courseId is required for course coupon mappings.');
+    if (
+      item.productDomain === InfluencerCouponProductDomain.COURSE &&
+      !courseId
+    ) {
+      throw new BadRequestException(
+        'courseId is required for course coupon mappings.',
+      );
     }
 
     if (
       item.productDomain === InfluencerCouponProductDomain.STORE_PACKAGE &&
       !storePackageId
     ) {
-      throw new BadRequestException('storePackageId is required for store package coupon mappings.');
-    }
-
-    if (item.regularProviderProductId === item.discountedProviderProductId) {
       throw new BadRequestException(
-        'Regular and discounted provider product IDs must be different.',
+        'storePackageId is required for store package coupon mappings.',
       );
     }
+
+    this.assertCouponProviderProductPrefix({
+      regularProviderProductId: item.regularProviderProductId,
+      discountedProviderProductId: item.discountedProviderProductId,
+    });
 
     return {
       productDomain: item.productDomain,
@@ -1158,13 +1219,18 @@ export class InfluencerHubService {
     };
   }
 
-  private assertValidDateWindow(startsAt?: string | null, expiresAt?: string | null) {
+  private assertValidDateWindow(
+    startsAt?: string | null,
+    expiresAt?: string | null,
+  ) {
     if (!startsAt || !expiresAt) {
       return;
     }
 
     if (new Date(startsAt).getTime() >= new Date(expiresAt).getTime()) {
-      throw new BadRequestException('Coupon expiry date must be after the start date.');
+      throw new BadRequestException(
+        'Coupon expiry date must be after the start date.',
+      );
     }
   }
 
@@ -1217,6 +1283,41 @@ export class InfluencerHubService {
     };
   }
 
+  private buildCouponProviderProductId(
+    regularProviderProductId: string,
+  ): string {
+    const normalized = regularProviderProductId.trim();
+
+    if (!normalized) {
+      throw new BadRequestException(
+        'Regular provider product ID is required to build coupon product ID.',
+      );
+    }
+
+    if (normalized.toLowerCase().startsWith('coupon_')) {
+      throw new BadRequestException(
+        'Regular provider product ID must not start with coupon_.',
+      );
+    }
+
+    return `coupon_${normalized}`;
+  }
+
+  private assertCouponProviderProductPrefix(params: {
+    regularProviderProductId: string;
+    discountedProviderProductId: string;
+  }) {
+    const expected = this.buildCouponProviderProductId(
+      params.regularProviderProductId,
+    );
+
+    if (params.discountedProviderProductId.trim() !== expected) {
+      throw new BadRequestException(
+        `Discounted provider product ID must be "${expected}" for this coupon flow.`,
+      );
+    }
+  }
+
   private mapPartnerDetail(partner: InfluencerPartner) {
     return {
       ...this.mapPartnerListItem(partner),
@@ -1242,18 +1343,20 @@ export class InfluencerHubService {
         startsAt: coupon.startsAt,
         expiresAt: coupon.expiresAt,
         notes: coupon.notes,
-        providerMappings: [...(coupon.providerMappings ?? [])].map((mapping) => ({
-          id: mapping.id,
-          productDomain: mapping.productDomain,
-          courseId: mapping.courseId,
-          storePackageId: mapping.storePackageId,
-          provider: mapping.provider,
-          regularProviderProductId: mapping.regularProviderProductId,
-          discountedProviderProductId: mapping.discountedProviderProductId,
-          providerBasePlanId: mapping.providerBasePlanId,
-          providerOfferId: mapping.providerOfferId,
-          isActive: mapping.isActive,
-        })),
+        providerMappings: [...(coupon.providerMappings ?? [])].map(
+          (mapping) => ({
+            id: mapping.id,
+            productDomain: mapping.productDomain,
+            courseId: mapping.courseId,
+            storePackageId: mapping.storePackageId,
+            provider: mapping.provider,
+            regularProviderProductId: mapping.regularProviderProductId,
+            discountedProviderProductId: mapping.discountedProviderProductId,
+            providerBasePlanId: mapping.providerBasePlanId,
+            providerOfferId: mapping.providerOfferId,
+            isActive: mapping.isActive,
+          }),
+        ),
       })),
     };
   }
@@ -1304,12 +1407,15 @@ export class InfluencerHubService {
   }
 
   private async getPartnerStatsMap(partnerIds: string[]) {
-    const result = new Map<string, {
-      usersLinked: number;
-      totalSalesEur: string;
-      commissionEarnedEur: string;
-      commissionOwedEur: string;
-    }>();
+    const result = new Map<
+      string,
+      {
+        usersLinked: number;
+        totalSalesEur: string;
+        commissionEarnedEur: string;
+        commissionOwedEur: string;
+      }
+    >();
 
     partnerIds.forEach((id) => {
       result.set(id, {
@@ -1343,16 +1449,21 @@ export class InfluencerHubService {
       );
       const pendingLedger = ledgerEntries.filter(
         (item) =>
-          item.partnerId === partnerId && item.status === InfluencerLedgerStatus.PENDING,
+          item.partnerId === partnerId &&
+          item.status === InfluencerLedgerStatus.PENDING,
       );
 
       result.set(partnerId, {
         usersLinked: new Set(converted.map((item) => item.userId)).size,
-        totalSalesEur: this.sumMoney(converted.map((item) => item.payableAmountEur)),
+        totalSalesEur: this.sumMoney(
+          converted.map((item) => item.payableAmountEur),
+        ),
         commissionEarnedEur: this.sumMoney(
           converted.map((item) => item.commissionAmountEur),
         ),
-        commissionOwedEur: this.sumMoney(pendingLedger.map((item) => item.amountEur)),
+        commissionOwedEur: this.sumMoney(
+          pendingLedger.map((item) => item.amountEur),
+        ),
       });
     }
 
@@ -1374,7 +1485,11 @@ export class InfluencerHubService {
     for (const item of attributions) {
       const date = item.convertedAt ?? item.createdAt;
       const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-      trend.set(key, (trend.get(key) ?? 0) + this.parseMoney(item.commissionAmountEur, 'Commission'));
+      trend.set(
+        key,
+        (trend.get(key) ?? 0) +
+          this.parseMoney(item.commissionAmountEur, 'Commission'),
+      );
     }
 
     return [...trend.entries()]
@@ -1386,7 +1501,10 @@ export class InfluencerHubService {
   }
 
   private parseCouponPercentage(couponCode: string) {
-    const match = couponCode.trim().toUpperCase().match(/(\d{2})$/);
+    const match = couponCode
+      .trim()
+      .toUpperCase()
+      .match(/(\d{2})$/);
 
     if (!match) {
       throw new BadRequestException(
@@ -1409,7 +1527,9 @@ export class InfluencerHubService {
     const normalized = `${value}`.trim();
 
     if (!/^-?\d{1,8}(?:\.\d{1,2})?$/.test(normalized)) {
-      throw new BadRequestException(`${fieldName} must be a valid money amount.`);
+      throw new BadRequestException(
+        `${fieldName} must be a valid money amount.`,
+      );
     }
 
     const negative = normalized.startsWith('-');

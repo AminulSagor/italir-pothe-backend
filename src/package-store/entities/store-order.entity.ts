@@ -63,6 +63,24 @@ export class StoreOrder {
   })
   status: StoreOrderStatus;
 
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  checkoutExpiresAt: Date | null;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  cancelledAt: Date | null;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  expiredAt: Date | null;
+
   @CreateDateColumn({
     type: 'timestamptz',
   })

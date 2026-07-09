@@ -564,4 +564,17 @@ export class StoreOrderHistoryQueryDto {
   @IsOptional()
   @IsEnum(StoreSortOrder)
   sortOrder?: StoreSortOrder;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeUnfinished?: boolean;
+}
+
+export class CancelStoreOrderDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  reason?: string;
 }

@@ -19,10 +19,7 @@ import { StorePackage } from './store-package.entity';
 @Index(['provider', 'productId'], {
   unique: true,
 })
-@Index(['packageId', 'provider'], {
-  unique: true,
-  where: '"isActive" = true',
-})
+@Index(['packageId', 'provider', 'isActive'])
 export class StorePackageProviderProduct {
   @PrimaryGeneratedColumn('uuid')
   id: string;

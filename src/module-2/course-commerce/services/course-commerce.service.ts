@@ -135,18 +135,25 @@ export class CourseCommerceService {
         );
       }
 
-      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
-        couponCode: query.couponCode,
-        productDomain: InfluencerCouponProductDomain.COURSE,
-        productId: course.id,
-        provider: query.provider as unknown as InfluencerBillingProvider,
-        regularProviderProductId: providerProduct.productId,
-        basePriceEur: course.price ?? '0.00',
-      });
+      couponResolution =
+        await this.influencerHubService.resolveCouponForCheckout({
+          couponCode: query.couponCode,
+          productDomain: InfluencerCouponProductDomain.COURSE,
+          productId: course.id,
+          provider: query.provider as unknown as InfluencerBillingProvider,
+          regularProviderProductId: providerProduct.productId,
+          basePriceEur: course.price ?? '0.00',
+        });
+
+      providerProduct = this.requireActiveProviderProduct(
+        course,
+        query.provider,
+        couponResolution.discountedProviderProductId,
+      );
 
       quote = await this.buildCourseQuoteFromInfluencerResolution(
         couponResolution,
-        currency,
+        query.currency ?? CommerceCurrency.EUR,
       );
     } else {
       quote = await this.calculateQuote(course, currency);
@@ -279,18 +286,26 @@ export class CourseCommerceService {
     let quote: CalculatedCourseQuote;
 
     if (dto.couponCode?.trim()) {
-      couponResolution = await this.influencerHubService.resolveCouponForCheckout({
-        couponCode: dto.couponCode,
-        productDomain: InfluencerCouponProductDomain.COURSE,
-        productId: course.id,
-        provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
-        regularProviderProductId: regularProviderProduct.productId,
-        basePriceEur: course.price ?? '0.00',
-      });
+      couponResolution =
+        await this.influencerHubService.resolveCouponForCheckout({
+          couponCode: dto.couponCode,
+          productDomain: InfluencerCouponProductDomain.COURSE,
+          productId: course.id,
+          provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
+          regularProviderProductId: regularProviderProduct.productId,
+          basePriceEur: course.price ?? '0.00',
+        });
 
       checkoutProductId = couponResolution.discountedProviderProductId;
-      checkoutBasePlanId = couponResolution.providerBasePlanId;
-      checkoutOfferId = couponResolution.providerOfferId;
+
+      providerProduct = this.requireActiveProviderProduct(
+        course,
+        dto.paymentProvider,
+        checkoutProductId,
+      );
+
+      checkoutBasePlanId = providerProduct.basePlanId;
+      checkoutOfferId = providerProduct.offerId;
 
       if (dto.productId.trim() !== checkoutProductId) {
         throw new BadRequestException(
@@ -308,6 +323,7 @@ export class CourseCommerceService {
         dto.paymentProvider,
         dto.productId,
       );
+
       checkoutProductId = providerProduct.productId;
       checkoutBasePlanId = providerProduct.basePlanId;
       checkoutOfferId = providerProduct.offerId;
@@ -1291,12 +1307,31 @@ export class CourseCommerceService {
     }
   }
 
+  private isCouponProviderProductId(productId: string): boolean {
+    return productId.trim().toLowerCase().startsWith('coupon_');
+  }
+
   private getActiveProviderProduct(
     course: Course,
     provider: CoursePaymentProvider,
+    productId?: string,
   ) {
-    return (course.providerProducts ?? []).find(
+    const activeProducts = (course.providerProducts ?? []).filter(
       (item) => item.provider === provider && item.isActive,
+    );
+
+    if (productId?.trim()) {
+      const requestedProductId = productId.trim();
+
+      return activeProducts.find(
+        (item) => item.productId === requestedProductId,
+      );
+    }
+
+    return (
+      activeProducts.find(
+        (item) => !this.isCouponProviderProductId(item.productId),
+      ) ?? activeProducts[0]
     );
   }
 
@@ -1305,11 +1340,17 @@ export class CourseCommerceService {
     provider: CoursePaymentProvider,
     productId?: string,
   ) {
-    const providerProduct = this.getActiveProviderProduct(course, provider);
+    const providerProduct = this.getActiveProviderProduct(
+      course,
+      provider,
+      productId,
+    );
 
     if (!providerProduct) {
       throw new BadRequestException(
-        'This course has no active product mapping for the selected provider.',
+        productId
+          ? 'This course has no active mapping for the supplied store product ID.'
+          : 'This course has no active regular product mapping for the selected provider.',
       );
     }
 
@@ -1318,12 +1359,6 @@ export class CourseCommerceService {
     ) {
       throw new BadRequestException(
         'Lifetime courses must use non-consumable store products.',
-      );
-    }
-
-    if (productId && providerProduct.productId !== productId.trim()) {
-      throw new BadRequestException(
-        'The supplied store product ID does not match the active course mapping.',
       );
     }
 
