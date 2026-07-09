@@ -19,10 +19,7 @@ import {
 @Index(['provider', 'productId'], {
   unique: true,
 })
-@Index(['courseId', 'provider'], {
-  unique: true,
-  where: '"isActive" = true',
-})
+@Index(['courseId', 'provider', 'isActive'])
 export class CourseProviderProduct {
   @PrimaryGeneratedColumn('uuid')
   id: string;

@@ -16,6 +16,7 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 import {
+  CancelStoreOrderDto,
   CreateStoreOrderDto,
   PublicStorePackageQueryDto,
   StoreOrderHistoryQueryDto,
@@ -158,6 +159,20 @@ export class PackageStoreController {
       orderId,
       dto,
     });
+  }
+
+  @Post('orders/:orderId/cancel')
+  async cancelOrder(
+    @Param('orderId', new ParseUUIDPipe({ version: '4' }))
+    orderId: string,
+    @Body() dto: CancelStoreOrderDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.packageStoreService.cancelOrder(
+      this.getUserId(request),
+      orderId,
+      dto,
+    );
   }
 
   @Get('orders/:orderId/invoice')

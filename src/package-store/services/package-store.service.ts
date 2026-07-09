@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -37,6 +38,7 @@ import {
   StorePackageQuoteQueryDto,
   UpdateCvEconomyConfigDto,
   UpdateStorePackageDto,
+  CancelStoreOrderDto,
 } from '../dto/package-store.dto';
 import { CvEconomyConfig } from '../entities/cv-economy-config.entity';
 import { StoreOrder } from '../entities/store-order.entity';
@@ -93,6 +95,7 @@ import {
   InfluencerOrderDomain,
   type InfluencerCheckoutCouponResolution,
 } from 'src/influencer-hub/types/influencer-hub.type';
+import { Cron } from '@nestjs/schedule';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -223,9 +226,81 @@ export class PackageStoreService {
     private readonly influencerHubService: InfluencerHubService,
   ) {}
 
+  private readonly logger = new Logger(PackageStoreService.name);
   // =========================================================
   // Admin dashboard
   // =========================================================
+
+  @Cron('*/5 * * * *', {
+    name: 'package-store-expire-stale-checkouts',
+  })
+  async expireStaleCheckoutOrders(): Promise<void> {
+    const now = new Date();
+
+    const orders = await this.orderRepository
+      .createQueryBuilder('storeOrder')
+      .where('storeOrder.status = :status', {
+        status: StoreOrderStatus.PENDING,
+      })
+      .andWhere('storeOrder.checkoutExpiresAt IS NOT NULL')
+      .andWhere('storeOrder.checkoutExpiresAt <= :now', {
+        now,
+      })
+      .orderBy('storeOrder.checkoutExpiresAt', 'ASC')
+      .limit(100)
+      .getMany();
+
+    for (const order of orders) {
+      try {
+        await this.expireSingleCheckoutOrder(order.id);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to expire checkout order ${order.id}: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`,
+        );
+      }
+    }
+  }
+
+  private async expireSingleCheckoutOrder(orderId: string): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const order = await this.getOrderGraphWithManager(manager, orderId);
+
+      if (order.status !== StoreOrderStatus.PENDING) {
+        return;
+      }
+
+      if (
+        order.checkoutExpiresAt &&
+        order.checkoutExpiresAt.getTime() > Date.now()
+      ) {
+        return;
+      }
+
+      order.status = StoreOrderStatus.EXPIRED;
+      order.expiredAt = new Date();
+
+      order.payment.failureCode = 'checkout_expired';
+      order.payment.failureMessage =
+        'Checkout expired before payment was completed.';
+
+      await manager.getRepository(StoreOrder).save(order);
+
+      await manager.getRepository(StoreOrderPayment).save(order.payment);
+
+      await this.addTimelineEvent(
+        manager,
+        order.id,
+        StoreTimelineEventType.ORDER_EXPIRED,
+        'Checkout expired',
+        'The checkout order expired before payment was completed.',
+        {
+          checkoutExpiresAt: order.checkoutExpiresAt?.toISOString() ?? null,
+        },
+      );
+    });
+  }
 
   async getDashboard() {
     const [orders, packages] = await Promise.all([
@@ -643,25 +718,6 @@ export class PackageStoreService {
           manager,
         );
 
-        const isActive = dto.isActive ?? true;
-
-        if (isActive) {
-          await repository
-            .createQueryBuilder()
-            .update(StorePackageProviderProduct)
-            .set({
-              isActive: false,
-            })
-            .where('"packageId" = :packageId', {
-              packageId,
-            })
-            .andWhere('provider = :provider', {
-              provider: dto.provider,
-            })
-            .andWhere('"isActive" = true')
-            .execute();
-        }
-
         const saved = await repository.save(
           repository.create({
             packageId,
@@ -670,7 +726,7 @@ export class PackageStoreService {
             productType: dto.productType,
             basePlanId,
             offerId,
-            isActive,
+            isActive: dto.isActive ?? true,
           }),
         );
 
@@ -801,26 +857,6 @@ export class PackageStoreService {
         manager,
       );
 
-      if (isActive) {
-        await repository
-          .createQueryBuilder()
-          .update(StorePackageProviderProduct)
-          .set({
-            isActive: false,
-          })
-          .where('"packageId" = :packageId', {
-            packageId,
-          })
-          .andWhere('provider = :provider', {
-            provider: current.provider,
-          })
-          .andWhere('id != :providerProductId', {
-            providerProductId,
-          })
-          .andWhere('"isActive" = true')
-          .execute();
-      }
-
       current.productId = productId;
       current.productType = productType;
       current.basePlanId = basePlanId;
@@ -833,21 +869,33 @@ export class PackageStoreService {
     return this.getProviderProductById(packageId, providerProductId);
   }
 
-  async deactivateProviderProduct(
-    packageId: string,
-    providerProductId: string,
-  ) {
+  async deleteProviderProduct(packageId: string, providerProductId: string) {
     const providerProduct = await this.getProviderProductEntity(
       packageId,
       providerProductId,
     );
 
-    providerProduct.isActive = false;
-    await this.providerProductRepository.save(providerProduct);
+    const referencedOrderCount =
+      await this.orderProviderSnapshotRepository.count({
+        where: {
+          providerProductId: providerProduct.id,
+        },
+      });
+
+    if (referencedOrderCount > 0) {
+      throw new ConflictException(
+        'This provider product mapping is already used by an order. Deactivate it instead of deleting it.',
+      );
+    }
+
+    await this.providerProductRepository.delete({
+      id: providerProduct.id,
+      packageId,
+    });
 
     return {
-      message: 'Provider product mapping deactivated successfully.',
-      providerProduct: this.mapProviderProduct(providerProduct),
+      message: 'Provider product mapping deleted successfully.',
+      providerProductId,
     };
   }
 
@@ -1162,17 +1210,18 @@ export class PackageStoreService {
           basePriceEur: storePackage.commerce.priceEur,
         });
 
+      const discountedProviderProduct = this.requireActiveProviderProduct(
+        storePackage,
+        query.provider,
+        couponResolution.discountedProviderProductId,
+      );
+
       quote = await this.buildStoreQuoteFromInfluencerResolution(
         couponResolution,
         currency,
       );
 
-      storeProduct = {
-        ...storeProduct,
-        productId: couponResolution.discountedProviderProductId,
-        basePlanId: couponResolution.providerBasePlanId,
-        offerId: couponResolution.providerOfferId,
-      };
+      storeProduct = this.mapProviderProduct(discountedProviderProduct);
     } else {
       quote = await this.calculateStoreQuote(storePackage, currency);
     }
@@ -1272,8 +1321,15 @@ export class PackageStoreService {
         });
 
       checkoutProductId = couponResolution.discountedProviderProductId;
-      checkoutBasePlanId = couponResolution.providerBasePlanId;
-      checkoutOfferId = couponResolution.providerOfferId;
+
+      providerProduct = this.requireActiveProviderProduct(
+        storePackage,
+        dto.paymentProvider,
+        checkoutProductId,
+      );
+
+      checkoutBasePlanId = providerProduct.basePlanId;
+      checkoutOfferId = providerProduct.offerId;
 
       if (dto.productId.trim() !== checkoutProductId) {
         throw new BadRequestException(
@@ -1291,6 +1347,7 @@ export class PackageStoreService {
         dto.paymentProvider,
         dto.productId,
       );
+
       checkoutProductId = providerProduct.productId;
       checkoutBasePlanId = providerProduct.basePlanId;
       checkoutOfferId = providerProduct.offerId;
@@ -1325,6 +1382,9 @@ export class PackageStoreService {
           packageId: storePackage.id,
           idempotencyKey: dto.idempotencyKey,
           status: StoreOrderStatus.PENDING,
+          checkoutExpiresAt: this.buildCheckoutExpiresAt(),
+          cancelledAt: null,
+          expiredAt: null,
         }),
       );
 
@@ -1424,6 +1484,7 @@ export class PackageStoreService {
           providerProductId: providerProduct.id,
           currency: quote.selectedCurrency,
           paymentAmount: quote.totalAmount,
+          checkoutExpiresAt: order.checkoutExpiresAt?.toISOString() ?? null,
         },
       );
 
@@ -1443,30 +1504,134 @@ export class PackageStoreService {
     return this.findOwnedOrderById(userId, orderId);
   }
 
+  private buildCheckoutExpiresAt(): Date {
+    const minutes = this.parsePositiveInteger(
+      this.configService.get<string>('PACKAGE_STORE_CHECKOUT_TTL_MINUTES'),
+      15,
+    );
+
+    return new Date(Date.now() + minutes * 60 * 1000);
+  }
+
+  private parsePositiveInteger(value: string | undefined, fallback: number) {
+    const parsed = Number(value);
+
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      return fallback;
+    }
+
+    return parsed;
+  }
+
   async getCheckout(userId: string, orderId: string) {
     const order = await this.getOwnedOrderGraph(userId, orderId);
 
-    if (order.status !== StoreOrderStatus.PENDING) {
+    const currentOrder = await this.expireOrderIfTimedOut(order);
+
+    if (currentOrder.status !== StoreOrderStatus.PENDING) {
       throw new BadRequestException(
-        `Checkout is unavailable for an order with status ${order.status}.`,
+        `Checkout is not available for order status ${currentOrder.status}.`,
       );
     }
 
     return {
-      order: this.mapOrder(order),
-      paymentMethod: {
-        provider: order.providerSnapshot.provider,
-        label:
-          order.providerSnapshot.provider === StorePaymentProvider.GOOGLE_PLAY
-            ? 'Google Play'
-            : 'App Store',
-        productId: order.providerSnapshot.productId,
-        productType: order.providerSnapshot.productType,
-        basePlanId: order.providerSnapshot.basePlanId,
-        offerId: order.providerSnapshot.offerId,
-        developmentVerification: this.isDevelopmentPaymentMode(),
-      },
+      order: this.mapOrder(currentOrder),
+
+      checkoutExpiresAt: currentOrder.checkoutExpiresAt,
+
+      paymentOptions: [
+        {
+          method: currentOrder.payment.provider,
+          label:
+            currentOrder.payment.provider === StorePaymentProvider.GOOGLE_PLAY
+              ? 'Google Play'
+              : 'App Store',
+          amount: currentOrder.pricing.paymentAmount,
+          currency: currentOrder.pricing.paymentCurrency,
+          providerProductId: currentOrder.providerSnapshot.productId,
+          productType: currentOrder.providerSnapshot.productType,
+          basePlanId: currentOrder.providerSnapshot.basePlanId,
+          offerId: currentOrder.providerSnapshot.offerId,
+        },
+      ],
+
+      note: 'Google Play or App Store controls the final localized charge.',
     };
+  }
+
+  private async expireOrderIfTimedOut(order: StoreOrder): Promise<StoreOrder> {
+    if (
+      order.status !== StoreOrderStatus.PENDING ||
+      !order.checkoutExpiresAt ||
+      order.checkoutExpiresAt.getTime() > Date.now()
+    ) {
+      return order;
+    }
+
+    await this.expireSingleCheckoutOrder(order.id);
+
+    return this.getOrderGraph(order.id);
+  }
+
+  async cancelOrder(userId: string, orderId: string, dto: CancelStoreOrderDto) {
+    return this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(StoreOrder);
+
+      const order = await this.getOrderGraphWithManager(
+        manager,
+        orderId,
+        userId,
+      );
+
+      if (order.status === StoreOrderStatus.COMPLETED) {
+        throw new ConflictException('A completed order cannot be cancelled.');
+      }
+
+      if (order.status === StoreOrderStatus.REFUNDED) {
+        throw new ConflictException('A refunded order cannot be cancelled.');
+      }
+
+      if (order.status === StoreOrderStatus.CANCELLED) {
+        return this.mapOrder(order);
+      }
+
+      if (order.status === StoreOrderStatus.EXPIRED) {
+        return this.mapOrder(order);
+      }
+
+      if (order.status !== StoreOrderStatus.PENDING) {
+        throw new BadRequestException(
+          `Order cannot be cancelled from status ${order.status}.`,
+        );
+      }
+
+      const now = new Date();
+
+      order.status = StoreOrderStatus.CANCELLED;
+      order.cancelledAt = now;
+
+      order.payment.failureCode = 'user_cancelled';
+      order.payment.failureMessage =
+        dto.reason?.trim() || 'User cancelled checkout before payment.';
+
+      await orderRepository.save(order);
+
+      await manager.getRepository(StoreOrderPayment).save(order.payment);
+
+      await this.addTimelineEvent(
+        manager,
+        order.id,
+        StoreTimelineEventType.ORDER_CANCELLED,
+        'Checkout cancelled',
+        order.payment.failureMessage,
+        {
+          cancelledBy: 'user',
+          reason: dto.reason?.trim() || null,
+        },
+      );
+
+      return this.mapOrder(order);
+    });
   }
 
   async verifyGooglePlayPurchase(params: {
@@ -1934,6 +2099,14 @@ export class PackageStoreService {
     });
 
     let filtered = [...storeItems, ...courseItems];
+
+    if (!query.includeUnfinished) {
+      filtered = filtered.filter((item) =>
+        [StoreOrderStatus.COMPLETED, StoreOrderStatus.REFUNDED].includes(
+          item.status,
+        ),
+      );
+    }
 
     if (query.status) {
       filtered = filtered.filter((item) => item.status === query.status);
@@ -3088,6 +3261,20 @@ export class PackageStoreService {
         return this.buildCompletionResponse(order, balances);
       }
 
+      await this.expireOrderIfTimedOut(order);
+
+      if (order.status === StoreOrderStatus.EXPIRED) {
+        throw new BadRequestException(
+          'Checkout expired before payment verification completed. Please create a new order.',
+        );
+      }
+
+      if (order.status === StoreOrderStatus.CANCELLED) {
+        throw new BadRequestException(
+          'Checkout was cancelled before payment verification completed.',
+        );
+      }
+
       if (order.status !== StoreOrderStatus.PENDING) {
         throw new BadRequestException(
           `Order cannot be completed from status ${order.status}.`,
@@ -3270,12 +3457,35 @@ export class PackageStoreService {
     }
   }
 
+  private isCouponProviderProductId(productId: string): boolean {
+    return productId.trim().toLowerCase().startsWith('coupon_');
+  }
+
   private getActiveProviderProduct(
     storePackage: StorePackage,
     provider: StorePaymentProvider,
+    productId?: string,
   ) {
-    return (storePackage.providerProducts ?? []).find(
+    const activeProducts = (storePackage.providerProducts ?? []).filter(
       (item) => item.provider === provider && item.isActive,
+    );
+
+    if (productId?.trim()) {
+      const requestedProductId = productId.trim();
+
+      return activeProducts.find(
+        (item) => item.productId === requestedProductId,
+      );
+    }
+
+    /*
+     * Default product means regular product.
+     * Coupon product must be selected only after coupon validation.
+     */
+    return (
+      activeProducts.find(
+        (item) => !this.isCouponProviderProductId(item.productId),
+      ) ?? activeProducts[0]
     );
   }
 
@@ -3287,17 +3497,14 @@ export class PackageStoreService {
     const providerProduct = this.getActiveProviderProduct(
       storePackage,
       provider,
+      productId,
     );
 
     if (!providerProduct) {
       throw new BadRequestException(
-        'This package has no active product mapping for the selected provider.',
-      );
-    }
-
-    if (productId && providerProduct.productId !== productId.trim()) {
-      throw new BadRequestException(
-        'The supplied store product ID does not match the active package mapping.',
+        productId
+          ? 'This package has no active mapping for the supplied store product ID.'
+          : 'This package has no active regular product mapping for the selected provider.',
       );
     }
 
@@ -3910,6 +4117,10 @@ export class PackageStoreService {
 
         occurredAt: item.occurredAt,
       })),
+
+      checkoutExpiresAt: order.checkoutExpiresAt,
+      cancelledAt: order.cancelledAt,
+      expiredAt: order.expiredAt,
 
       createdAt: order.createdAt,
 

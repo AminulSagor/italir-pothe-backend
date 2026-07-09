@@ -55,11 +55,15 @@ export enum StoreOrderStatus {
   PENDING = 'pending',
   COMPLETED = 'completed',
   FAILED = 'failed',
+  CANCELLED = 'cancelled',
+  EXPIRED = 'expired',
   REFUNDED = 'refunded',
 }
 
 export enum StoreTimelineEventType {
   ORDER_PLACED = 'order_placed',
+  ORDER_CANCELLED = 'order_cancelled',
+  ORDER_EXPIRED = 'order_expired',
   PAYMENT_PROCESSED = 'payment_processed',
   PAYMENT_FAILED = 'payment_failed',
   ENTITLEMENT_GRANTED = 'entitlement_granted',
