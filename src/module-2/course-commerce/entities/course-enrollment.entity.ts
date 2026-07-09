@@ -30,8 +30,8 @@ export class CourseEnrollment {
   userId: string;
 
   @Index()
-  @Column({ type: 'uuid' })
-  courseId: string;
+  @Column({ type: 'uuid', nullable: true })
+  courseId: string | null;
 
   @Index()
   @Column({ type: 'uuid' })
@@ -91,10 +91,11 @@ export class CourseEnrollment {
   user: User | null;
 
   @ManyToOne(() => Course, {
-    onDelete: 'RESTRICT',
+    nullable: true,
+    onDelete: 'SET NULL',
   })
   @JoinColumn({ name: 'courseId' })
-  course: Course;
+  course: Course | null;
 
   @ManyToOne(() => CoursePurchaseOrder, {
     onDelete: 'RESTRICT',

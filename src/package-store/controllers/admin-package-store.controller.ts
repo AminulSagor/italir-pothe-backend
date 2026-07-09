@@ -184,12 +184,14 @@ export class AdminPackageStoreController {
   ) {
     const invoice = await this.packageStoreService.getAdminInvoice(orderId);
 
-    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.setHeader('Content-Type', 'application/pdf');
     response.setHeader(
       'Content-Disposition',
       `attachment; filename="${invoice.fileName}"`,
     );
-    response.send(invoice.html);
+    response.setHeader('Content-Length', invoice.pdfBuffer.length.toString());
+
+    response.end(invoice.pdfBuffer);
   }
 
   @Post('orders/:orderId/refund')

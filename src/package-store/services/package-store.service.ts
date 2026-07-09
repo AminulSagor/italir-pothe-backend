@@ -96,6 +96,7 @@ import {
   type InfluencerCheckoutCouponResolution,
 } from 'src/influencer-hub/types/influencer-hub.type';
 import { Cron } from '@nestjs/schedule';
+import { PackageStoreInvoiceService } from './package-store-invoice.service';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -209,6 +210,8 @@ export class PackageStoreService {
 
     @InjectRepository(ProviderRefundOperation)
     private readonly refundOperationRepository: Repository<ProviderRefundOperation>,
+
+    private readonly packageStoreInvoiceService: PackageStoreInvoiceService,
 
     private readonly appStoreBillingService: AppStoreBillingService,
 
@@ -2224,7 +2227,7 @@ export class PackageStoreService {
       );
     }
 
-    return this.buildInvoice(order);
+    return this.packageStoreInvoiceService.buildInvoice(order);
   }
 
   async getAdminInvoice(orderId: string) {
@@ -2239,7 +2242,7 @@ export class PackageStoreService {
       );
     }
 
-    return this.buildInvoice(order);
+    return this.packageStoreInvoiceService.buildInvoice(order);
   }
 
   // =========================================================
@@ -4385,148 +4388,6 @@ export class PackageStoreService {
         occurredAt: new Date(),
       }),
     );
-  }
-
-  // =========================================================
-  // Invoice
-  // =========================================================
-
-  private buildInvoice(order: StoreOrder) {
-    const packageName = this.escapeHtml(order.snapshot.packageName);
-
-    const couponRow =
-      order.pricing.discountPercentage > 0
-        ? `
-          <tr>
-            <th>
-              Coupon ${
-                order.pricing.couponCode
-                  ? `(${this.escapeHtml(order.pricing.couponCode)})`
-                  : ''
-              }
-            </th>
-
-            <td class="right">
-              -€${order.pricing.discountAmountEur}
-            </td>
-          </tr>
-        `
-        : '';
-
-    const html = `
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8" />
-
-          <title>
-            Invoice ${this.escapeHtml(order.orderNumber)}
-          </title>
-
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              margin: 40px;
-              color: #1f2937;
-            }
-
-            .header {
-              margin-bottom: 32px;
-            }
-
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-top: 24px;
-            }
-
-            th,
-            td {
-              padding: 12px;
-              border-botto    const orderRepository = manager.getRepository(StoreOrder);
-    const lockQuery = orderRepository
-      .createQueryBuilder('storeOrder')
-      .select('storeOrder.id')
-      .where('storeOrder.id = :orderId', { orderId })
-      .setLock('pessimistic_write');
-
-    if (userId) {
-      lockQuery.andWhere('storeOrder.userId = :userId', { userId });
-    }
-
-    // Lock only the root order row. PostgreSQL cannot apply FOR UPDATE to
-    // nullable rows produced by the LEFT JOIN relations below.
-    const lockedOrder = await lockQuery.getOne();
-
-    if (!lockedOrder) {
-      throw new NotFoundException('Store order not found.');
-    }
-
-    const order = await orderRepository.findOne({
-      where: userId
-        ? { id: lockedOrder.id, userId }
-        : { id: lockedOrder.id },
-      relations: [
-        'snapshot',
-        'providerSnapshot',
-        'providerTransaction',
-        'pricing',
-        'payment',
-        'reversal',
-        'timeline',
-        'package',
-        'user',
-      ],
-        ${this.escapeHtml(order.status)}
-            </p>
-
-            <p>
-              Date:
-              ${
-                order.payment.paidAt
-                  ? order.payment.paidAt.toISOString()
-                  : order.createdAt.toISOString()
-              }
-            </p>
-          </div>
-
-          <table>
-            <tr>
-              <th>Package</th>
-              <td class="right">${packageName}</td>
-            </tr>
-
-            <tr>
-              <th>Package Price</th>
-              <td class="right">
-                €${order.pricing.basePriceEur}
-              </td>
-            </tr>
-
-            ${couponRow}
-
-            <tr>
-              <th class="total">
-                Total Amount Paid
-              </th>
-
-              <td class="right total">
-                ${this.formatCurrencyAmount(
-                  order.pricing.paymentAmount,
-                  order.pricing.paymentCurrency,
-                )}
-              </td>
-            </tr>
-          </table>
-        </body>
-      </html>
-    `;
-
-    return {
-      fileName: `invoice-${order.orderNumber}.html`,
-
-      html,
-    };
   }
 
   // =========================================================

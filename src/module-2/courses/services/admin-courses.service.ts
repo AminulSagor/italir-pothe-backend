@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Not, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Not, Repository } from 'typeorm';
 
 import { Lesson, LessonStatus } from '../../lessons/entities/lesson.entity';
 import {
@@ -50,6 +50,8 @@ import {
   CourseEnrollmentStatus,
   CoursePurchaseStatus,
 } from 'src/module-2/course-commerce/types/course-commerce.type';
+import { UserCourseEnrollment } from '../entities/user-course-enrollment.entity';
+import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/course-provider-product.entity';
 
 @Injectable()
 export class AdminCoursesService {
@@ -385,17 +387,21 @@ export class AdminCoursesService {
       course.id,
     );
 
-    const recordsToBeDeleted = await this.buildCourseOwnedDeleteReport(course);
+    const recordsToBeDetached = await this.buildCourseReferenceDetachReport(
+      course.id,
+    );
 
     return {
       courseId: course.id,
       status: course.status,
-      canDeletePermanently: !dependencies.hasBlockingDependencies,
+      canDeletePermanently: course.status === CourseStatus.ARCHIVED,
+      requiresArchiveFirst: course.status !== CourseStatus.ARCHIVED,
       dependencies,
-      recordsToBeDeleted,
-      recommendation: dependencies.hasBlockingDependencies
-        ? 'Keep this course archived. Permanent delete is blocked because the course has enrollment, purchase, or revenue history.'
-        : 'This course has no blocking business dependency. Permanent delete will remove the course with its syllabus, lessons, quizzes, vocabulary, final exam, and related learning records.',
+      recordsToBeDetached,
+      recommendation:
+        course.status === CourseStatus.ARCHIVED
+          ? 'Permanent delete will remove only the course row. Enrollment, purchase, certificate, exam attempt, provider-product, lesson, and chapter records will be preserved with courseId set to null.'
+          : 'Archive the course before permanent deletion.',
     };
   }
 
@@ -412,143 +418,12 @@ export class AdminCoursesService {
       course.id,
     );
 
-    if (dependencies.hasBlockingDependencies) {
-      throw new BadRequestException({
-        message:
-          'Course cannot be permanently deleted because it has enrollment, purchase, or revenue history. Keep it archived to preserve historical data.',
-        dependencies,
-      });
-    }
-
-    const recordsToBeDeleted = await this.buildCourseOwnedDeleteReport(course);
+    const detachedRecords = await this.buildCourseReferenceDetachReport(
+      course.id,
+    );
 
     await this.dataSource.transaction(async (manager) => {
-      const ids = await this.buildCourseOwnedRecordIds(course);
-
-      await this.deleteByIds(
-        manager.getRepository(ExamReviewMetric),
-        ids.examReviewMetricIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamReview),
-        ids.examReviewIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(Certificate),
-        ids.certificateIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamAnswerItem),
-        ids.examAnswerItemIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamAnswer),
-        ids.examAnswerIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamAttempt),
-        ids.examAttemptIds,
-      );
-
-      await this.deleteByIds(
-        manager.getRepository(ExamAcceptedAnswer),
-        ids.examAcceptedAnswerIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamQuestionOption),
-        ids.examQuestionOptionIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamMatchingPair),
-        ids.examMatchingPairIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamSequenceItem),
-        ids.examSequenceItemIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamQuestion),
-        ids.examQuestionIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamSectionRule),
-        ids.examSectionRuleIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamSection),
-        ids.examSectionIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(ExamTemplate),
-        ids.examTemplateIds,
-      );
-
-      await this.deleteByIds(
-        manager.getRepository(QuizAttemptAnswerItem),
-        ids.quizAttemptAnswerItemIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(QuizAttemptAnswer),
-        ids.quizAttemptAnswerIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(QuizSession),
-        ids.quizSessionIds,
-      );
-
-      await this.deleteByIds(
-        manager.getRepository(QuizAcceptedAnswer),
-        ids.quizAcceptedAnswerIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(QuizQuestionOption),
-        ids.quizQuestionOptionIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(QuizMatchingPair),
-        ids.quizMatchingPairIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(QuizSequenceItem),
-        ids.quizSequenceItemIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(QuizQuestion),
-        ids.quizQuestionIds,
-      );
-      await this.deleteByIds(manager.getRepository(Quiz), ids.quizIds);
-
-      await this.deleteByIds(
-        manager.getRepository(VocabularyReviewSessionItem),
-        ids.vocabularyReviewSessionItemIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(VocabularyReviewSession),
-        ids.vocabularyReviewSessionIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(UserVocabularyProgress),
-        ids.userVocabularyProgressIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(LessonVocabulary),
-        ids.vocabularyIds,
-      );
-
-      await this.deleteByIds(
-        manager.getRepository(UserLessonProgress),
-        ids.userLessonProgressIds,
-      );
-      await this.deleteByIds(
-        manager.getRepository(UserCourseProgress),
-        ids.userCourseProgressIds,
-      );
-
-      await this.deleteByIds(manager.getRepository(Lesson), ids.lessonIds);
-      await this.deleteByIds(
-        manager.getRepository(CourseChapter),
-        ids.chapterIds,
-      );
+      await this.detachCourseReferences(manager, course.id);
 
       await manager.getRepository(Course).delete({
         id: course.id,
@@ -556,9 +431,11 @@ export class AdminCoursesService {
     });
 
     return {
-      message: 'Course permanently deleted successfully.',
+      message:
+        'Course permanently deleted successfully. Historical records were preserved and detached from the deleted course.',
       id: course.id,
-      deletedRecords: recordsToBeDeleted,
+      preservedDependencies: dependencies,
+      detachedRecords,
     };
   }
 
@@ -602,65 +479,183 @@ export class AdminCoursesService {
     const revenueHistoryCount =
       await this.getCourseRevenueHistoryCount(courseId);
 
-    const hasBlockingDependencies =
-      studentEnrollmentCount > 0 ||
-      purchaseHistoryCount > 0 ||
-      revenueHistoryCount > 0;
-
     return {
-      hasBlockingDependencies,
+      hasHistoricalDependencies:
+        studentEnrollmentCount > 0 ||
+        purchaseHistoryCount > 0 ||
+        revenueHistoryCount > 0,
+      blocksPermanentDelete: false,
       studentEnrollmentCount,
       purchaseHistoryCount,
       revenueHistoryCount,
     };
   }
 
-  private async buildCourseOwnedDeleteReport(course: Course) {
-    const ids = await this.buildCourseOwnedRecordIds(course);
+  private async buildCourseReferenceDetachReport(courseId: string) {
+    const [
+      chapterCount,
+      lessonCount,
+      providerProductCount,
+      enrollmentCount,
+      purchaseOrderCount,
+      certificateCount,
+      examTemplateCount,
+      examAttemptCount,
+      legacyEnrollmentCount,
+    ] = await Promise.all([
+      this.dataSource.getRepository(CourseChapter).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(Lesson).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(CourseProviderProduct).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(CourseEnrollment).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(CoursePurchaseOrder).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(Certificate).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(ExamTemplate).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(ExamAttempt).count({
+        where: {
+          courseId,
+        },
+      }),
+
+      this.dataSource.getRepository(UserCourseEnrollment).count({
+        where: {
+          courseId,
+        },
+      }),
+    ]);
 
     return {
-      chapterCount: ids.chapterIds.length,
-      lessonCount: ids.lessonIds.length,
-
-      quizCount: ids.quizIds.length,
-      quizQuestionCount: ids.quizQuestionIds.length,
-      quizSessionCount: ids.quizSessionIds.length,
-      quizAttemptAnswerCount: ids.quizAttemptAnswerIds.length,
-      quizAttemptAnswerItemCount: ids.quizAttemptAnswerItemIds.length,
-
-      vocabularyCount: ids.vocabularyIds.length,
-      userVocabularyProgressCount: ids.userVocabularyProgressIds.length,
-      vocabularyReviewSessionCount: ids.vocabularyReviewSessionIds.length,
-      vocabularyReviewSessionItemCount:
-        ids.vocabularyReviewSessionItemIds.length,
-
-      examTemplateCount: ids.examTemplateIds.length,
-      examSectionCount: ids.examSectionIds.length,
-      examQuestionCount: ids.examQuestionIds.length,
-      examAttemptCount: ids.examAttemptIds.length,
-      examAnswerCount: ids.examAnswerIds.length,
-      examAnswerItemCount: ids.examAnswerItemIds.length,
-      examReviewCount: ids.examReviewIds.length,
-      examReviewMetricCount: ids.examReviewMetricIds.length,
-
-      certificateCount: ids.certificateIds.length,
-
-      userCourseProgressCount: ids.userCourseProgressIds.length,
-      userLessonProgressCount: ids.userLessonProgressIds.length,
+      chapterCount,
+      lessonCount,
+      providerProductCount,
+      enrollmentCount,
+      purchaseOrderCount,
+      certificateCount,
+      examTemplateCount,
+      examAttemptCount,
+      legacyEnrollmentCount,
     };
   }
 
-  private async deleteByIds<T extends { id: string }>(
-    repository: Repository<T>,
-    ids: string[],
+  private async detachCourseReferences(
+    manager: EntityManager,
+    courseId: string,
   ) {
-    if (ids.length === 0) {
-      return;
-    }
+    await manager.getRepository(CourseEnrollment).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
 
-    await repository.delete({
-      id: In(ids),
-    } as any);
+    await manager.getRepository(CoursePurchaseOrder).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
+
+    await manager.getRepository(Certificate).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
+
+    await manager.getRepository(ExamAttempt).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
+
+    await manager.getRepository(ExamTemplate).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
+
+    await manager.getRepository(CourseProviderProduct).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+        isActive: false,
+      },
+    );
+
+    await manager.getRepository(UserCourseEnrollment).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
+
+    await manager.getRepository(CourseChapter).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
+
+    await manager.getRepository(Lesson).update(
+      {
+        courseId,
+      },
+      {
+        courseId: null,
+      },
+    );
   }
 
   private async getCourseStudentEnrollmentCounts(courseIds: string[]) {

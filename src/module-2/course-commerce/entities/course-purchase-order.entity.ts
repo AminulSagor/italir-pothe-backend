@@ -40,8 +40,8 @@ export class CoursePurchaseOrder {
   userId: string;
 
   @Index()
-  @Column({ type: 'uuid' })
-  courseId: string;
+  @Column({ type: 'uuid', nullable: true })
+  courseId: string | null;
 
   /**
    * Existing Course.price value at checkout.
@@ -158,10 +158,11 @@ export class CoursePurchaseOrder {
   user: User | null;
 
   @ManyToOne(() => Course, {
-    onDelete: 'RESTRICT',
+    nullable: true,
+    onDelete: 'SET NULL',
   })
   @JoinColumn({ name: 'courseId' })
-  course: Course;
+  course: Course | null;
 
   @OneToOne(
     () => CourseOrderProviderSnapshot,

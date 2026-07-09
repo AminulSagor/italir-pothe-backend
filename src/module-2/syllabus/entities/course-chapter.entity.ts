@@ -19,8 +19,8 @@ export class CourseChapter {
   id: string;
 
   @Index()
-  @Column({ type: 'uuid' })
-  courseId: string;
+  @Column({ type: 'uuid', nullable: true })
+  courseId: string | null;
 
   @Column({ type: 'varchar', length: 180 })
   title: string;
@@ -38,10 +38,11 @@ export class CourseChapter {
   updatedAt: Date;
 
   @ManyToOne(() => Course, (course) => course.chapters, {
-    onDelete: 'CASCADE',
+    nullable: true,
+    onDelete: 'SET NULL',
   })
   @JoinColumn({ name: 'courseId' })
-  course: Course;
+  course: Course | null;
 
   @OneToMany(() => Lesson, (lesson) => lesson.chapter)
   lessons: Lesson[];

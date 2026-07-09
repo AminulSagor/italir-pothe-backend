@@ -29,12 +29,15 @@ export class UserCourseEnrollment {
   @Column({ type: 'uuid' })
   userId: string;
 
-  @ManyToOne(() => Course, { nullable: false })
+  @ManyToOne(() => Course, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
   @JoinColumn({ name: 'courseId' })
-  course: Course;
+  course: Course | null;
 
-  @Column({ type: 'uuid' })
-  courseId: string;
+  @Column({ type: 'uuid', nullable: true })
+  courseId: string | null;
 
   @Column({ type: 'varchar', length: 50 })
   status: string;

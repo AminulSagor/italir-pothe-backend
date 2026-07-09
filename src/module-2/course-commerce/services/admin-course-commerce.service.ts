@@ -643,7 +643,6 @@ export class AdminCourseCommerceService {
       const enrollment = await enrollmentRepository.findOne({
         where: {
           userId: order.userId,
-          courseId: order.courseId,
           orderId: order.id,
         },
       });
@@ -997,7 +996,6 @@ export class AdminCourseCommerceService {
       const enrollment = await enrollmentRepository.findOne({
         where: {
           userId: order.userId,
-          courseId: order.courseId,
           orderId: order.id,
         },
         lock: {
