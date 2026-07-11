@@ -131,7 +131,6 @@ export class QuizSessionsService {
     return this.findSessionById(savedSession.id, user);
   }
 
-
   async getLessonQuizAvailability(lessonId: string) {
     const quiz = await this.quizRepository.findOne({
       where: {
@@ -228,12 +227,24 @@ export class QuizSessionsService {
       await this.answerItemRepository.save(answerItems);
     }
 
+    const fillBlankCorrectAnswer =
+      question.questionType === QuizQuestionFormat.FILL_IN_THE_BLANKS
+        ? ((question.options ?? []).find((option) => option.isCorrect)
+            ?.optionText ?? null)
+        : null;
+
     return {
       sessionId: session.id,
       questionId: question.id,
       isCorrect: gradeResult.isCorrect,
       correctAnswer: gradeResult.correctAnswer,
-      meaning: question.translationText,
+
+      // For fill-gap questions, show the actual correct option.
+      meaning:
+        fillBlankCorrectAnswer ??
+        question.translationText ??
+        question.helperText,
+
       explanation: question.helperText,
     };
   }
