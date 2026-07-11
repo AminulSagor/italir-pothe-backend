@@ -638,7 +638,7 @@ export class QuizSessionsService {
     return {
       ...params.result,
       lessonTitle,
-      completedTitle: 'Bravissimo!',
+      completedTitle: 'Ottimo lavoro!',
       completedMessage: `You completed ${lessonTitle}!`,
       timeTakenSeconds: params.session.timeTakenSeconds,
       accuracyPercent: params.result.scorePercentage,
