@@ -1141,11 +1141,7 @@ export class CvAssistantService {
   }
 
   private buildAssistantReply(plan: CvAssistantTurnPlan): string {
-    const reply = [
-      plan.answerFeedback,
-      plan.answerJustification,
-      plan.nextQuestion?.text,
-    ]
+    const reply = [plan.answerFeedback, plan.nextQuestion?.text]
       .map((value) => value?.trim())
       .filter((value): value is string => Boolean(value))
       .join('\n\n');
