@@ -1153,7 +1153,10 @@ export class AdminExamsService {
   }
 
   private resolveImageFileId(payload: PreparedQuestionPayload) {
-    if (payload.questionType === QuizQuestionFormat.IDENTIFY_IMAGE) {
+    if (
+      payload.questionType === QuizQuestionFormat.WRITING_WORD_TRANSLATION ||
+      payload.questionType === QuizQuestionFormat.IDENTIFY_IMAGE
+    ) {
       return payload.mediaFileId ?? null;
     }
 
