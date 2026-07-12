@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -131,6 +132,16 @@ export class ExamsService {
 
     const isUnlocked = courseProgressPercent >= exam.unlockCompletionPercent;
 
+    const existingAttempt = await this.examAttemptRepository.findOne({
+      where: {
+        userId,
+        examTemplateId: exam.id,
+      },
+    });
+
+    const hasAttempted = existingAttempt !== null;
+    const isEligible = isUnlocked && !hasAttempted;
+
     return {
       course: {
         id: course.id,
@@ -148,9 +159,14 @@ export class ExamsService {
       },
       courseProgressPercent,
       isUnlocked,
-      message: isUnlocked
-        ? "You're ready! Final exam is unlocked."
-        : `You need to complete ${exam.unlockCompletionPercent}% of the course to unlock the final exam.`,
+      hasAttempted,
+      isEligible,
+      attemptStatus: existingAttempt?.status ?? null,
+      message: hasAttempted
+        ? 'You have already taken this final examination.'
+        : isUnlocked
+          ? "You're ready! Final exam is unlocked."
+          : `You need to complete ${exam.unlockCompletionPercent}% of the course to unlock the final exam.`,
     };
   }
 
@@ -172,14 +188,14 @@ export class ExamsService {
     const existingAttempt = await this.examAttemptRepository.findOne({
       where: {
         userId,
-        courseId: course.id,
         examTemplateId: exam.id,
-        status: ExamAttemptStatus.IN_PROGRESS,
       },
     });
 
     if (existingAttempt) {
-      return this.findAttempt(existingAttempt.id, userId);
+      throw new ConflictException(
+        'You have already taken this final examination.',
+      );
     }
 
     const attempt = this.examAttemptRepository.create({

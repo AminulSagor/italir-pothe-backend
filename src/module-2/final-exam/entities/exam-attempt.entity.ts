@@ -18,6 +18,9 @@ import { ExamAnswer } from './exam-answer.entity';
 import { ExamReview } from './exam-review.entity';
 import { ExamTemplate } from './exam-template.entity';
 
+@Index('UQ_exam_attempt_user_exam', ['userId', 'examTemplateId'], {
+  unique: true,
+})
 @Entity('exam_attempts')
 export class ExamAttempt {
   @PrimaryGeneratedColumn('uuid')
