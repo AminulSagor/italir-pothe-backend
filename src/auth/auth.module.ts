@@ -8,15 +8,17 @@ import { AuthController } from './auth.controller';
 import { User } from '../users/entities/user.entity';
 import { JwtStrategy } from './jwt.strategy';
 import { SmsService } from '../common/services/sms.service';
-import { EmailService } from '../common/services/email.service';
+
 import { Otp } from 'src/users/entities/otp.entity';
 import { PackageStoreModule } from 'src/package-store/package-store.module';
+import { MailModule } from 'src/common/mail/mail.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Otp]),
     PassportModule,
     PackageStoreModule,
+    MailModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -31,7 +33,7 @@ import { PackageStoreModule } from 'src/package-store/package-store.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, SmsService, EmailService],
+  providers: [AuthService, JwtStrategy, SmsService],
   exports: [JwtStrategy, PassportModule],
 })
 export class AuthModule {}

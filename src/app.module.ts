@@ -48,6 +48,7 @@ import { GooglePlayRtdnModule } from './billing/google-play-rtdn/google-play-rtd
 import { GooglePlayReconciliationModule } from './billing/google-play-reconciliation/google-play-reconciliation.module';
 import { AppStoreNotificationsModule } from './billing/app-store/app-store-notifications.module';
 import { HomeModule } from './home/home.module';
+import { ContactModule } from './contact/contact.module';
 
 @Module({
   imports: [
@@ -73,7 +74,7 @@ import { HomeModule } from './home/home.module';
         migrationsRun: false,
       }),
     }),
-
+    ContactModule,
     UsersModule,
     AuthModule,
     PresenceModule,
