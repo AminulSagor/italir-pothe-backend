@@ -137,10 +137,21 @@ export class ExamsService {
         userId,
         examTemplateId: exam.id,
       },
+      order: {
+        createdAt: 'DESC',
+      },
     });
 
     const hasAttempted = existingAttempt !== null;
     const isEligible = isUnlocked && !hasAttempted;
+
+    const resultReady =
+      existingAttempt !== null &&
+      ![
+        ExamAttemptStatus.IN_PROGRESS,
+        ExamAttemptStatus.SUBMITTED,
+        ExamAttemptStatus.UNDER_REVIEW,
+      ].includes(existingAttempt.status);
 
     return {
       course: {
@@ -148,6 +159,7 @@ export class ExamsService {
         title: course.title,
         subtitle: course.subtitle,
       },
+
       exam: {
         id: exam.id,
         title: exam.title,
@@ -157,13 +169,21 @@ export class ExamsService {
         resultNotice: exam.resultNotice,
         resultNoticeBn: exam.resultNoticeBn,
       },
+
       courseProgressPercent,
       isUnlocked,
       hasAttempted,
       isEligible,
+
+      // Newly added fields
+      attemptId: existingAttempt?.id ?? null,
       attemptStatus: existingAttempt?.status ?? null,
+      resultReady,
+
       message: hasAttempted
-        ? 'You have already taken this final examination.'
+        ? resultReady
+          ? 'Your final examination result is available.'
+          : 'Your final examination result is being processed.'
         : isUnlocked
           ? "You're ready! Final exam is unlocked."
           : `You need to complete ${exam.unlockCompletionPercent}% of the course to unlock the final exam.`,
