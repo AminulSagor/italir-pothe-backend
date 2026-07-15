@@ -18,8 +18,14 @@ import { ExamAnswer } from './exam-answer.entity';
 import { ExamReview } from './exam-review.entity';
 import { ExamTemplate } from './exam-template.entity';
 
-@Index('UQ_exam_attempt_user_exam', ['userId', 'examTemplateId'], {
+@Index('IDX_exam_attempt_user_exam_created', [
+  'userId',
+  'examTemplateId',
+  'createdAt',
+])
+@Index('UQ_exam_attempt_active_user_exam', ['userId', 'examTemplateId'], {
   unique: true,
+  where: `"status" IN (` + `'in_progress', 'submitted', 'under_review'` + `)`,
 })
 @Entity('exam_attempts')
 export class ExamAttempt {

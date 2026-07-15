@@ -132,6 +132,7 @@ export class ExamsService {
 
     const isUnlocked = courseProgressPercent >= exam.unlockCompletionPercent;
 
+    // Always use the newest attempt.
     const existingAttempt = await this.examAttemptRepository.findOne({
       where: {
         userId,
@@ -143,7 +144,9 @@ export class ExamsService {
     });
 
     const hasAttempted = existingAttempt !== null;
-    const isEligible = isUnlocked && !hasAttempted;
+
+    const canRetake =
+      existingAttempt?.status === ExamAttemptStatus.RETAKE_REQUESTED;
 
     const resultReady =
       existingAttempt !== null &&
@@ -152,6 +155,26 @@ export class ExamsService {
         ExamAttemptStatus.SUBMITTED,
         ExamAttemptStatus.UNDER_REVIEW,
       ].includes(existingAttempt.status);
+
+    // Eligible for the first attempt or an approved retake.
+    const isEligible = isUnlocked && (!hasAttempted || canRetake);
+
+    let message: string;
+
+    if (!isUnlocked) {
+      message =
+        `You need to complete ` +
+        `${exam.unlockCompletionPercent}% of the course ` +
+        'to unlock the final exam.';
+    } else if (canRetake) {
+      message = 'Your result is available. You may take the final exam again.';
+    } else if (hasAttempted && resultReady) {
+      message = 'Your final examination result is available.';
+    } else if (hasAttempted) {
+      message = 'Your final examination result is being processed.';
+    } else {
+      message = "You're ready! Final exam is unlocked.";
+    }
 
     return {
       course: {
@@ -174,19 +197,13 @@ export class ExamsService {
       isUnlocked,
       hasAttempted,
       isEligible,
+      canRetake,
 
-      // Newly added fields
       attemptId: existingAttempt?.id ?? null,
       attemptStatus: existingAttempt?.status ?? null,
       resultReady,
 
-      message: hasAttempted
-        ? resultReady
-          ? 'Your final examination result is available.'
-          : 'Your final examination result is being processed.'
-        : isUnlocked
-          ? "You're ready! Final exam is unlocked."
-          : `You need to complete ${exam.unlockCompletionPercent}% of the course to unlock the final exam.`,
+      message,
     };
   }
 
@@ -205,16 +222,22 @@ export class ExamsService {
       );
     }
 
-    const existingAttempt = await this.examAttemptRepository.findOne({
+    const latestAttempt = await this.examAttemptRepository.findOne({
       where: {
         userId,
         examTemplateId: exam.id,
       },
+      order: {
+        createdAt: 'DESC',
+      },
     });
 
-    if (existingAttempt) {
+    if (
+      latestAttempt &&
+      latestAttempt.status !== ExamAttemptStatus.RETAKE_REQUESTED
+    ) {
       throw new ConflictException(
-        'You have already taken this final examination.',
+        'A new attempt is not available for this final examination.',
       );
     }
 
@@ -467,23 +490,34 @@ export class ExamsService {
       throw new NotFoundException('Exam attempt not found');
     }
 
+    const canRetake = attempt.status === ExamAttemptStatus.RETAKE_REQUESTED;
+
+    const certificateAvailable =
+      attempt.status === ExamAttemptStatus.CERTIFICATE_ISSUED;
+
     if (
       attempt.status === ExamAttemptStatus.IN_PROGRESS ||
       attempt.status === ExamAttemptStatus.UNDER_REVIEW ||
       attempt.status === ExamAttemptStatus.SUBMITTED
     ) {
       return {
+        courseId: attempt.courseId,
         status: attempt.status,
         referenceCode: attempt.referenceCode,
         resultReady: false,
+        canRetake: false,
+        certificateAvailable: false,
         message: 'Result is not ready yet. Teacher review is in progress.',
       };
     }
 
     return {
+      courseId: attempt.courseId,
       status: attempt.status,
       referenceCode: attempt.referenceCode,
       resultReady: true,
+      canRetake,
+      certificateAvailable,
       review: attempt.review,
     };
   }
