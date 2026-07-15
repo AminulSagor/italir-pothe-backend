@@ -43,6 +43,7 @@ import {
 } from 'src/package-store/types/package-store.type';
 import { GooglePlaySubscriptionLifecycleService } from 'src/billing/google-play-subscriptions/services/google-play-subscription-lifecycle.service';
 import { QueryGooglePlayRtdnEventsDto } from 'src/billing/google-play-reconciliation/dto/google-play-reconciliation.dto';
+import { GooglePlayProductPurchaseV2 } from 'src/billing/types/google-play-billing.type';
 
 type InternalPurchaseMatch =
   | {
@@ -502,15 +503,19 @@ export class GooglePlayRtdnProcessorService {
       );
     }
 
+    let authoritativePurchase: GooglePlayProductPurchaseV2 | null = null;
     let authoritative: Record<string, unknown> | null = null;
 
     try {
-      const purchase =
+      authoritativePurchase =
         await this.googlePlayBillingService.getOneTimeProductPurchaseByToken({
           purchaseToken: item.purchaseToken,
         });
 
-      authoritative = purchase as unknown as Record<string, unknown>;
+      authoritative = authoritativePurchase as unknown as Record<
+        string,
+        unknown
+      >;
     } catch (error) {
       /*
        * A canceled pending purchase might no longer be queryable.
@@ -563,14 +568,37 @@ export class GooglePlayRtdnProcessorService {
       item.purchaseToken,
     );
 
-    const match = await this.findInternalPurchase({
+    let match = await this.findInternalPurchase({
       tokenHash,
     });
 
+    const obfuscatedAccountId =
+      authoritativePurchase?.obfuscatedExternalAccountId
+        ?.trim()
+        .toLowerCase() ?? '';
+
+    if (!match && obfuscatedAccountId) {
+      match = await this.findPendingCoursePurchaseByAccount({
+        productId: item.sku,
+        obfuscatedAccountId,
+      });
+    }
+
     if (!match) {
       /*
-       * RTDN can arrive before the mobile client sends the
-       * token to the backend. Do not grant by product ID alone.
+       * The purchase contains the account identifier generated when
+       * the backend order was created. The order may still be committing,
+       * so keep this RTDN retryable instead of permanently processing it.
+       */
+      if (obfuscatedAccountId) {
+        throw new ConflictException(
+          'The matching pending Google Play course order is not available yet.',
+        );
+      }
+
+      /*
+       * Purchases from an old app build might not contain an account ID.
+       * Such purchases cannot be safely attached to a user through RTDN.
        */
       return {
         authoritativePayload: authoritative,
@@ -582,7 +610,7 @@ export class GooglePlayRtdnProcessorService {
 
           entitlementChanged: false,
 
-          note: 'Client verification can complete the purchase later.',
+          note: 'The Google Play purchase did not contain a recoverable application account identifier.',
         },
       };
     }
@@ -599,17 +627,21 @@ export class GooglePlayRtdnProcessorService {
       }
 
       if (order.status === CoursePurchaseStatus.PAID) {
+        const acknowledgement =
+          await this.googlePlayBillingService.acknowledgeOneTimeProduct({
+            productId: item.sku,
+            purchaseToken: item.purchaseToken,
+          });
+
         return {
           authoritativePayload: authoritative,
-
           result: {
             action: 'course_already_paid',
-
             domain: 'course',
-
             internalOrderId: order.id,
-
             entitlementChanged: false,
+            acknowledged: acknowledgement.acknowledged,
+            alreadyAcknowledged: acknowledgement.alreadyAcknowledged,
           },
         };
       }
@@ -1018,6 +1050,49 @@ export class GooglePlayRtdnProcessorService {
 
         entitlementChanged: true,
       },
+    };
+  }
+
+  private async findPendingCoursePurchaseByAccount(params: {
+    productId: string;
+    obfuscatedAccountId: string;
+  }): Promise<InternalPurchaseMatch | null> {
+    const transactions = await this.courseTransactionRepository
+      .createQueryBuilder('transaction')
+      .innerJoinAndSelect('transaction.order', 'purchaseOrder')
+      .where('transaction.provider = :provider', {
+        provider: CoursePaymentProvider.GOOGLE_PLAY,
+      })
+      .andWhere('transaction.productId = :productId', {
+        productId: params.productId,
+      })
+      .andWhere('transaction.obfuscatedAccountId = :obfuscatedAccountId', {
+        obfuscatedAccountId: params.obfuscatedAccountId,
+      })
+      .andWhere('transaction.tokenHash IS NULL')
+      .andWhere('purchaseOrder.status IN (:...statuses)', {
+        statuses: [
+          CoursePurchaseStatus.PENDING,
+          CoursePurchaseStatus.PROCESSING,
+        ],
+      })
+      .orderBy('purchaseOrder.createdAt', 'DESC')
+      .take(2)
+      .getMany();
+
+    if (transactions.length === 0) {
+      return null;
+    }
+
+    if (transactions.length > 1) {
+      this.logger.warn(
+        'Multiple pending Google Play course orders matched the same account and product. The latest order will be used.',
+      );
+    }
+
+    return {
+      domain: 'course',
+      transaction: transactions[0],
     };
   }
 

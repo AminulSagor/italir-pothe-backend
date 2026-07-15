@@ -268,18 +268,28 @@ export class CourseCommerceService {
 
       const response = await this.buildOrderResponse(existingOrder);
 
+      const googlePlayObfuscatedAccountId =
+        existingOrder.paymentProvider === CoursePaymentProvider.GOOGLE_PLAY
+          ? (existingOrder.providerTransaction.obfuscatedAccountId ??
+            createHash('sha256').update(existingOrder.userId).digest('hex'))
+          : null;
+
       if (
         existingOrder.status === CoursePurchaseStatus.PENDING ||
         existingOrder.status === CoursePurchaseStatus.PROCESSING
       ) {
         return {
           ...response,
+          googlePlayObfuscatedAccountId,
           checkoutAction:
             this.demoPaymentGateway.buildCheckoutAction(existingOrder),
         };
       }
 
-      return response;
+      return {
+        ...response,
+        googlePlayObfuscatedAccountId,
+      };
     }
 
     const selectedCurrency = dto.currency ?? CommerceCurrency.EUR;
@@ -336,6 +346,11 @@ export class CourseCommerceService {
       checkoutProductId,
     );
 
+    const googlePlayObfuscatedAccountId =
+      providerProduct.provider === CoursePaymentProvider.GOOGLE_PLAY
+        ? createHash('sha256').update(userId).digest('hex')
+        : null;
+
     const orderId = await this.dataSource.transaction(async (manager) => {
       const orderRepository = manager.getRepository(CoursePurchaseOrder);
       const providerSnapshotRepository = manager.getRepository(
@@ -383,6 +398,7 @@ export class CourseCommerceService {
           orderId: order.id,
           provider: providerProduct.provider,
           productId: checkoutProductId,
+          obfuscatedAccountId: googlePlayObfuscatedAccountId,
           tokenHash: null,
           providerTransactionId: null,
           environment: CourseProviderEnvironment.DEVELOPMENT,
@@ -409,6 +425,7 @@ export class CourseCommerceService {
 
     return {
       ...(await this.buildOrderResponse(savedOrder)),
+      googlePlayObfuscatedAccountId,
       checkoutAction: this.demoPaymentGateway.buildCheckoutAction(savedOrder),
     };
   }

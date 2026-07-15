@@ -47,6 +47,13 @@ export class CourseOrderProviderTransaction {
   })
   productId: string;
 
+  @Column({
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  obfuscatedAccountId: string | null;
+
   /**
    * SHA-256 hash of a Google Play purchase token or another
    * provider verification token.
