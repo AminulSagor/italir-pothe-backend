@@ -22,6 +22,8 @@ import { ExamReview } from '../entities/exam-review.entity';
 import {
   ExamAttemptStatus,
   ExamQuestionStatus,
+  ExamReviewMode,
+  ExamSectionStatus,
   ExamSectionType,
   ExamVerdict,
 } from '../types/final-exam.type';
@@ -35,6 +37,7 @@ import {
   NotificationPriority,
   NotificationType,
 } from 'src/notifications/entities/notification-event.entity';
+import { ExamQuestion } from '../entities/exam-question.entity';
 
 @Injectable()
 export class ExamEvaluationService {
@@ -305,7 +308,15 @@ export class ExamEvaluationService {
       throw new NotFoundException('Exam attempt not found');
     }
 
-    return attempt;
+    const autoGrading = await this.calculateAutoGrading(
+      attempt.examTemplateId,
+      attempt.answers ?? [],
+    );
+
+    return {
+      ...attempt,
+      autoGrading,
+    };
   }
 
   async getCertificationCenter(attemptId: string) {
@@ -761,6 +772,81 @@ export class ExamEvaluationService {
       certificate,
 
       attempt: await this.getEvaluationDetails(attempt.id),
+    };
+  }
+
+  private async calculateAutoGrading(
+    examTemplateId: string,
+    answers: ExamAnswer[],
+  ) {
+    const autoQuestions = await this.dataSource
+      .getRepository(ExamQuestion)
+      .createQueryBuilder('question')
+      .innerJoinAndSelect('question.section', 'section')
+      .where('section.examTemplateId = :examTemplateId', {
+        examTemplateId,
+      })
+      .andWhere('section.sectionType IN (:...sectionTypes)', {
+        sectionTypes: [
+          ExamSectionType.CORE_QUIZ,
+          ExamSectionType.LISTENING_LAB,
+        ],
+      })
+      .andWhere('section.reviewMode = :reviewMode', {
+        reviewMode: ExamReviewMode.AUTO,
+      })
+      .andWhere('section.status = :sectionStatus', {
+        sectionStatus: ExamSectionStatus.ACTIVE,
+      })
+      .andWhere('question.status = :questionStatus', {
+        questionStatus: ExamQuestionStatus.ACTIVE,
+      })
+      .getMany();
+
+    const autoQuestionIds = new Set<string>(
+      autoQuestions.map((question) => question.id),
+    );
+
+    const autoAnswers = answers.filter((answer) =>
+      autoQuestionIds.has(answer.questionId),
+    );
+
+    const earnedPoints = autoAnswers.reduce(
+      (total, answer) => total + Number(answer.score ?? 0),
+      0,
+    );
+
+    const possiblePoints = autoQuestions.reduce(
+      (total, question) => total + Math.max(1, Number(question.points ?? 1)),
+      0,
+    );
+
+    const answeredQuestionCount = new Set(
+      autoAnswers.map((answer) => answer.questionId),
+    ).size;
+
+    const totalQuestionCount = autoQuestions.length;
+
+    const skippedQuestionCount = Math.max(
+      0,
+      totalQuestionCount - answeredQuestionCount,
+    );
+
+    const scorePercent =
+      possiblePoints > 0
+        ? Number(((earnedPoints / possiblePoints) * 100).toFixed(2))
+        : 0;
+
+    const scoreOutOfTen = Number((scorePercent / 10).toFixed(2));
+
+    return {
+      earnedPoints,
+      possiblePoints,
+      scorePercent,
+      scoreOutOfTen,
+      answeredQuestionCount,
+      skippedQuestionCount,
+      totalQuestionCount,
     };
   }
 

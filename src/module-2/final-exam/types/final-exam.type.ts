@@ -74,3 +74,13 @@ export enum FinalExamManualQuestionFormat {
 export type FinalExamQuestionFormat =
   | QuizQuestionFormat
   | FinalExamManualQuestionFormat;
+
+export interface FinalExamAutoGrading {
+  earnedPoints: number;
+  possiblePoints: number;
+  scorePercent: number;
+  scoreOutOfTen: number;
+  answeredQuestionCount: number;
+  skippedQuestionCount: number;
+  totalQuestionCount: number;
+}

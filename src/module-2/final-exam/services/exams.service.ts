@@ -334,6 +334,25 @@ export class ExamsService {
       throw new BadRequestException('Question does not belong to this section');
     }
 
+    if (!question.section) {
+      throw new BadRequestException(
+        'Question section information is unavailable',
+      );
+    }
+
+    if (question.section.examTemplateId !== attempt.examTemplateId) {
+      throw new BadRequestException(
+        'Question does not belong to this exam attempt',
+      );
+    }
+
+    if (
+      question.section.status !== ExamSectionStatus.ACTIVE ||
+      question.status !== ExamQuestionStatus.ACTIVE
+    ) {
+      throw new BadRequestException('This exam question is not active');
+    }
+
     const grade = this.gradeAnswer(question, dto);
 
     await this.examAnswerRepository.delete({
