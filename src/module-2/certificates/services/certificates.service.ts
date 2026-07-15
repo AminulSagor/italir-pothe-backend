@@ -150,14 +150,18 @@ export class CertificatesService {
 
     if (payload.notifyStudent === true) {
       try {
+        const courseTitle = certificate.courseTitleSnapshot?.trim() || 'course';
+
         await this.notificationsService.createSystemNotificationForUser({
           userId: certificate.userId,
           type: NotificationType.SYSTEM,
-          title: 'Your official certificate is ready',
-          body: `Your ${
-            certificate.courseTitleSnapshot ?? 'course'
-          } certificate has been issued.`,
-          deepLink: `italirpothe://certificates/${certificate.id}`,
+          title: 'Your final exam result is ready',
+          body:
+            `Your ${courseTitle} result and official certificate are ready. ` +
+            'Open your result to review the details.',
+          deepLink:
+            `italirpothe://final-exams/attempts/` +
+            `${certificate.examAttemptId}/result`,
           priority: NotificationPriority.HIGH,
         });
 
