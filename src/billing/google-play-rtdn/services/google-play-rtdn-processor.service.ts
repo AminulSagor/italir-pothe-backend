@@ -584,6 +584,13 @@ export class GooglePlayRtdnProcessorService {
       });
     }
 
+    if (!match && obfuscatedAccountId) {
+      match = await this.findPendingStorePurchaseByAccount({
+        productId: item.sku,
+        obfuscatedAccountId,
+      });
+    }
+
     if (!match) {
       /*
        * The purchase contains the account identifier generated when
@@ -592,7 +599,7 @@ export class GooglePlayRtdnProcessorService {
        */
       if (obfuscatedAccountId) {
         throw new ConflictException(
-          'The matching pending Google Play course order is not available yet.',
+          'The matching pending Google Play order is not available yet.',
         );
       }
 
@@ -1092,6 +1099,46 @@ export class GooglePlayRtdnProcessorService {
 
     return {
       domain: 'course',
+      transaction: transactions[0],
+    };
+  }
+
+  private async findPendingStorePurchaseByAccount(params: {
+    productId: string;
+    obfuscatedAccountId: string;
+  }): Promise<InternalPurchaseMatch | null> {
+    const transactions = await this.storeTransactionRepository
+      .createQueryBuilder('transaction')
+      .innerJoinAndSelect('transaction.order', 'storeOrder')
+      .where('transaction.provider = :provider', {
+        provider: StorePaymentProvider.GOOGLE_PLAY,
+      })
+      .andWhere('transaction.productId = :productId', {
+        productId: params.productId,
+      })
+      .andWhere('transaction.obfuscatedAccountId = :obfuscatedAccountId', {
+        obfuscatedAccountId: params.obfuscatedAccountId,
+      })
+      .andWhere('transaction.tokenHash IS NULL')
+      .andWhere('storeOrder.status = :status', {
+        status: StoreOrderStatus.PENDING,
+      })
+      .orderBy('storeOrder.createdAt', 'DESC')
+      .take(2)
+      .getMany();
+
+    if (transactions.length === 0) {
+      return null;
+    }
+
+    if (transactions.length > 1) {
+      this.logger.warn(
+        'Multiple pending Google Play package-store orders matched the same account and product. The latest order will be used.',
+      );
+    }
+
+    return {
+      domain: 'package_store',
       transaction: transactions[0],
     };
   }

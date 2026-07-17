@@ -1281,6 +1281,11 @@ export class PackageStoreService {
 
     const selectedCurrency = dto.currency ?? CommerceCurrency.EUR;
 
+    const googlePlayObfuscatedAccountId =
+      dto.paymentProvider === StorePaymentProvider.GOOGLE_PLAY
+        ? createHash('sha256').update(userId).digest('hex')
+        : null;
+
     if (existingOrder) {
       if (
         existingOrder.packageId !== dto.packageId ||
@@ -1296,7 +1301,23 @@ export class PackageStoreService {
       }
 
       this.assertOrderRelations(existingOrder);
-      return this.mapOrder(existingOrder);
+
+      if (
+        googlePlayObfuscatedAccountId &&
+        !existingOrder.providerTransaction.obfuscatedAccountId
+      ) {
+        existingOrder.providerTransaction.obfuscatedAccountId =
+          googlePlayObfuscatedAccountId;
+
+        await this.orderProviderTransactionRepository.save(
+          existingOrder.providerTransaction,
+        );
+      }
+
+      return {
+        ...this.mapOrder(existingOrder),
+        googlePlayObfuscatedAccountId,
+      };
     }
 
     const storePackage = await this.getPublishedPackage(dto.packageId);
@@ -1426,6 +1447,7 @@ export class PackageStoreService {
           orderId: order.id,
           provider: providerProduct.provider,
           productId: checkoutProductId,
+          obfuscatedAccountId: googlePlayObfuscatedAccountId,
           tokenHash: null,
           providerTransactionId: null,
           environment: StoreProviderEnvironment.DEVELOPMENT,
@@ -1504,7 +1526,12 @@ export class PackageStoreService {
       return order.id;
     });
 
-    return this.findOwnedOrderById(userId, orderId);
+    const createdOrder = await this.findOwnedOrderById(userId, orderId);
+
+    return {
+      ...createdOrder,
+      googlePlayObfuscatedAccountId,
+    };
   }
 
   private buildCheckoutExpiresAt(): Date {
@@ -1537,24 +1564,62 @@ export class PackageStoreService {
       );
     }
 
+    const provider = currentOrder.payment.provider;
+
+    const label =
+      provider === StorePaymentProvider.GOOGLE_PLAY
+        ? 'Google Play'
+        : 'App Store';
+
+    const developmentVerification =
+      this.isDevelopmentVerificationForProvider(provider);
+
+    const paymentMethod = {
+      provider,
+      enabled: true,
+
+      // Flutter specifically reads this field.
+      productId: currentOrder.providerSnapshot.productId,
+
+      productType: currentOrder.providerSnapshot.productType,
+      basePlanId: currentOrder.providerSnapshot.basePlanId,
+      offerId: currentOrder.providerSnapshot.offerId,
+
+      developmentVerification,
+      label,
+      unavailableReason: '',
+    };
+
     return {
       order: this.mapOrder(currentOrder),
 
       checkoutExpiresAt: currentOrder.checkoutExpiresAt,
 
+      // Required by StoreCheckoutResponseModel in Flutter.
+      paymentMethod,
+
+      // Keep this for compatibility with any older clients.
       paymentOptions: [
         {
-          method: currentOrder.payment.provider,
-          label:
-            currentOrder.payment.provider === StorePaymentProvider.GOOGLE_PLAY
-              ? 'Google Play'
-              : 'App Store',
+          method: provider,
+          provider,
+          enabled: true,
+          label,
+
           amount: currentOrder.pricing.paymentAmount,
           currency: currentOrder.pricing.paymentCurrency,
+
+          productId: currentOrder.providerSnapshot.productId,
+
+          // Retained for older response consumers.
           providerProductId: currentOrder.providerSnapshot.productId,
+
           productType: currentOrder.providerSnapshot.productType,
           basePlanId: currentOrder.providerSnapshot.basePlanId,
           offerId: currentOrder.providerSnapshot.offerId,
+
+          developmentVerification,
+          unavailableReason: '',
         },
       ],
 

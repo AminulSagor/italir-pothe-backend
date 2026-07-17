@@ -52,6 +52,13 @@ export class StoreOrderProviderTransaction {
     length: 64,
     nullable: true,
   })
+  obfuscatedAccountId: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
   tokenHash: string | null;
 
   @Column({
