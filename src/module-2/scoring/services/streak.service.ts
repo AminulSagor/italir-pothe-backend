@@ -2,6 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { StoreSubscription } from 'src/billing/google-play-subscriptions/entities/store-subscription.entity';
+import { StoreSubscriptionStatus } from 'src/billing/types/google-play-subscription.type';
+import { StoreOrderPackageSnapshot } from 'src/package-store/entities/store-order-package-snapshot.entity';
+import {
+  StorePackageType,
+  StreakProtectionMode,
+} from 'src/package-store/types/package-store.type';
+
 import { UserStreak } from '../entities/user-streak.entity';
 
 export interface UserStreakSummary {
@@ -11,11 +19,19 @@ export interface UserStreakSummary {
   isUpdatedToday: boolean;
 }
 
+interface MonthlyProtectionPeriod {
+  startsAt: Date;
+  endsAt: Date;
+}
+
 @Injectable()
 export class StreakService {
   constructor(
     @InjectRepository(UserStreak)
     private readonly userStreakRepository: Repository<UserStreak>,
+
+    @InjectRepository(StoreSubscription)
+    private readonly subscriptionRepository: Repository<StoreSubscription>,
   ) {}
 
   async getUserStreak(
@@ -89,7 +105,9 @@ export class StreakService {
     }
 
     const lastDate = this.parseDate(streak.lastActivityDate);
+
     const currentDate = this.parseDate(resolvedActivityDate);
+
     const diffDays = this.diffDays(lastDate, currentDate);
 
     if (diffDays < 0) {
@@ -103,7 +121,9 @@ export class StreakService {
     }
 
     streak.longestDays = Math.max(streak.longestDays, streak.currentDays);
+
     streak.lastActivityDate = resolvedActivityDate;
+
     streak.lastActivityAt = activityAt;
 
     const savedStreak = await this.userStreakRepository.save(streak);
@@ -140,7 +160,9 @@ export class StreakService {
     }
 
     const lastDate = this.parseDate(streak.lastActivityDate);
+
     const today = this.parseDate(currentDate);
+
     const diffDays = this.diffDays(lastDate, today);
 
     if (diffDays <= 1) {
@@ -149,34 +171,163 @@ export class StreakService {
 
     const missedDays = diffDays - 1;
 
-    if (streak.streakFreezeCount > 0) {
-      const freezeDaysToUse = Math.min(streak.streakFreezeCount, missedDays);
+    const firstMissedDate = this.addDays(lastDate, 1);
 
-      streak.currentDays += freezeDaysToUse;
-      streak.streakFreezeCount -= freezeDaysToUse;
+    const lastMissedDate = this.addDays(today, -1);
 
-      const protectedDate = this.addDays(lastDate, freezeDaysToUse);
+    const monthlyPeriods = await this.findMonthlyProtectionPeriods(
+      streak.userId,
+      firstMissedDate,
+      lastMissedDate,
+    );
 
-      streak.lastActivityDate = this.formatDate(protectedDate);
-      streak.lastActivityAt = protectedDate;
+    for (
+      let missedDayIndex = 0;
+      missedDayIndex < missedDays;
+      missedDayIndex += 1
+    ) {
+      const missedDate = this.addDays(firstMissedDate, missedDayIndex);
 
-      const remainingMissedDays = missedDays - freezeDaysToUse;
+      const protectedByMonthlyPlan = this.isDateProtectedByMonthlyPlan(
+        missedDate,
+        monthlyPeriods,
+      );
 
-      if (remainingMissedDays <= 0) {
-        return this.userStreakRepository.save(streak);
+      if (!protectedByMonthlyPlan) {
+        if (streak.streakFreezeCount <= 0) {
+          streak.currentDays = 0;
+          streak.lastActivityDate = null;
+          streak.lastActivityAt = null;
+
+          return this.userStreakRepository.save(streak);
+        }
+
+        // Finite freezes are consumed only when monthly
+        // protection does not cover the missed date.
+        streak.streakFreezeCount -= 1;
       }
-    }
 
-    streak.currentDays = 0;
-    streak.lastActivityDate = null;
-    streak.lastActivityAt = null;
+      streak.currentDays += 1;
+
+      streak.longestDays = Math.max(streak.longestDays, streak.currentDays);
+
+      streak.lastActivityDate = this.formatDate(missedDate);
+
+      streak.lastActivityAt = missedDate;
+    }
 
     return this.userStreakRepository.save(streak);
   }
 
+  private async findMonthlyProtectionPeriods(
+    userId: string,
+    rangeStart: Date,
+    rangeEnd: Date,
+  ): Promise<MonthlyProtectionPeriod[]> {
+    const rangeEndExclusive = this.addDays(rangeEnd, 1);
+
+    const subscriptions = await this.subscriptionRepository
+      .createQueryBuilder('subscription')
+      .innerJoin(
+        StoreOrderPackageSnapshot,
+        'snapshot',
+        'snapshot.orderId = subscription.initialOrderId',
+      )
+      .where('subscription.userId = :userId', {
+        userId,
+      })
+      .andWhere('snapshot.packageType = :packageType', {
+        packageType: StorePackageType.STREAK_FREEZE,
+      })
+      .andWhere('snapshot.streakProtectionMode = :protectionMode', {
+        protectionMode: StreakProtectionMode.MONTHLY_UNLIMITED,
+      })
+      .andWhere('subscription.expiresAt IS NOT NULL')
+      .andWhere(
+        `COALESCE(
+            subscription.startedAt,
+            subscription.createdAt
+          ) < :rangeEndExclusive`,
+        {
+          rangeEndExclusive,
+        },
+      )
+      .andWhere('subscription.expiresAt > :rangeStart', {
+        rangeStart,
+      })
+      .andWhere('subscription.status NOT IN (:...excludedStatuses)', {
+        excludedStatuses: [
+          StoreSubscriptionStatus.PENDING,
+          StoreSubscriptionStatus.PENDING_PURCHASE_CANCELED,
+          StoreSubscriptionStatus.UNKNOWN,
+        ],
+      })
+      .getMany();
+
+    const periods: MonthlyProtectionPeriod[] = [];
+
+    for (const subscription of subscriptions) {
+      const startsAt = subscription.startedAt ?? subscription.createdAt;
+
+      let endsAt = subscription.expiresAt;
+
+      if (!endsAt) {
+        continue;
+      }
+
+      /*
+       * Revocation removes protection from the
+       * revocation time onward.
+       */
+      if (subscription.revokedAt && subscription.revokedAt < endsAt) {
+        endsAt = subscription.revokedAt;
+      }
+
+      /*
+       * ON_HOLD and PAUSED suspend entitlement.
+       * lastEventTime represents when that latest
+       * suspension state was received.
+       */
+      if (
+        (subscription.status === StoreSubscriptionStatus.ON_HOLD ||
+          subscription.status === StoreSubscriptionStatus.PAUSED) &&
+        subscription.lastEventTime &&
+        subscription.lastEventTime < endsAt
+      ) {
+        endsAt = subscription.lastEventTime;
+      }
+
+      if (endsAt <= startsAt) {
+        continue;
+      }
+
+      periods.push({
+        startsAt,
+        endsAt,
+      });
+    }
+
+    return periods;
+  }
+
+  private isDateProtectedByMonthlyPlan(
+    missedDate: Date,
+    periods: MonthlyProtectionPeriod[],
+  ): boolean {
+    const dayStart = missedDate;
+
+    const dayEndExclusive = this.addDays(missedDate, 1);
+
+    return periods.some(
+      (period) => period.startsAt < dayEndExclusive && period.endsAt > dayStart,
+    );
+  }
+
   private addDays(date: Date, days: number): Date {
     const nextDate = new Date(date);
+
     nextDate.setUTCDate(nextDate.getUTCDate() + days);
+
     return nextDate;
   }
 
@@ -196,7 +347,7 @@ export class StreakService {
     };
   }
 
-  private resolveActivityDate(activityDate?: string) {
+  private resolveActivityDate(activityDate?: string): string {
     if (activityDate && /^\d{4}-\d{2}-\d{2}$/.test(activityDate)) {
       return activityDate;
     }
@@ -204,11 +355,11 @@ export class StreakService {
     return new Date().toISOString().slice(0, 10);
   }
 
-  private parseDate(date: string) {
+  private parseDate(date: string): Date {
     return new Date(`${date}T00:00:00.000Z`);
   }
 
-  private diffDays(first: Date, second: Date) {
+  private diffDays(first: Date, second: Date): number {
     const oneDayMs = 24 * 60 * 60 * 1000;
 
     return Math.round((second.getTime() - first.getTime()) / oneDayMs);

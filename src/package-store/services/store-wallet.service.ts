@@ -12,6 +12,7 @@ import {
 } from '../types/package-store.type';
 import { PaymentRequiredException } from 'src/common/exceptions/payment-required.exception';
 import { StoreOrderReversal } from '../entities/store-order-reversal.entity';
+import { GooglePlaySubscriptionLifecycleService } from 'src/billing/google-play-subscriptions/services/google-play-subscription-lifecycle.service';
 
 @Injectable()
 export class StoreWalletService {
@@ -20,6 +21,8 @@ export class StoreWalletService {
     private readonly configRepository: Repository<CvEconomyConfig>,
 
     private readonly dataSource: DataSource,
+
+    private readonly googlePlaySubscriptionLifecycleService: GooglePlaySubscriptionLifecycleService,
   ) {}
 
   async initializeForNewUser(userId: string) {
@@ -533,7 +536,14 @@ export class StoreWalletService {
     manager: EntityManager,
   ) {
     const streak = await this.getOrCreateStreak(userId, manager);
+
     const config = await this.getOrCreateCvEconomyConfig(manager);
+
+    const activeSubscription =
+      await this.googlePlaySubscriptionLifecycleService.findCurrentStreakProtectionForUser(
+        userId,
+        manager,
+      );
 
     const now = new Date();
 
@@ -545,7 +555,9 @@ export class StoreWalletService {
     return {
       ai: {
         voiceMinutes: wallet.aiVoiceSeconds / 60,
+
         voiceSeconds: wallet.aiVoiceSeconds,
+
         textTokens: wallet.aiTextTokens,
       },
 
@@ -558,12 +570,42 @@ export class StoreWalletService {
           expiresAt: unlimitedProtectionActive
             ? wallet.unlimitedStreakProtectionUntil
             : null,
+
+          subscription: activeSubscription
+            ? {
+                id: activeSubscription.id,
+
+                provider: activeSubscription.provider,
+
+                packageId: activeSubscription.packageId,
+
+                productId: activeSubscription.productId,
+
+                basePlanId: activeSubscription.basePlanId,
+
+                offerId: activeSubscription.offerId,
+
+                status: activeSubscription.status,
+
+                entitlementStatus: activeSubscription.entitlementStatus,
+
+                autoRenewEnabled: activeSubscription.autoRenewEnabled,
+
+                startedAt: activeSubscription.startedAt,
+
+                expiresAt: activeSubscription.expiresAt,
+
+                canceledAt: activeSubscription.canceledAt,
+              }
+            : null,
         },
       },
 
       cv: {
         credits: wallet.cvCredits,
+
         freeCreditsPerSignup: config.freeCreditsPerSignup,
+
         allowEditingWithoutCredit: config.allowEditingWithoutCredit,
       },
     };

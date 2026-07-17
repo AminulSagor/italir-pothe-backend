@@ -1321,6 +1321,7 @@ export class PackageStoreService {
     }
 
     const storePackage = await this.getPublishedPackage(dto.packageId);
+    await this.assertMonthlyStreakPurchaseAllowed(userId, storePackage);
     const regularProviderProduct = this.requireActiveProviderProduct(
       storePackage,
       dto.paymentProvider,
@@ -1534,6 +1535,63 @@ export class PackageStoreService {
     };
   }
 
+  private async assertMonthlyStreakPurchaseAllowed(
+    userId: string,
+    storePackage: StorePackage,
+  ): Promise<void> {
+    const isMonthlyStreakProtection =
+      storePackage.packageType === StorePackageType.STREAK_FREEZE &&
+      storePackage.commerce.billingModel === StoreBillingModel.MONTHLY &&
+      storePackage.entitlement.streakProtectionMode ===
+        StreakProtectionMode.MONTHLY_UNLIMITED;
+
+    if (!isMonthlyStreakProtection) {
+      return;
+    }
+
+    const activeSubscription =
+      await this.googlePlaySubscriptionLifecycleService.findCurrentStreakProtectionForUser(
+        userId,
+      );
+
+    if (activeSubscription) {
+      throw new ConflictException(
+        'An active monthly streak-protection subscription already exists.',
+      );
+    }
+
+    const pendingMonthlyOrder = await this.orderRepository
+      .createQueryBuilder('storeOrder')
+      .innerJoin('storeOrder.snapshot', 'snapshot')
+      .where('storeOrder.userId = :userId', {
+        userId,
+      })
+      .andWhere('storeOrder.status = :status', {
+        status: StoreOrderStatus.PENDING,
+      })
+      .andWhere(
+        `(
+          storeOrder.checkoutExpiresAt IS NULL
+          OR storeOrder.checkoutExpiresAt > :now
+        )`,
+        {
+          now: new Date(),
+        },
+      )
+      .andWhere('snapshot.packageType = :packageType', {
+        packageType: StorePackageType.STREAK_FREEZE,
+      })
+      .andWhere('snapshot.streakProtectionMode = :protectionMode', {
+        protectionMode: StreakProtectionMode.MONTHLY_UNLIMITED,
+      })
+      .getOne();
+
+    if (pendingMonthlyOrder) {
+      throw new ConflictException(
+        'A monthly streak-protection purchase is already pending.',
+      );
+    }
+  }
   private buildCheckoutExpiresAt(): Date {
     const minutes = this.parsePositiveInteger(
       this.configService.get<string>('PACKAGE_STORE_CHECKOUT_TTL_MINUTES'),
@@ -1823,8 +1881,14 @@ export class PackageStoreService {
           },
         );
 
+      const refreshedBalances = await this.walletService.getBalances(
+        order.userId,
+      );
+
       return {
         ...completion,
+
+        balances: refreshedBalances,
 
         googlePlayProcessing: {
           type: 'subscription',
@@ -3329,25 +3393,26 @@ export class PackageStoreService {
         return this.buildCompletionResponse(order, balances);
       }
 
-      await this.expireOrderIfTimedOut(order);
+      const recoverableStatuses: StoreOrderStatus[] = [
+        StoreOrderStatus.PENDING,
+        StoreOrderStatus.EXPIRED,
+        StoreOrderStatus.CANCELLED,
+      ];
 
-      if (order.status === StoreOrderStatus.EXPIRED) {
-        throw new BadRequestException(
-          'Checkout expired before payment verification completed. Please create a new order.',
-        );
-      }
-
-      if (order.status === StoreOrderStatus.CANCELLED) {
-        throw new BadRequestException(
-          'Checkout was cancelled before payment verification completed.',
-        );
-      }
-
-      if (order.status !== StoreOrderStatus.PENDING) {
+      if (!recoverableStatuses.includes(order.status)) {
         throw new BadRequestException(
           `Order cannot be completed from status ${order.status}.`,
         );
       }
+
+      /*
+       * The provider transaction has already passed real
+       * Google Play verification above this point.
+       *
+       * Google Play is therefore authoritative even when
+       * the local checkout timer has expired.
+       */
+      const recoveredFromStatus = order.status;
 
       const duplicatePayment = await manager
         .getRepository(StoreOrderPayment)
@@ -3368,6 +3433,9 @@ export class PackageStoreService {
 
       order.status = StoreOrderStatus.COMPLETED;
 
+      order.cancelledAt = null;
+      order.expiredAt = null;
+
       order.payment.providerReference = params.providerReference;
 
       order.payment.failureCode = null;
@@ -3386,8 +3454,15 @@ export class PackageStoreService {
         'The payment was completed successfully.',
         {
           provider: params.provider,
+
           productId: order.providerSnapshot.productId,
+
           providerReference: params.providerReference,
+
+          recoveredFromStatus:
+            recoveredFromStatus === StoreOrderStatus.PENDING
+              ? null
+              : recoveredFromStatus,
         },
       );
 

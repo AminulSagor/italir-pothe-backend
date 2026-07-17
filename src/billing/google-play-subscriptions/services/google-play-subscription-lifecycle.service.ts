@@ -477,6 +477,36 @@ export class GooglePlaySubscriptionLifecycleService {
     };
   }
 
+  async findCurrentStreakProtectionForUser(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<StoreSubscriptionResponse | null> {
+    const repository = manager
+      ? manager.getRepository(StoreSubscription)
+      : this.subscriptionRepository;
+
+    const subscription = await repository
+      .createQueryBuilder('subscription')
+      .where('subscription.userId = :userId', {
+        userId,
+      })
+      .andWhere('subscription.provider = :provider', {
+        provider: StorePaymentProvider.GOOGLE_PLAY,
+      })
+      .andWhere('subscription.entitlementActive = :active', {
+        active: true,
+      })
+      .andWhere('subscription.expiresAt IS NOT NULL')
+      .andWhere('subscription.expiresAt > :now', {
+        now: new Date(),
+      })
+      .orderBy('subscription.expiresAt', 'DESC')
+      .addOrderBy('subscription.updatedAt', 'DESC')
+      .getOne();
+
+    return subscription ? this.mapSubscription(subscription) : null;
+  }
+
   async cancelSubscription(params: {
     subscriptionId: string;
     adminUserId: string;

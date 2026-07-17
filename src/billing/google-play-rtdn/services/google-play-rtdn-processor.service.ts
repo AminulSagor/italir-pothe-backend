@@ -587,7 +587,12 @@ export class GooglePlayRtdnProcessorService {
     if (!match && obfuscatedAccountId) {
       match = await this.findPendingStorePurchaseByAccount({
         productId: item.sku,
+
         obfuscatedAccountId,
+
+        purchaseTime: this.parseGooglePlayDate(
+          authoritativePurchase?.purchaseCompletionTime,
+        ),
       });
     }
 
@@ -816,9 +821,43 @@ export class GooglePlayRtdnProcessorService {
       item.purchaseToken,
     );
 
-    const match = await this.findInternalPurchase({
+    let match = await this.findInternalPurchase({
       tokenHash,
     });
+
+    const obfuscatedAccountId =
+      authoritativePurchase.externalAccountIdentifiers?.obfuscatedExternalAccountId
+        ?.trim()
+        .toLowerCase() ?? '';
+
+    const subscriptionProductId = this.extractSubscriptionProductId(
+      authoritativePurchase as unknown as Record<string, unknown>,
+    );
+
+    const purchaseStartedAt = this.parseGooglePlayDate(
+      authoritativePurchase.startTime,
+    );
+
+    if (!match && obfuscatedAccountId && subscriptionProductId) {
+      match = await this.findPendingStorePurchaseByAccount({
+        productId: subscriptionProductId,
+
+        obfuscatedAccountId,
+
+        purchaseTime: purchaseStartedAt,
+      });
+    }
+
+    if (!match && obfuscatedAccountId) {
+      /*
+       * The app might have closed before sending the
+       * purchase token to the API. Keep the RTDN event
+       * retryable while the backend order is committing.
+       */
+      throw new ConflictException(
+        'The matching Google Play subscription order is not available yet.',
+      );
+    }
 
     let initialOrderId: string | null = null;
 
@@ -1106,8 +1145,9 @@ export class GooglePlayRtdnProcessorService {
   private async findPendingStorePurchaseByAccount(params: {
     productId: string;
     obfuscatedAccountId: string;
+    purchaseTime?: Date | null;
   }): Promise<InternalPurchaseMatch | null> {
-    const transactions = await this.storeTransactionRepository
+    const query = this.storeTransactionRepository
       .createQueryBuilder('transaction')
       .innerJoinAndSelect('transaction.order', 'storeOrder')
       .where('transaction.provider = :provider', {
@@ -1120,9 +1160,29 @@ export class GooglePlayRtdnProcessorService {
         obfuscatedAccountId: params.obfuscatedAccountId,
       })
       .andWhere('transaction.tokenHash IS NULL')
-      .andWhere('storeOrder.status = :status', {
-        status: StoreOrderStatus.PENDING,
-      })
+      .andWhere('storeOrder.status IN (:...statuses)', {
+        statuses: [
+          StoreOrderStatus.PENDING,
+          StoreOrderStatus.EXPIRED,
+          StoreOrderStatus.CANCELLED,
+        ],
+      });
+
+    if (params.purchaseTime) {
+      /*
+       * Avoid attaching an older Google purchase to an
+       * order that was created after that purchase.
+       */
+      const latestAllowedOrderTime = new Date(
+        params.purchaseTime.getTime() + 5 * 60 * 1000,
+      );
+
+      query.andWhere('storeOrder.createdAt <= :latestAllowedOrderTime', {
+        latestAllowedOrderTime,
+      });
+    }
+
+    const transactions = await query
       .orderBy('storeOrder.createdAt', 'DESC')
       .take(2)
       .getMany();
@@ -1133,7 +1193,7 @@ export class GooglePlayRtdnProcessorService {
 
     if (transactions.length > 1) {
       this.logger.warn(
-        'Multiple pending Google Play package-store orders matched the same account and product. The latest order will be used.',
+        'Multiple recoverable Google Play package-store orders matched the same account and product. The newest eligible order will be used.',
       );
     }
 
@@ -1213,6 +1273,16 @@ export class GooglePlayRtdnProcessorService {
       domain: 'package_store',
       transaction: storeTransactions[0],
     };
+  }
+
+  private parseGooglePlayDate(value?: string | null): Date | null {
+    if (!value) {
+      return null;
+    }
+
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   private extractSubscriptionProductId(
