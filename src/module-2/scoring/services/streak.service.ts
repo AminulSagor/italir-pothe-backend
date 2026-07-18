@@ -245,9 +245,9 @@ export class StreakService {
       .andWhere('subscription.expiresAt IS NOT NULL')
       .andWhere(
         `COALESCE(
-            subscription.startedAt,
-            subscription.createdAt
-          ) < :rangeEndExclusive`,
+      "subscription"."startedAt",
+      "subscription"."createdAt"
+    ) < :rangeEndExclusive`,
         {
           rangeEndExclusive,
         },
