@@ -7,6 +7,7 @@ import { CvEconomyConfig } from '../entities/cv-economy-config.entity';
 import { StoreOrder } from '../entities/store-order.entity';
 import { UserStoreWallet } from '../entities/user-store-wallet.entity';
 import {
+  CvGenerationChargeSource,
   StorePackageType,
   StreakProtectionMode,
 } from '../types/package-store.type';
@@ -103,13 +104,90 @@ export class StoreWalletService {
   ): Promise<{
     remainingCredits: number;
   }> {
-    if (manager) {
-      return this.consumeCvCreditWithManager(userId, manager);
+    const result = await this.consumeCvGenerationAccess(userId, manager);
+
+    return {
+      remainingCredits: result.paidCreditsRemaining,
+    };
+  }
+
+  async consumeCvGenerationAccess(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<{
+    source: CvGenerationChargeSource;
+    freeGenerationsRemaining: number;
+    paidCreditsRemaining: number;
+  }> {
+    if (!manager) {
+      return this.dataSource.transaction((transactionManager) =>
+        this.consumeCvGenerationAccess(userId, transactionManager),
+      );
     }
 
-    return this.dataSource.transaction((transactionManager) =>
-      this.consumeCvCreditWithManager(userId, transactionManager),
-    );
+    const wallet = await this.getLockedWallet(userId, manager);
+
+    let source: CvGenerationChargeSource;
+
+    if (wallet.freeCvGenerationsRemaining > 0) {
+      wallet.freeCvGenerationsRemaining -= 1;
+
+      source = CvGenerationChargeSource.FREE_ALLOWANCE;
+    } else if (wallet.cvCredits > 0) {
+      wallet.cvCredits -= 1;
+
+      source = CvGenerationChargeSource.PAID_CREDIT;
+    } else {
+      throw new PaymentRequiredException(
+        'Your three free CV creations have ended. Purchase a CV credit to create another CV.',
+      );
+    }
+
+    await manager.getRepository(UserStoreWallet).save(wallet);
+
+    return {
+      source,
+      freeGenerationsRemaining: wallet.freeCvGenerationsRemaining,
+      paidCreditsRemaining: wallet.cvCredits,
+    };
+  }
+
+  async refundCvGenerationAccess(
+    userId: string,
+    source: CvGenerationChargeSource,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (source === CvGenerationChargeSource.NONE) {
+      return;
+    }
+
+    if (!manager) {
+      await this.dataSource.transaction((transactionManager) =>
+        this.refundCvGenerationAccess(userId, source, transactionManager),
+      );
+
+      return;
+    }
+
+    const wallet = await this.getLockedWallet(userId, manager);
+
+    if (source === CvGenerationChargeSource.FREE_ALLOWANCE) {
+      wallet.freeCvGenerationsRemaining += 1;
+    }
+
+    if (source === CvGenerationChargeSource.PAID_CREDIT) {
+      wallet.cvCredits += 1;
+    }
+
+    await manager.getRepository(UserStoreWallet).save(wallet);
+  }
+
+  async isCvEditingWithoutCreditAllowed(
+    manager?: EntityManager,
+  ): Promise<boolean> {
+    const config = await this.getOrCreateCvEconomyConfig(manager);
+
+    return config.allowEditingWithoutCredit;
   }
 
   /**
@@ -415,7 +493,7 @@ export class StoreWalletService {
       config = await repository.save(
         repository.create({
           configKey: 'default',
-          freeCreditsPerSignup: 2,
+          freeCreditsPerSignup: 3,
           allowEditingWithoutCredit: true,
           updatedByAdminId: null,
         }),
@@ -455,7 +533,9 @@ export class StoreWalletService {
     });
 
     if (!wallet) {
-      throw new BadRequestException('AI wallet could not be initialized.');
+      throw new BadRequestException(
+        'The user store wallet could not be initialized.',
+      );
     }
 
     if (wallet.aiVoiceSeconds === 0 && wallet.aiVoiceMinutes > 0) {
@@ -486,18 +566,37 @@ export class StoreWalletService {
           aiVoiceMinutes: 0,
           aiVoiceSeconds: 0,
           aiTextTokens: 0,
+
+          /*
+           * Purchased CV credits only.
+           */
           cvCredits: 0,
+
+          /*
+           * The free allowance is stored separately.
+           */
+          freeCvGenerationsRemaining: 0,
+          freeCvGenerationsGrantedAt: null,
+
           signupCvCreditsGrantedAt: null,
+
+          unlimitedStreakProtectionUntil: null,
         }),
       );
     }
 
-    if (grantSignupCredits && !wallet.signupCvCreditsGrantedAt) {
+    if (grantSignupCredits && !wallet.freeCvGenerationsGrantedAt) {
       const config = await this.getOrCreateCvEconomyConfig(manager);
 
-      wallet.cvCredits += config.freeCreditsPerSignup;
+      wallet.freeCvGenerationsRemaining = config.freeCreditsPerSignup;
 
-      wallet.signupCvCreditsGrantedAt = new Date();
+      wallet.freeCvGenerationsGrantedAt = new Date();
+
+      /*
+       * Keep the legacy timestamp populated for
+       * backward compatibility.
+       */
+      wallet.signupCvCreditsGrantedAt ??= wallet.freeCvGenerationsGrantedAt;
 
       wallet = await repository.save(wallet);
     }
@@ -602,9 +701,31 @@ export class StoreWalletService {
       },
 
       cv: {
+        /*
+         * Purchased credits only.
+         */
         credits: wallet.cvCredits,
 
         freeCreditsPerSignup: config.freeCreditsPerSignup,
+
+        freeGenerationsLimit: config.freeCreditsPerSignup,
+
+        freeGenerationsRemaining: wallet.freeCvGenerationsRemaining,
+
+        freeLimitExhausted: wallet.freeCvGenerationsRemaining <= 0,
+
+        totalGenerationsAvailable:
+          wallet.freeCvGenerationsRemaining + wallet.cvCredits,
+
+        canCreate:
+          wallet.freeCvGenerationsRemaining > 0 || wallet.cvCredits > 0,
+
+        nextGenerationUses:
+          wallet.freeCvGenerationsRemaining > 0
+            ? 'free'
+            : wallet.cvCredits > 0
+              ? 'credit'
+              : 'none',
 
         allowEditingWithoutCredit: config.allowEditingWithoutCredit,
       },

@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, DeepPartial, Repository } from 'typeorm';
 
 import { CvTemplatesService } from 'src/cv-templates/services/cv-templates.service';
 import { FilePurpose } from 'src/files/entities/file.entity';
@@ -15,9 +15,12 @@ import {
   FilesService,
   type FileRequestUser,
 } from 'src/files/services/files.service';
+import { StoreWalletService } from 'src/package-store/services/store-wallet.service';
+import { CvGenerationChargeSource } from 'src/package-store/types/package-store.type';
 
 import { CreateCvGenerationDto } from '../dto/create-cv-generation.dto';
-import type { CvDataDto } from '../dto/cv-data.dto';
+import { CvDataDto } from '../dto/cv-data.dto';
+import { RegenerateCvGenerationDto } from '../dto/regenerate-cv-generation.dto';
 import { CvGeneration } from '../entities/cv-generation.entity';
 import {
   CvGenerationMode,
@@ -28,7 +31,6 @@ import {
   type CvReferenceImage,
 } from './cv-image-generation.service';
 import { CvPromptService } from './cv-prompt.service';
-import { RegenerateCvGenerationDto } from '../dto/regenerate-cv-generation.dto';
 
 export interface CreateCvGenerationFromAssistantParams {
   assistantSessionId: string;
@@ -53,6 +55,7 @@ export interface CreateCvGenerationFromAssistantParams {
 
   referenceImageFileIds: string[];
 }
+
 @Injectable()
 export class CvGenerationsService {
   private readonly logger = new Logger(CvGenerationsService.name);
@@ -60,6 +63,10 @@ export class CvGenerationsService {
   constructor(
     @InjectRepository(CvGeneration)
     private readonly cvGenerationRepository: Repository<CvGeneration>,
+
+    private readonly dataSource: DataSource,
+
+    private readonly storeWalletService: StoreWalletService,
 
     private readonly cvTemplatesService: CvTemplatesService,
 
@@ -87,26 +94,14 @@ export class CvGenerationsService {
       await this.cvTemplatesService.findById(dto.templateId);
     }
 
-    const generation = this.cvGenerationRepository.create({
-      userId: currentUser.id,
-
-      /*
-       * Normal form-based generation does not belong
-       * to an assistant session.
-       */
+    const savedGeneration = await this.createProcessingGeneration(currentUser, {
       assistantSessionId: null,
 
-      /*
-       * This is a new CV, not a regenerated or
-       * edited version of another generation.
-       */
       sourceGenerationId: null,
 
       mode: dto.mode,
 
       templateId: dto.templateId ?? null,
-
-      status: CvGenerationStatus.PROCESSING,
 
       cvData: this.cloneRecord(dto.cvData),
 
@@ -128,10 +123,6 @@ export class CvGenerationsService {
             )
           : null,
 
-      /*
-       * Normal creation has no separate
-       * regeneration instruction.
-       */
       regenerationInstruction: null,
 
       profilePhotoFileId: dto.profilePhotoFileId ?? null,
@@ -142,8 +133,6 @@ export class CvGenerationsService {
 
       errorMessage: null,
     });
-
-    const savedGeneration = await this.cvGenerationRepository.save(generation);
 
     void this.processGeneration(savedGeneration.id, currentUser);
 
@@ -180,27 +169,29 @@ export class CvGenerationsService {
       await this.cvTemplatesService.findById(params.templateId);
     }
 
-    const generation = this.cvGenerationRepository.create({
-      userId: currentUser.id,
-
+    /*
+     * New assistant CV:
+     * sourceGenerationId is null
+     * → consumes free allowance first
+     * → then one purchased credit
+     *
+     * Assistant edit:
+     * sourceGenerationId is present
+     * → free when allowEditingWithoutCredit is true
+     * → otherwise consumes normal access
+     */
+    const savedGeneration = await this.createProcessingGeneration(currentUser, {
       assistantSessionId: params.assistantSessionId,
 
-      /*
-       * Null for a newly created CV.
-       * Contains the previous generation ID for
-       * facts-only or design-and-facts editing.
-       */
       sourceGenerationId: params.sourceGenerationId ?? null,
 
       mode: params.mode,
 
       templateId: params.templateId,
 
-      status: CvGenerationStatus.PROCESSING,
-
       /*
-       * Store a separate deep copy so later changes
-       * cannot mutate the source generation data.
+       * Preserve a separate copy so later assistant
+       * changes cannot mutate this generation.
        */
       cvData: this.cloneRecord(params.cvData),
 
@@ -222,13 +213,6 @@ export class CvGenerationsService {
             )
           : null,
 
-      /*
-       * For facts_only, this may contain the
-       * source CV's existing design instruction.
-       *
-       * For design_and_facts, this contains the
-       * user's newly requested design instruction.
-       */
       regenerationInstruction: params.regenerationInstruction?.trim() || null,
 
       profilePhotoFileId: params.profilePhotoFileId,
@@ -239,8 +223,6 @@ export class CvGenerationsService {
 
       errorMessage: null,
     });
-
-    const savedGeneration = await this.cvGenerationRepository.save(generation);
 
     void this.processGeneration(savedGeneration.id, currentUser);
 
@@ -257,10 +239,13 @@ export class CvGenerationsService {
         where: {
           userId,
         },
+
         order: {
           createdAt: 'DESC',
         },
+
         skip: (normalizedPage - 1) * normalizedLimit,
+
         take: normalizedLimit,
       });
 
@@ -333,13 +318,16 @@ export class CvGenerationsService {
       await this.cvTemplatesService.findById(originalGeneration.templateId);
     }
 
-    const newGeneration = this.cvGenerationRepository.create({
-      userId: originalGeneration.userId,
-
-      /*
-       * Direct design regeneration is linked through
-       * sourceGenerationId, not the old assistant session.
-       */
+    /*
+     * sourceGenerationId marks this as an edit/regeneration.
+     *
+     * When allowEditingWithoutCredit is true:
+     * no free allowance or paid credit is consumed.
+     *
+     * When allowEditingWithoutCredit is false:
+     * free allowance is consumed first, then one purchased credit.
+     */
+    const savedGeneration = await this.createProcessingGeneration(currentUser, {
       assistantSessionId: null,
 
       sourceGenerationId: originalGeneration.id,
@@ -347,8 +335,6 @@ export class CvGenerationsService {
       mode: originalGeneration.mode,
 
       templateId: originalGeneration.templateId,
-
-      status: CvGenerationStatus.PROCESSING,
 
       /*
        * Preserve the exact confirmed CV facts.
@@ -386,9 +372,6 @@ export class CvGenerationsService {
 
       errorMessage: null,
     });
-
-    const savedGeneration =
-      await this.cvGenerationRepository.save(newGeneration);
 
     void this.processGeneration(savedGeneration.id, currentUser);
 
@@ -438,7 +421,10 @@ export class CvGenerationsService {
     }
 
     try {
-      const cvData = generation.cvData as unknown as CvDataDto;
+      const cvData = Object.assign(
+        new CvDataDto(),
+        this.cloneRecord(generation.cvData),
+      );
 
       const profilePhotoUrl = generation.profilePhotoFileId
         ? await this.getOwnedProfilePhotoSignedUrl(
@@ -510,11 +496,13 @@ export class CvGenerationsService {
 
       await this.cvGenerationRepository.save(generation);
     } catch (error) {
-      generation.status = CvGenerationStatus.FAILED;
+      const safeError = this.getSafeGenerationError(error);
 
-      generation.errorMessage = this.getSafeGenerationError(error);
-
-      await this.cvGenerationRepository.save(generation);
+      /*
+       * Mark the generation as failed and refund the
+       * exact free allowance or paid credit only once.
+       */
+      await this.failGenerationAndRefund(generation.id, safeError);
 
       const logMessage =
         error instanceof Error ? error.message : 'Unknown generation error';
@@ -859,6 +847,110 @@ CHATBOT DATA RULE:
     return generation;
   }
 
+  private async createProcessingGeneration(
+    currentUser: FileRequestUser,
+    values: DeepPartial<CvGeneration>,
+  ): Promise<CvGeneration> {
+    return this.dataSource.transaction(async (manager) => {
+      const isEditOrRegeneration = Boolean(values.sourceGenerationId);
+
+      const editingIsFree =
+        isEditOrRegeneration &&
+        (await this.storeWalletService.isCvEditingWithoutCreditAllowed(
+          manager,
+        ));
+
+      let chargeSource = CvGenerationChargeSource.NONE;
+
+      if (!editingIsFree) {
+        const charge = await this.storeWalletService.consumeCvGenerationAccess(
+          currentUser.id,
+          manager,
+        );
+
+        chargeSource = charge.source;
+      }
+
+      const repository = manager.getRepository(CvGeneration);
+
+      /*
+       * Allowance/credit consumption and generation creation
+       * happen in one transaction. If either part fails,
+       * neither change is committed.
+       */
+      const generation = repository.create({
+        ...values,
+
+        userId: currentUser.id,
+
+        status: CvGenerationStatus.PROCESSING,
+
+        creditChargeSource: chargeSource,
+
+        creditChargedAt:
+          chargeSource === CvGenerationChargeSource.NONE ? null : new Date(),
+
+        creditRefundedAt: null,
+      });
+
+      return repository.save(generation);
+    });
+  }
+
+  private async failGenerationAndRefund(
+    generationId: string,
+    errorMessage: string,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(CvGeneration);
+
+      /*
+       * Lock the generation row so concurrent workers cannot
+       * refund the same free allowance or paid credit twice.
+       */
+      const generation = await repository.findOne({
+        where: {
+          id: generationId,
+        },
+
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (!generation) {
+        return;
+      }
+
+      /*
+       * Do not overwrite a completed or already finalized generation.
+       */
+      if (generation.status !== CvGenerationStatus.PROCESSING) {
+        return;
+      }
+
+      generation.status = CvGenerationStatus.FAILED;
+
+      generation.errorMessage = errorMessage;
+
+      const shouldRefund =
+        generation.creditChargeSource !== CvGenerationChargeSource.NONE &&
+        !generation.creditRefundedAt;
+
+      if (shouldRefund) {
+        await this.storeWalletService.refundCvGenerationAccess(
+          generation.userId,
+          generation.creditChargeSource,
+          manager,
+        );
+
+        generation.creditRefundedAt = new Date();
+      }
+
+      await repository.save(generation);
+    });
+  }
+
   private async assertOwnedProfilePhoto(
     fileId: string,
     userId: string,
@@ -1064,7 +1156,9 @@ CHATBOT DATA RULE:
     const sourceGeneration = await this.cvGenerationRepository.findOne({
       where: {
         id: generation.sourceGenerationId,
+
         userId: generation.userId,
+
         status: CvGenerationStatus.COMPLETED,
       },
     });
@@ -1091,6 +1185,7 @@ CHATBOT DATA RULE:
 
     return {
       url: response.signedReadUrl,
+
       fileName: 'previous-generated-cv-design',
     };
   }

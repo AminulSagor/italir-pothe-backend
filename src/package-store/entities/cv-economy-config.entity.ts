@@ -24,7 +24,7 @@ export class CvEconomyConfig {
 
   @Column({
     type: 'integer',
-    default: 2,
+    default: 3,
   })
   freeCreditsPerSignup: number;
 

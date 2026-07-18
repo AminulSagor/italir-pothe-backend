@@ -6,6 +6,12 @@ export enum StorePackageType {
   CV_CREDIT = 'cv_credit',
 }
 
+export enum CvGenerationChargeSource {
+  NONE = 'none',
+  FREE_ALLOWANCE = 'free_allowance',
+  PAID_CREDIT = 'paid_credit',
+}
+
 export enum StorePackageStatus {
   PUBLISHED = 'published',
   ARCHIVED = 'archived',

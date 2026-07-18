@@ -45,6 +45,18 @@ export class UserStoreWallet {
   cvCredits: number;
 
   @Column({
+    type: 'integer',
+    default: 0,
+  })
+  freeCvGenerationsRemaining: number;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  freeCvGenerationsGrantedAt: Date | null;
+
+  @Column({
     type: 'timestamptz',
     nullable: true,
   })

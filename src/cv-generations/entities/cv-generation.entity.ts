@@ -11,6 +11,7 @@ import {
   CvGenerationMode,
   CvGenerationStatus,
 } from '../enums/cv-generation.enum';
+import { CvGenerationChargeSource } from 'src/package-store/types/package-store.type';
 
 @Entity('cv_generations')
 @Index(['userId', 'createdAt'])
@@ -70,6 +71,25 @@ export class CvGeneration {
     default: CvGenerationStatus.PROCESSING,
   })
   status: CvGenerationStatus;
+
+  @Column({
+    type: 'varchar',
+    length: 30,
+    default: CvGenerationChargeSource.NONE,
+  })
+  creditChargeSource: CvGenerationChargeSource;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  creditChargedAt: Date | null;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  creditRefundedAt: Date | null;
 
   @Column({
     type: 'jsonb',

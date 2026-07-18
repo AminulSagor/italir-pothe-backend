@@ -10,6 +10,7 @@ import { CvGeneration } from './entities/cv-generation.entity';
 import { CvGenerationsService } from './services/cv-generations.service';
 import { CvImageGenerationService } from './services/cv-image-generation.service';
 import { CvPromptService } from './services/cv-prompt.service';
+import { PackageStoreModule } from 'src/package-store/package-store.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { CvPromptService } from './services/cv-prompt.service';
     TypeOrmModule.forFeature([CvGeneration]),
     CvTemplatesModule,
     FilesModule,
+    PackageStoreModule,
   ],
   controllers: [CvGenerationsController],
   providers: [CvGenerationsService, CvImageGenerationService, CvPromptService],
