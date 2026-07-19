@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { ModerationReport } from './entities/moderation-report.entity';
@@ -7,6 +11,11 @@ import { ModerationAction } from './entities/moderation-action.entity';
 import { User } from '../users/entities/user.entity';
 import { Course } from '../module-2/courses/entities/course.entity';
 import { UserCourseEnrollment } from '../module-2/courses/entities/user-course-enrollment.entity';
+import { FilesService } from 'src/files/services/files.service';
+import {
+  UserReport,
+  UserReportStatus,
+} from 'src/user-reports/entities/user-report.entity';
 
 @Injectable()
 export class ModerationService {
@@ -30,6 +39,7 @@ export class ModerationService {
     private readonly enrollmentRepo: Repository<UserCourseEnrollment>,
 
     private readonly dataSource: DataSource,
+    private readonly filesService: FilesService,
   ) {}
 
   private percentageChange(current: number, previous: number) {
@@ -76,13 +86,19 @@ export class ModerationService {
       this.reportRepo
         .createQueryBuilder('report')
         .where('report.status = :status', { status: 'pending' })
-        .andWhere('report.submittedAt >= :currentWeekStart', { currentWeekStart })
+        .andWhere('report.submittedAt >= :currentWeekStart', {
+          currentWeekStart,
+        })
         .getCount(),
       this.reportRepo
         .createQueryBuilder('report')
         .where('report.status = :status', { status: 'pending' })
-        .andWhere('report.submittedAt >= :previousWeekStart', { previousWeekStart })
-        .andWhere('report.submittedAt < :currentWeekStart', { currentWeekStart })
+        .andWhere('report.submittedAt >= :previousWeekStart', {
+          previousWeekStart,
+        })
+        .andWhere('report.submittedAt < :currentWeekStart', {
+          currentWeekStart,
+        })
         .getCount(),
       this.actionRepo
         .createQueryBuilder('action')
@@ -90,7 +106,9 @@ export class ModerationService {
         .getCount(),
       this.actionRepo
         .createQueryBuilder('action')
-        .where('action.loggedAt >= :yesterdayStart', { yesterdayStart: this.daysAgo(1) })
+        .where('action.loggedAt >= :yesterdayStart', {
+          yesterdayStart: this.daysAgo(1),
+        })
         .andWhere('action.loggedAt < :todayStart', { todayStart })
         .getCount(),
       this.reportRepo
@@ -105,7 +123,10 @@ export class ModerationService {
     const avgResponseResult = await this.actionRepo
       .createQueryBuilder('action')
       .innerJoin('action.report', 'report')
-      .select('AVG(EXTRACT(EPOCH FROM (action.loggedAt - report.submittedAt)) / 60)', 'avg')
+      .select(
+        'AVG(EXTRACT(EPOCH FROM (action.loggedAt - report.submittedAt)) / 60)',
+        'avg',
+      )
       .getRawOne<{ avg: string | null }>();
 
     const avgResponseTimeMinutes = avgResponseResult?.avg
@@ -139,11 +160,18 @@ export class ModerationService {
     };
   }
 
-  async listReports(page = 1, limit = 10, status?: string, reason?: string, search?: string) {
+  async listReports(
+    page = 1,
+    limit = 10,
+    status?: string,
+    reason?: string,
+    search?: string,
+  ) {
     const safePage = Math.max(page, 1);
     const safeLimit = Math.min(Math.max(limit, 1), 100);
 
-    const qb = this.reportRepo.createQueryBuilder('r')
+    const qb = this.reportRepo
+      .createQueryBuilder('r')
       .leftJoinAndSelect('r.subject', 'subject')
       .leftJoinAndSelect('r.reporter', 'reporter')
       .orderBy('r.submittedAt', 'DESC');
@@ -160,7 +188,10 @@ export class ModerationService {
 
     const total = await qb.getCount();
 
-    const items = await qb.skip((safePage - 1) * safeLimit).take(safeLimit).getMany();
+    const items = await qb
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getMany();
 
     const rows = items.map((r) => ({
       id: r.id,
@@ -225,6 +256,32 @@ export class ModerationService {
     const reporter = report.reporter;
     const subject = report.subject;
 
+    const mappedVisualEvidence = await Promise.all(
+      visualEvidence.map(async (evidence) => {
+        let evidenceUrl = evidence.mediaUrl;
+
+        if (evidence.evidenceFileId) {
+          try {
+            const signedRead = await this.filesService.createSignedReadUrl(
+              evidence.evidenceFileId,
+            );
+
+            evidenceUrl = signedRead.signedReadUrl;
+          } catch (_) {
+            evidenceUrl = evidence.mediaUrl;
+          }
+        }
+
+        return {
+          id: evidence.id,
+          fileId: evidence.evidenceFileId,
+          url: evidenceUrl,
+          description: evidence.descriptionText,
+          uploadedAt: evidence.uploadedAt,
+        };
+      }),
+    );
+
     return {
       report_overview: {
         id: report.id,
@@ -273,13 +330,7 @@ export class ModerationService {
         status: enrollment.status,
       })),
 
-      visual_evidence: visualEvidence.map((evidence) => ({
-        id: evidence.id,
-        url: evidence.mediaUrl,
-
-        description: evidence.descriptionText ?? null,
-        uploadedAt: evidence.uploadedAt,
-      })),
+      visual_evidence: mappedVisualEvidence,
       action_history: actionHistory.map((action) => ({
         id: action.id,
         actionType: action.actionType,
@@ -300,10 +351,17 @@ export class ModerationService {
     }
 
     const actionType = payload.action_type?.trim() ?? '';
-    const allowedActionTypes = ['formal_warning', 'warn', 'permanent_ban', 'dismiss'];
+    const allowedActionTypes = [
+      'formal_warning',
+      'warn',
+      'permanent_ban',
+      'dismiss',
+    ];
 
     if (!allowedActionTypes.includes(actionType)) {
-      throw new BadRequestException('action_type must be formal_warning, permanent_ban, or dismiss');
+      throw new BadRequestException(
+        'action_type must be formal_warning, permanent_ban, or dismiss',
+      );
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -328,11 +386,41 @@ export class ModerationService {
       await manager.update(
         ModerationReport,
         { id: report.id },
-        { status: newStatus, assignedModeratorId: moderatorId },
+        {
+          status: newStatus,
+          assignedModeratorId: moderatorId,
+        },
       );
 
+      /*
+       * Keep the original mobile report synchronized
+       * with the admin moderation case.
+       *
+       * UserReportStatus has no "banned" status, so all
+       * completed moderation decisions become RESOLVED.
+       */
+      if (report.sourceUserReportId) {
+        await manager.update(
+          UserReport,
+          {
+            id: report.sourceUserReportId,
+          },
+          {
+            status: UserReportStatus.RESOLVED,
+          },
+        );
+      }
+
       if (actionType === 'permanent_ban') {
-        await manager.update(User, { id: report.subjectId }, { isBanned: true });
+        await manager.update(
+          User,
+          {
+            id: report.subjectId,
+          },
+          {
+            isBanned: true,
+          },
+        );
       }
 
       return {

@@ -1,184 +1,415 @@
-import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { randomInt } from 'crypto';
+import { DataSource, Repository } from 'typeorm';
 
-import { UserReport, UserReportStatus } from './entities/user-report.entity';
-import { ReportReason } from './entities/report-reason.entity';
-import { User } from 'src/users/entities/user.entity';
-import { ModerationReport } from 'src/moderation/entities/moderation-report.entity';
-import { FilesService, FileRequestUser } from 'src/files/services/files.service';
 import { FilePurpose } from 'src/files/entities/file.entity';
+import {
+  FileRequestUser,
+  FilesService,
+} from 'src/files/services/files.service';
+import { ModerationReport } from 'src/moderation/entities/moderation-report.entity';
+import { ReportVisualEvidence } from 'src/moderation/entities/report-visual-evidence.entity';
+import { User } from 'src/users/entities/user.entity';
+
+import { ReportReason } from './entities/report-reason.entity';
+import { UserReport, UserReportStatus } from './entities/user-report.entity';
 
 @Injectable()
 export class UserReportsService {
   constructor(
-    @InjectRepository(UserReport)
-    private readonly userReportRepository: Repository<UserReport>,
-
     @InjectRepository(ReportReason)
     private readonly reportReasonRepository: Repository<ReportReason>,
 
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
 
-    @InjectRepository(ModerationReport)
-    private readonly moderationReportRepository: Repository<ModerationReport>,
-
     private readonly filesService: FilesService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async createReport(
-    reporter: { id: string; role?: string },
+    reporter: {
+      id: string;
+      role?: string;
+    },
     reportedUserId: string,
     reasonId: string,
     description?: string | null,
     evidenceFileId?: string | null,
-    evidence?: { buffer: Buffer; originalName: string; mimeType: string } | null,
+    evidence?: {
+      buffer: Buffer;
+      originalName: string;
+      mimeType: string;
+    } | null,
   ) {
-    // validate reported user exists
-    const reported = await this.userRepository.findOne({ where: { id: reportedUserId } });
-    if (!reported) {
-      throw new NotFoundException('The user you are trying to report does not exist.');
+    const reporterId = reporter.id?.trim() ?? '';
+    const targetUserId = reportedUserId?.trim() ?? '';
+    const normalizedReasonId = reasonId?.trim() ?? '';
+    const normalizedDescription = description?.trim() ?? '';
+
+    if (!reporterId) {
+      throw new BadRequestException('Reporter identity is required.');
     }
 
-    // validate reason
-    const isUuid = (v: string) =>
-      typeof v === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
-
-    let reason: ReportReason | null = null;
-    if (isUuid(reasonId)) {
-      // frontend provided the actual UUID
-      reason = await this.reportReasonRepository.findOne({ where: { id: reasonId } });
-    } else if (typeof reasonId === 'string') {
-      // frontend likely provided a key/slug/title like 'harassment' — try case-insensitive title match
-      reason = await this.reportReasonRepository
-        .createQueryBuilder('r')
-        .where('LOWER(r.title) = LOWER(:title)', { title: reasonId })
-        .getOne();
+    if (!targetUserId) {
+      throw new BadRequestException('reportedUserId is required.');
     }
 
-    if (!reason || !reason.isActive) {
-      throw new BadRequestException('Invalid reason provided.');
+    if (reporterId === targetUserId) {
+      throw new BadRequestException('You cannot report your own account.');
     }
+
+    if (!normalizedReasonId) {
+      throw new BadRequestException('reasonId is required.');
+    }
+
+    if (normalizedDescription.length < 10) {
+      throw new BadRequestException(
+        'Description must contain at least 10 characters.',
+      );
+    }
+
+    if (normalizedDescription.length > 500) {
+      throw new BadRequestException(
+        'Description cannot exceed 500 characters.',
+      );
+    }
+
+    const reportedUser = await this.userRepository.findOne({
+      where: {
+        id: targetUserId,
+      },
+    });
+
+    if (!reportedUser) {
+      throw new NotFoundException(
+        'The user you are trying to report does not exist.',
+      );
+    }
+
+    const reason = await this.resolveActiveReason(normalizedReasonId);
 
     let attachedEvidenceFileId: string | null = null;
+
     let evidenceUrl: string | null = null;
 
+    let createdEvidenceInThisRequest = false;
+
+    let evidenceOwner: FileRequestUser | null = null;
+
     if (evidence) {
-      // Direct buffer upload (multipart) — create file record immediately
-      const currentUser: FileRequestUser = { id: reporter.id, role: reporter.role ?? 'USER' };
+      const currentUser: FileRequestUser = {
+        id: reporterId,
+        role: reporter.role ?? 'user',
+      };
 
       const created = await this.filesService.createFileFromBuffer(
         evidence.buffer,
         evidence.originalName,
         evidence.mimeType,
         currentUser,
+        FilePurpose.REPORT_EVIDENCE,
       );
 
       attachedEvidenceFileId = created.file.id;
-      evidenceUrl = created.publicUrl;
-    } else if (evidenceFileId) {
-      // Two-step flow: client already uploaded and confirmed the file — validate ownership and purpose
-      const confirmedFile = await this.filesService.findActiveFileById(evidenceFileId);
 
-      if (!confirmedFile) {
-        throw new BadRequestException('Provided evidenceFileId does not reference an existing uploaded file');
+      createdEvidenceInThisRequest = true;
+
+      evidenceOwner = currentUser;
+
+      evidenceUrl = await this.tryCreateEvidenceReadUrl(created.file.id);
+    } else {
+      const normalizedEvidenceFileId = evidenceFileId?.trim() ?? '';
+
+      if (normalizedEvidenceFileId) {
+        const confirmedFile = await this.filesService.findActiveFileById(
+          normalizedEvidenceFileId,
+        );
+
+        if (confirmedFile.filePurpose !== FilePurpose.REPORT_EVIDENCE) {
+          throw new BadRequestException(
+            'Provided file is not valid report evidence.',
+          );
+        }
+
+        const normalizedRole = (reporter.role ?? '').trim().toLowerCase();
+
+        const boolIsAdmin = normalizedRole === 'admin';
+
+        if (!boolIsAdmin && confirmedFile.ownerUserId !== reporterId) {
+          throw new ForbiddenException(
+            'You do not have permission to attach this file as evidence.',
+          );
+        }
+
+        attachedEvidenceFileId = confirmedFile.id;
+
+        evidenceUrl = await this.tryCreateEvidenceReadUrl(confirmedFile.id);
       }
+    }
 
-      if (confirmedFile.filePurpose !== FilePurpose.REPORT_EVIDENCE) {
-        throw new BadRequestException('Provided file is not valid report evidence');
-      }
+    const ticketId = `REP-${randomInt(100000, 1000000)}`;
 
-      // if reporter is not admin, ensure they own the file
-      if ((reporter.role ?? '').toLowerCase() !== 'admin') {
-        if (!confirmedFile.ownerUserId || confirmedFile.ownerUserId !== reporter.id) {
-          throw new ForbiddenException('You do not have permission to attach this file as evidence');
+    let transactionResult: {
+      savedUserReport: UserReport;
+      savedModerationReport: ModerationReport;
+    };
+
+    try {
+      transactionResult = await this.dataSource.transaction(async (manager) => {
+        const userReport = manager.create(UserReport, {
+          reporterId,
+          reportedUserId: targetUserId,
+          reasonId: reason.id,
+          description: normalizedDescription,
+          evidenceFileId: attachedEvidenceFileId,
+          status: UserReportStatus.PENDING,
+          ticketId,
+        });
+
+        const savedUserReport = await manager.save(userReport);
+
+        const moderationReport = manager.create(ModerationReport, {
+          sourceUserReportId: savedUserReport.id,
+
+          caseNumber: `MOD-${Date.now()}-${randomInt(1000, 10000)}`,
+
+          reporterId: savedUserReport.reporterId,
+
+          subjectId: savedUserReport.reportedUserId,
+
+          contentType: 'user',
+
+          contentEntityId: savedUserReport.reportedUserId,
+
+          reportReason: reason.title,
+
+          reporterNote: savedUserReport.description,
+
+          status: 'pending',
+
+          assignedModeratorId: null,
+        });
+
+        const savedModerationReport = await manager.save(moderationReport);
+
+        if (attachedEvidenceFileId) {
+          const visualEvidence = manager.create(ReportVisualEvidence, {
+            reportId: savedModerationReport.id,
+
+            evidenceFileId: attachedEvidenceFileId,
+
+            mediaUrl: null,
+
+            descriptionText: null,
+          });
+
+          await manager.save(visualEvidence);
+        }
+
+        return {
+          savedUserReport,
+          savedModerationReport,
+        };
+      });
+    } catch (error) {
+      /*
+       * Only clean up files uploaded during
+       * this exact request.
+       *
+       * Do not archive a file supplied through
+       * evidenceFileId because it existed before
+       * this report request.
+       */
+      if (
+        createdEvidenceInThisRequest &&
+        attachedEvidenceFileId &&
+        evidenceOwner
+      ) {
+        try {
+          await this.filesService.archiveFile(
+            attachedEvidenceFileId,
+            evidenceOwner,
+          );
+        } catch (_) {
+          /*
+           * Preserve the original database
+           * transaction error.
+           */
         }
       }
 
-      attachedEvidenceFileId = confirmedFile.id;
-
-      // derive public URL via files service helper
-      try {
-        const read = await this.filesService.createSignedReadUrl(confirmedFile.id);
-        evidenceUrl = read.file?.publicUrl ?? null;
-      } catch (err) {
-        evidenceUrl = null;
-      }
-    }
-
-    const ticketId = `REP-${randomInt(100000, 999999)}`;
-
-    const report = this.userReportRepository.create({
-      reporterId: reporter.id,
-      reportedUserId,
-      reasonId: reason.id,
-      description: description?.trim() || null,
-      evidenceFileId: attachedEvidenceFileId,
-      status: UserReportStatus.PENDING,
-      ticketId,
-    });
-
-    const saved = await this.userReportRepository.save(report);
-
-    // create corresponding moderation report so admin API can surface it
-    try {
-      const caseNumber = `MOD-${Date.now()}-${randomInt(1000, 9999)}`;
-      const mod = this.moderationReportRepository.create({
-        caseNumber,
-        reporterId: saved.reporterId,
-        subjectId: saved.reportedUserId,
-        contentType: 'user',
-        contentEntityId: saved.reportedUserId,
-        reportReason: reason.title,
-        reporterNote: saved.description,
-        status: 'pending',
-      });
-
-      await this.moderationReportRepository.save(mod);
-    } catch (err) {
-      // don't block report creation if moderation mirror fails
-      // eslint-disable-next-line no-console
-      console.warn('Failed to create moderation report mirror:', err?.message ?? err);
+      throw error;
     }
 
     return {
-      id: saved.id,
-      reporterId: saved.reporterId,
-      reportedUserId: saved.reportedUserId,
-      reason: { id: reason.id, title: reason.title },
-      description: saved.description,
-      evidenceFileId: saved.evidenceFileId,
+      id: transactionResult.savedUserReport.id,
+
+      reporterId: transactionResult.savedUserReport.reporterId,
+
+      reportedUserId: transactionResult.savedUserReport.reportedUserId,
+
+      reason: {
+        id: reason.id,
+        title: reason.title,
+      },
+
+      description: transactionResult.savedUserReport.description,
+
+      evidenceFileId: transactionResult.savedUserReport.evidenceFileId,
+
       evidenceUrl,
-      status: saved.status,
-      ticketId: saved.ticketId,
-      createdAt: saved.createdAt,
+
+      status: transactionResult.savedUserReport.status,
+
+      ticketId: transactionResult.savedUserReport.ticketId,
+
+      moderationCaseNumber: transactionResult.savedModerationReport.caseNumber,
+
+      createdAt: transactionResult.savedUserReport.createdAt,
     };
   }
 
   async listActiveReasons() {
-    const reasons = await this.reportReasonRepository.find({ where: { isActive: true } });
-    return reasons.map((r) => ({ id: r.id, title: r.title }));
+    const reasons = await this.reportReasonRepository.find({
+      where: {
+        isActive: true,
+      },
+      order: {
+        createdAt: 'ASC',
+      },
+    });
+
+    return reasons.map((reason) => ({
+      id: reason.id,
+      title: reason.title,
+    }));
   }
 
-  // Admin helpers
   async listAllReasons() {
-    return this.reportReasonRepository.find({ order: { createdAt: 'ASC' } });
+    return this.reportReasonRepository.find({
+      order: {
+        createdAt: 'ASC',
+      },
+    });
   }
 
   async createReason(title: string, isActive = true) {
-    const exists = await this.reportReasonRepository.findOne({ where: { title } });
-    if (exists) return exists;
-    const reason = this.reportReasonRepository.create({ title, isActive });
+    const normalizedTitle = title?.trim() ?? '';
+
+    if (!normalizedTitle) {
+      throw new BadRequestException('Reason title is required.');
+    }
+
+    const existingReason = await this.reportReasonRepository
+      .createQueryBuilder('reason')
+      .where('LOWER(TRIM(reason.title)) = LOWER(:title)', {
+        title: normalizedTitle,
+      })
+      .getOne();
+
+    if (existingReason) {
+      return existingReason;
+    }
+
+    const reason = this.reportReasonRepository.create({
+      title: normalizedTitle,
+      isActive,
+    });
+
     return this.reportReasonRepository.save(reason);
   }
 
   async updateReason(id: string, title?: string, isActive?: boolean) {
-    const reason = await this.reportReasonRepository.findOne({ where: { id } });
-    if (!reason) throw new NotFoundException('Reason not found');
-    if (title) reason.title = title;
-    if (isActive !== undefined) reason.isActive = isActive;
+    const reason = await this.reportReasonRepository.findOne({
+      where: {
+        id,
+      },
+    });
+
+    if (!reason) {
+      throw new NotFoundException('Reason not found.');
+    }
+
+    if (title !== undefined) {
+      const normalizedTitle = title.trim();
+
+      if (!normalizedTitle) {
+        throw new BadRequestException('Reason title cannot be empty.');
+      }
+
+      const duplicate = await this.reportReasonRepository
+        .createQueryBuilder('otherReason')
+        .where('otherReason.id != :id', {
+          id: reason.id,
+        })
+        .andWhere('LOWER(TRIM(otherReason.title)) = LOWER(:title)', {
+          title: normalizedTitle,
+        })
+        .getOne();
+
+      if (duplicate) {
+        throw new BadRequestException(
+          'Another report reason already uses this title.',
+        );
+      }
+
+      reason.title = normalizedTitle;
+    }
+
+    if (isActive !== undefined) {
+      reason.isActive = isActive;
+    }
+
     return this.reportReasonRepository.save(reason);
+  }
+
+  private async resolveActiveReason(value: string): Promise<ReportReason> {
+    const reason = this.isUuid(value)
+      ? await this.reportReasonRepository.findOne({
+          where: {
+            id: value,
+            isActive: true,
+          },
+        })
+      : await this.reportReasonRepository
+          .createQueryBuilder('reason')
+          .where('LOWER(TRIM(reason.title)) = LOWER(:title)', {
+            title: value,
+          })
+          .andWhere('reason.isActive = :isActive', {
+            isActive: true,
+          })
+          .getOne();
+
+    if (!reason) {
+      throw new BadRequestException('Invalid reason provided.');
+    }
+
+    return reason;
+  }
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(
+      value,
+    );
+  }
+
+  private async tryCreateEvidenceReadUrl(
+    fileId: string,
+  ): Promise<string | null> {
+    try {
+      const result = await this.filesService.createSignedReadUrl(fileId);
+
+      return result.signedReadUrl;
+    } catch (_) {
+      return null;
+    }
   }
 }

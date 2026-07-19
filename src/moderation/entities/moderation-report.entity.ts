@@ -15,9 +15,25 @@ import { User } from '../../users/entities/user.entity';
 @Index('UQ_moderation_reports_case_number', ['caseNumber'], {
   unique: true,
 })
+@Index('UQ_moderation_reports_source_user_report_id', ['sourceUserReportId'], {
+  unique: true,
+  where: '"sourceUserReportId" IS NOT NULL',
+})
 export class ModerationReport {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  /*
+   * Connects this admin moderation case to the
+   * original report submitted from the mobile app.
+   *
+   * It remains nullable for older moderation rows.
+   */
+  @Column({
+    type: 'uuid',
+    nullable: true,
+  })
+  sourceUserReportId: string | null;
 
   @Column({
     type: 'varchar',
@@ -26,10 +42,6 @@ export class ModerationReport {
   })
   caseNumber: string;
 
-  /*
-   * The raw reporterId is preserved even when the user account
-   * is deleted. In that case, reporter will resolve to null.
-   */
   @ManyToOne(() => User, {
     nullable: true,
     createForeignKeyConstraints: false,
@@ -44,10 +56,6 @@ export class ModerationReport {
   })
   reporterId: string;
 
-  /*
-   * The raw subjectId is preserved even when the user account
-   * is deleted. In that case, subject will resolve to null.
-   */
   @ManyToOne(() => User, {
     nullable: true,
     createForeignKeyConstraints: false,
@@ -68,7 +76,6 @@ export class ModerationReport {
   })
   contentType: string;
 
-  // Supports either integer or UUID entity references.
   @Column({
     type: 'varchar',
     length: 100,
