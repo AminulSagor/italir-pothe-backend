@@ -259,10 +259,7 @@ export class UserReportsService {
         }
       }
 
-      if (
-        normalizedClientReportId &&
-        this.isUniqueViolationError(error)
-      ) {
+      if (normalizedClientReportId && this.isUniqueViolationError(error)) {
         const existingReport = await this.findExistingReportResponse(
           reporterId,
           normalizedClientReportId,
@@ -398,7 +395,6 @@ export class UserReportsService {
     return this.reportReasonRepository.save(reason);
   }
 
-
   private async findExistingReportResponse(
     reporterId: string,
     clientReportId: string,
@@ -459,34 +455,29 @@ export class UserReportsService {
   }
 
   private async resolveActiveReason(value: string): Promise<ReportReason> {
-    const reason = this.isUuid(value)
-      ? await this.reportReasonRepository.findOne({
-          where: {
-            id: value,
-            isActive: true,
-          },
-        })
-      : await this.reportReasonRepository
-          .createQueryBuilder('reason')
-          .where('LOWER(TRIM(reason.title)) = LOWER(:title)', {
-            title: value,
-          })
-          .andWhere('reason.isActive = :isActive', {
-            isActive: true,
-          })
-          .getOne();
+    const normalizedValue = value.trim();
+
+    const reason = await this.reportReasonRepository
+      .createQueryBuilder('reason')
+      .where('reason.isActive = :isActive', {
+        isActive: true,
+      })
+      .andWhere(
+        `(
+        CAST(reason.id AS text) = :value
+        OR LOWER(TRIM(reason.title)) = LOWER(:value)
+      )`,
+        {
+          value: normalizedValue,
+        },
+      )
+      .getOne();
 
     if (!reason) {
       throw new BadRequestException('Invalid reason provided.');
     }
 
     return reason;
-  }
-
-  private isUuid(value: string): boolean {
-    return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/.test(
-      value,
-    );
   }
 
   private async tryCreateEvidenceReadUrl(
