@@ -26,7 +26,7 @@ import { Otp, OtpPurpose } from '../users/entities/otp.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ConfigService } from '@nestjs/config';
 import { StoreWalletService } from 'src/package-store/services/store-wallet.service';
-import { AccountModerationStatusService } from 'src/user-reports/account-moderation-status.service';
+import { AccountModerationStatusService } from 'src/moderation/account-moderation-status.service';
 
 @Injectable()
 export class AuthService {

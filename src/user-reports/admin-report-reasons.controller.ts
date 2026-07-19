@@ -28,15 +28,24 @@ export class AdminReportReasonsController {
 
   @Post()
   @Roles(UserRole.ADMIN, UserRole.LEAD_MODERATOR)
-  async create(@Body('title') title: string, @Body('isActive') isActive?: boolean) {
-    if (!title || !title.trim()) throw new BadRequestException('title is required');
+  async create(
+    @Body('title') title: string,
+    @Body('isActive') isActive?: boolean,
+  ) {
+    if (!title || !title.trim())
+      throw new BadRequestException('title is required');
     return this.userReportsService.createReason(title.trim(), isActive ?? true);
   }
 
   @Put(':id')
   @Roles(UserRole.ADMIN, UserRole.LEAD_MODERATOR)
-  async update(@Param('id') id: string, @Body('title') title?: string, @Body('isActive') isActive?: boolean) {
-    if (!title && isActive === undefined) throw new BadRequestException('nothing to update');
+  async update(
+    @Param('id') id: string,
+    @Body('title') title?: string,
+    @Body('isActive') isActive?: boolean,
+  ) {
+    if (!title && isActive === undefined)
+      throw new BadRequestException('nothing to update');
     return this.userReportsService.updateReason(id, title?.trim(), isActive);
   }
 

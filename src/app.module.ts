@@ -17,8 +17,6 @@ import { QuizzesModule } from './module-2/quizzes/quizzes.module';
 import { FinalExamModule } from './module-2/final-exam/final-exam.module';
 import { CertificatesModule } from './module-2/certificates/certificates.module';
 import { WebinarModule } from './webinar/webinar.module';
-import { ModerationModule } from './moderation/moderation.module';
-import { UserReportsModule } from './user-reports/user-reports.module';
 import { ScoringModule } from './module-2/scoring/scoring.module';
 import { DailyChallengesModule } from './module-2/daily-challenges/daily-challenges.module';
 import { FirebaseModule } from './firebase/firebase.module';
@@ -37,7 +35,6 @@ import { PackageStoreModule } from './package-store/package-store.module';
 import { CallsModule } from './calls/calls.module';
 import { UserSettingsModule } from './user_settings/user-settings.module';
 import { LearningActivityModule } from './module-2/learning-activity/learning-activity.module';
-
 import { RevenueAnalyticsModule } from './revenue-analytics/revenue-analytics.module';
 import { AdminDashboardModule } from './admin-dashboard/admin-dashboard.module';
 import { CvTemplatesModule } from './cv-templates/cv-templates.module';
@@ -49,6 +46,8 @@ import { GooglePlayReconciliationModule } from './billing/google-play-reconcilia
 import { AppStoreNotificationsModule } from './billing/app-store/app-store-notifications.module';
 import { HomeModule } from './home/home.module';
 import { ContactModule } from './contact/contact.module';
+import { ModerationModule } from './moderation/moderation.module';
+import { UserReportsModule } from './user-reports/user-reports.module';
 
 @Module({
   imports: [

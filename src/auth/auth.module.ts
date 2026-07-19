@@ -13,7 +13,7 @@ import { MailModule } from 'src/common/mail/mail.module';
 import { ModerationAction } from 'src/moderation/entities/moderation-action.entity';
 import { JwtStrategy } from './jwt.strategy';
 import { AuthService } from './auth.service';
-import { AccountModerationStatusService } from 'src/user-reports/account-moderation-status.service';
+import { AccountModerationStatusService } from 'src/moderation/account-moderation-status.service';
 
 @Module({
   imports: [

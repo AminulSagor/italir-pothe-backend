@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { User } from '../users/entities/user.entity';
-import { ModerationAction } from './entities/moderation-action.entity';
+import { ModerationAction } from 'src/moderation/entities/moderation-action.entity';
 
 export const ACCOUNT_BANNED_CODE = 'ACCOUNT_BANNED';
 

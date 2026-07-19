@@ -6,7 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { User, UserRole } from '../users/entities/user.entity';
-import { AccountModerationStatusService } from 'src/user-reports/account-moderation-status.service';
+import { AccountModerationStatusService } from 'src/moderation/account-moderation-status.service';
 
 export interface JwtPayload {
   sub: string;
