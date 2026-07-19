@@ -8,9 +8,11 @@ import { ModerationController } from './moderation.controller';
 import { User } from '../users/entities/user.entity';
 import { Course } from '../module-2/courses/entities/course.entity';
 import { UserCourseEnrollment } from '../module-2/courses/entities/user-course-enrollment.entity';
+import { FilesModule } from 'src/files/files.module';
 
 @Module({
   imports: [
+    FilesModule,
     TypeOrmModule.forFeature([
       ModerationReport,
       ReportVisualEvidence,
