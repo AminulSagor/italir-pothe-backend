@@ -571,6 +571,17 @@ export class InfluencerHubService {
     });
 
     if (coupon) {
+      if (coupon.ownerType === InfluencerCouponOwnerType.PRODUCT) {
+        return this.resolveProductOwnCoupon({
+          couponCode,
+          productDomain: params.productDomain,
+          productId: params.productId,
+          provider: params.provider,
+          regularProviderProductId: params.regularProviderProductId,
+          basePriceEur,
+        });
+      }
+
       return this.resolveStoredCoupon({
         coupon,
         productDomain: params.productDomain,
