@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { UserRole } from '../users/entities/user.entity';
-import { ModerationService } from 'src/user-reports/moderation.service';
+import { ModerationService } from './moderation.service';
 
 @Controller('api/v1/moderation')
 @UseGuards(JwtAuthGuard, RolesGuard)

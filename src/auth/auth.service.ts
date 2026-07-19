@@ -26,6 +26,7 @@ import { Otp, OtpPurpose } from '../users/entities/otp.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { ConfigService } from '@nestjs/config';
 import { StoreWalletService } from 'src/package-store/services/store-wallet.service';
+import { AccountModerationStatusService } from 'src/user-reports/account-moderation-status.service';
 
 @Injectable()
 export class AuthService {
@@ -44,6 +45,7 @@ export class AuthService {
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
     private readonly storeWalletService: StoreWalletService,
+    private readonly accountModerationStatusService: AccountModerationStatusService,
   ) {}
 
   private normalizeIdentifier(identifier: string): string {
@@ -315,6 +317,8 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    await this.accountModerationStatusService.assertAccountIsActive(user);
+
     if (!user.isVerified) {
       throw new UnauthorizedException('Please verify your account first');
     }
@@ -348,6 +352,7 @@ export class AuthService {
     }
 
     await this.userRepository.save(user);
+    await this.accountModerationStatusService.assertAccountIsActive(user);
 
     return {
       message: 'Account successfully verified',

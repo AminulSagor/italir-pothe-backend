@@ -49,6 +49,15 @@ import { CallService } from './services/call.service';
     CallRealtimeService,
   ],
 
-  exports: [CallService, CallOrchestratorService],
+  exports: [
+    CallService,
+    CallOrchestratorService,
+
+    /*
+     * Exported so another module, such as ModerationModule,
+     * can disconnect a permanently banned user's call sockets.
+     */
+    CallRealtimeService,
+  ],
 })
 export class CallsModule {}

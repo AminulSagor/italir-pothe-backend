@@ -96,7 +96,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         where: { id: userId },
       });
 
-      if (!user) {
+      if (!user || user.isBanned) {
         client.disconnect(true);
         return;
       }
@@ -131,6 +131,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       client.disconnect(true);
     }
+  }
+
+  disconnectUserForModeration(
+    userId: string,
+    payload: Record<string, unknown>,
+  ): void {
+    if (!this.server) {
+      return;
+    }
+
+    const room = this.userRoom(userId);
+
+    /*
+     * Notify only the banned user's connected chat sockets.
+     */
+    this.server.to(room).emit('account_banned', payload);
+
+    /*
+     * Allow Flutter a brief moment to process the event and
+     * open the suspended-account screen before disconnecting.
+     */
+    setTimeout(() => {
+      this.server.in(room).disconnectSockets(true);
+    }, 250);
   }
 
   async handleDisconnect(client: Socket): Promise<void> {
@@ -366,13 +390,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         const inboxUsers = this.activeInboxUsers.get(payload.conversationId);
         const isInInbox = inboxUsers?.has(receiverId) ?? false;
-        
+
         if (!isInInbox) {
           try {
             const senderName = user.name || user.fullName || 'Someone';
             const bodyText =
               savedMessage.content ||
-              (payload.attachments?.length ? 'Sent an attachment' : 'New message');
+              (payload.attachments?.length
+                ? 'Sent an attachment'
+                : 'New message');
 
             await this.notificationsService.createSystemNotificationForUser({
               userId: receiverId,
@@ -435,28 +461,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('presence:enter_inbox')
-  async handleEnterInbox(
-    client: Socket,
-    payload: { conversationId: string },
-  ) {
+  async handleEnterInbox(client: Socket, payload: { conversationId: string }) {
     const user = client.data.user as User | undefined;
     if (!user || !payload?.conversationId) {
       return { error: 'Unauthorized or invalid payload' };
     }
 
-    const conversationUsers = this.activeInboxUsers.get(payload.conversationId) ?? new Set<string>();
+    const conversationUsers =
+      this.activeInboxUsers.get(payload.conversationId) ?? new Set<string>();
     conversationUsers.add(user.id);
     this.activeInboxUsers.set(payload.conversationId, conversationUsers);
 
-    this.logger.log(`User ${user.id} entered inbox for conversation ${payload.conversationId}`);
+    this.logger.log(
+      `User ${user.id} entered inbox for conversation ${payload.conversationId}`,
+    );
     return { ok: true };
   }
 
   @SubscribeMessage('presence:leave_inbox')
-  async handleLeaveInbox(
-    client: Socket,
-    payload: { conversationId: string },
-  ) {
+  async handleLeaveInbox(client: Socket, payload: { conversationId: string }) {
     const user = client.data.user as User | undefined;
     if (!user || !payload?.conversationId) {
       return { error: 'Unauthorized or invalid payload' };
@@ -470,7 +493,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     }
 
-    this.logger.log(`User ${user.id} left inbox for conversation ${payload.conversationId}`);
+    this.logger.log(
+      `User ${user.id} left inbox for conversation ${payload.conversationId}`,
+    );
     return { ok: true };
   }
 

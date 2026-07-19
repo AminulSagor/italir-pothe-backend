@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { User, UserRole } from '../users/entities/user.entity';
+import { AccountModerationStatusService } from 'src/user-reports/account-moderation-status.service';
 
 export interface JwtPayload {
   sub: string;
@@ -32,6 +33,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+
+    private readonly accountModerationStatusService: AccountModerationStatusService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -57,9 +60,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account no longer exists');
     }
 
-    if (user.isBanned) {
-      throw new UnauthorizedException('User account is no longer active');
-    }
+    await this.accountModerationStatusService.assertAccountIsActive(user);
 
     return {
       id: user.id,

@@ -70,6 +70,6 @@ import { UserDeviceService } from 'src/devices/services/user-device.service';
     ChatGateway,
     MessageDeliveryProcessor,
   ],
-  exports: [ChatService, UserDeviceService],
+  exports: [ChatService, UserDeviceService, ChatGateway],
 })
 export class ChatModule {}

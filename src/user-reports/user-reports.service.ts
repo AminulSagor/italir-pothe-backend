@@ -259,7 +259,10 @@ export class UserReportsService {
         }
       }
 
-      if (normalizedClientReportId && this.isUniqueViolationError(error)) {
+      if (
+        normalizedClientReportId &&
+        this.isUniqueViolationError(error)
+      ) {
         const existingReport = await this.findExistingReportResponse(
           reporterId,
           normalizedClientReportId,
@@ -395,6 +398,7 @@ export class UserReportsService {
     return this.reportReasonRepository.save(reason);
   }
 
+
   private async findExistingReportResponse(
     reporterId: string,
     clientReportId: string,
@@ -463,10 +467,8 @@ export class UserReportsService {
         isActive: true,
       })
       .andWhere(
-        `(
-        CAST(reason.id AS text) = :value
-        OR LOWER(TRIM(reason.title)) = LOWER(:value)
-      )`,
+        `(CAST(reason.id AS text) = :value
+          OR LOWER(TRIM(reason.title)) = LOWER(:value))`,
         {
           value: normalizedValue,
         },
