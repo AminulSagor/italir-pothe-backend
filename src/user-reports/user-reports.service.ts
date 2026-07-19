@@ -41,6 +41,7 @@ export class UserReportsService {
     reportedUserId: string,
     reasonId: string,
     description?: string | null,
+    clientReportId?: string | null,
     evidenceFileId?: string | null,
     evidence?: {
       buffer: Buffer;
@@ -52,6 +53,7 @@ export class UserReportsService {
     const targetUserId = reportedUserId?.trim() ?? '';
     const normalizedReasonId = reasonId?.trim() ?? '';
     const normalizedDescription = description?.trim() ?? '';
+    const normalizedClientReportId = clientReportId?.trim() ?? '';
 
     if (!reporterId) {
       throw new BadRequestException('Reporter identity is required.');
@@ -69,16 +71,27 @@ export class UserReportsService {
       throw new BadRequestException('reasonId is required.');
     }
 
-    if (normalizedDescription.length < 10) {
-      throw new BadRequestException(
-        'Description must contain at least 10 characters.',
-      );
-    }
-
     if (normalizedDescription.length > 500) {
       throw new BadRequestException(
         'Description cannot exceed 500 characters.',
       );
+    }
+
+    if (normalizedClientReportId.length > 120) {
+      throw new BadRequestException(
+        'clientReportId cannot exceed 120 characters.',
+      );
+    }
+
+    if (normalizedClientReportId) {
+      const existingReport = await this.findExistingReportResponse(
+        reporterId,
+        normalizedClientReportId,
+      );
+
+      if (existingReport) {
+        return existingReport;
+      }
     }
 
     const reportedUser = await this.userRepository.findOne({
@@ -167,8 +180,9 @@ export class UserReportsService {
           reporterId,
           reportedUserId: targetUserId,
           reasonId: reason.id,
-          description: normalizedDescription,
+          description: normalizedDescription || null,
           evidenceFileId: attachedEvidenceFileId,
+          clientReportId: normalizedClientReportId || null,
           status: UserReportStatus.PENDING,
           ticketId,
         });
@@ -242,6 +256,20 @@ export class UserReportsService {
            * Preserve the original database
            * transaction error.
            */
+        }
+      }
+
+      if (
+        normalizedClientReportId &&
+        this.isUniqueViolationError(error)
+      ) {
+        const existingReport = await this.findExistingReportResponse(
+          reporterId,
+          normalizedClientReportId,
+        );
+
+        if (existingReport) {
+          return existingReport;
         }
       }
 
@@ -368,6 +396,66 @@ export class UserReportsService {
     }
 
     return this.reportReasonRepository.save(reason);
+  }
+
+
+  private async findExistingReportResponse(
+    reporterId: string,
+    clientReportId: string,
+  ) {
+    const existingUserReport = await this.dataSource
+      .getRepository(UserReport)
+      .findOne({
+        where: {
+          reporterId,
+          clientReportId,
+        },
+        relations: {
+          reason: true,
+        },
+      });
+
+    if (!existingUserReport) {
+      return null;
+    }
+
+    const moderationReport = await this.dataSource
+      .getRepository(ModerationReport)
+      .findOne({
+        where: {
+          sourceUserReportId: existingUserReport.id,
+        },
+      });
+
+    const evidenceUrl = existingUserReport.evidenceFileId
+      ? await this.tryCreateEvidenceReadUrl(existingUserReport.evidenceFileId)
+      : null;
+
+    return {
+      id: existingUserReport.id,
+      reporterId: existingUserReport.reporterId,
+      reportedUserId: existingUserReport.reportedUserId,
+      reason: {
+        id: existingUserReport.reason.id,
+        title: existingUserReport.reason.title,
+      },
+      description: existingUserReport.description,
+      evidenceFileId: existingUserReport.evidenceFileId,
+      evidenceUrl,
+      status: existingUserReport.status,
+      ticketId: existingUserReport.ticketId,
+      moderationCaseNumber: moderationReport?.caseNumber ?? null,
+      createdAt: existingUserReport.createdAt,
+    };
+  }
+
+  private isUniqueViolationError(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === '23505'
+    );
   }
 
   private async resolveActiveReason(value: string): Promise<ReportReason> {

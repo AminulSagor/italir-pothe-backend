@@ -169,6 +169,14 @@ export class ModerationService {
   ) {
     const safePage = Math.max(page, 1);
     const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const normalizedStatus = status?.trim().toLowerCase();
+    const allowedStatuses = ['pending', 'processing', 'resolved', 'banned'];
+
+    if (normalizedStatus && !allowedStatuses.includes(normalizedStatus)) {
+      throw new BadRequestException(
+        'status must be pending, processing, resolved, or banned',
+      );
+    }
 
     const qb = this.reportRepo
       .createQueryBuilder('r')
@@ -176,8 +184,12 @@ export class ModerationService {
       .leftJoinAndSelect('r.reporter', 'reporter')
       .orderBy('r.submittedAt', 'DESC');
 
-    if (status) qb.andWhere('r.status = :status', { status });
-    if (reason) qb.andWhere('r.reportReason = :reason', { reason });
+    if (normalizedStatus) {
+      qb.andWhere('r.status = :status', { status: normalizedStatus });
+    }
+    if (reason?.trim()) {
+      qb.andWhere('r.reportReason = :reason', { reason: reason.trim() });
+    }
     if (search?.trim()) {
       const normalizedSearch = `%${search.trim().toLowerCase()}%`;
       qb.andWhere(
@@ -350,13 +362,10 @@ export class ModerationService {
       throw new BadRequestException('action_reason is required');
     }
 
-    const actionType = payload.action_type?.trim() ?? '';
-    const allowedActionTypes = [
-      'formal_warning',
-      'warn',
-      'permanent_ban',
-      'dismiss',
-    ];
+    const requestedActionType = payload.action_type?.trim() ?? '';
+    const actionType =
+      requestedActionType === 'warn' ? 'formal_warning' : requestedActionType;
+    const allowedActionTypes = ['formal_warning', 'permanent_ban', 'dismiss'];
 
     if (!allowedActionTypes.includes(actionType)) {
       throw new BadRequestException(
@@ -368,7 +377,15 @@ export class ModerationService {
       const report = await manager.findOne(ModerationReport, {
         where: { id: reportId },
       });
-      if (!report) throw new NotFoundException('Report not found');
+      if (!report) {
+        throw new NotFoundException('Report not found');
+      }
+
+      if (report.status === 'resolved' || report.status === 'banned') {
+        throw new BadRequestException(
+          'This moderation report already has a final decision.',
+        );
+      }
 
       const action = manager.create(ModerationAction, {
         reportId: report.id,

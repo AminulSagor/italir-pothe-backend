@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -7,7 +8,6 @@ import {
   Query,
   Req,
   UseGuards,
-  BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -35,25 +35,47 @@ export class ModerationController {
     @Query('reason') reason?: string,
     @Query('search') search?: string,
   ) {
-    const p = parseInt(page as any, 10) || 1;
-    const l = parseInt(limit as any, 10) || 10;
-    return this.moderationService.listReports(p, l, status, reason, search);
+    const parsedPage = Number.parseInt(page, 10) || 1;
+    const parsedLimit = Number.parseInt(limit, 10) || 10;
+
+    return this.moderationService.listReports(
+      parsedPage,
+      parsedLimit,
+      status,
+      reason,
+      search,
+    );
   }
 
   @Get('reports/:caseNumber')
   @Roles(UserRole.ADMIN, UserRole.MODERATOR, UserRole.LEAD_MODERATOR)
   async getReport(@Param('caseNumber') caseNumber: string) {
-    return this.moderationService.getReportByCaseNumber(caseNumber);
+    const normalizedCaseNumber = caseNumber?.trim();
+
+    if (!normalizedCaseNumber) {
+      throw new BadRequestException('caseNumber is required');
+    }
+
+    return this.moderationService.getReportByCaseNumber(normalizedCaseNumber);
   }
 
   @Post('reports/:id/action')
   @Roles(UserRole.ADMIN, UserRole.MODERATOR, UserRole.LEAD_MODERATOR)
-  async actionOnReport(@Param('id') id: string, @Body() body: { action_type: string; action_reason: string }, @Req() req: any) {
-    if (!body?.action_reason || !body.action_reason.trim()) {
+  async actionOnReport(
+    @Param('id') id: string,
+    @Body() body: { action_type: string; action_reason: string },
+    @Req() req: any,
+  ) {
+    if (!body?.action_reason?.trim()) {
       throw new BadRequestException('action_reason is required');
     }
 
-    const moderatorId = req.user?.id;
+    const moderatorId = req.user?.id?.trim();
+
+    if (!moderatorId) {
+      throw new BadRequestException('Moderator identity is required');
+    }
+
     return this.moderationService.performAction(id, body, moderatorId);
   }
 }

@@ -49,6 +49,7 @@ export class UserReportsController {
     @Body('reportedUserId') reportedUserId: string,
     @Body('reasonId') reasonId: string,
     @Body('description') description?: string,
+    @Body('clientReportId') clientReportId?: string,
     @Body('evidenceFileId') evidenceFileId?: string,
     @UploadedFile() evidenceImage?: any,
   ) {
@@ -79,6 +80,7 @@ export class UserReportsController {
       reportedUserId,
       reasonId,
       description,
+      clientReportId,
       evidenceFileId,
       evidence,
     );
