@@ -590,6 +590,12 @@ export class UsersService {
       );
     }
 
+    if (!otpRecord.code) {
+      throw new BadRequestException(
+        'Verification code has already been used. Please request a new code.',
+      );
+    }
+
     const isOtpValid = await bcrypt.compare(code, otpRecord.code);
 
     if (!isOtpValid) {
