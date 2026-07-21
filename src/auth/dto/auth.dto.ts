@@ -1,12 +1,16 @@
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
+  MaxLength,
   MinLength,
 } from 'class-validator';
+
+import { DevicePlatform } from '../../devices/enums/device.enums';
 
 const strongPasswordRegex =
   /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]+$/;
@@ -14,13 +18,20 @@ const strongPasswordRegex =
 const phoneRegex = /^(?:\+8801\d{9}|\+39\d{8,11})$/;
 
 export class SignupDto {
-  @IsNotEmpty({ message: 'Full name is required' })
+  @IsNotEmpty({
+    message: 'Full name is required',
+  })
   @IsString()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   fullName: string;
 
   @IsOptional()
-  @IsEmail({}, { message: 'Please provide a valid email address' })
+  @IsEmail(
+    {},
+    {
+      message: 'Please provide a valid email address',
+    },
+  )
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
   )
@@ -36,7 +47,9 @@ export class SignupDto {
 
   @IsNotEmpty()
   @IsString()
-  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  @MinLength(8, {
+    message: 'Password must be at least 8 characters long',
+  })
   @Matches(strongPasswordRegex, {
     message:
       'Password must contain at least one uppercase letter, one number, and one special character',
@@ -47,7 +60,9 @@ export class SignupDto {
 export class CreateAdminDto extends SignupDto {}
 
 export class LoginDto {
-  @IsNotEmpty({ message: 'Please provide your email or phone number' })
+  @IsNotEmpty({
+    message: 'Please provide your email or phone number',
+  })
   @IsString()
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
@@ -57,6 +72,26 @@ export class LoginDto {
   @IsNotEmpty()
   @IsString()
   password: string;
+
+  /*
+   * Stable unique ID for this app installation.
+   *
+   * Optional temporarily so older app versions do not break
+   * while the updated Flutter application is being released.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  deviceId?: string;
+
+  /*
+   * Supported values:
+   * android, ios, web, desktop
+   */
+  @IsOptional()
+  @IsEnum(DevicePlatform)
+  platform?: DevicePlatform;
 }
 
 export class VerifyOtpDto {
@@ -69,8 +104,23 @@ export class VerifyOtpDto {
 
   @IsNotEmpty()
   @IsString()
-  @Matches(/^\d{4}$/, { message: 'OTP must be exactly 4 digits' })
+  @Matches(/^\d{4}$/, {
+    message: 'OTP must be exactly 4 digits',
+  })
   otp: string;
+
+  /*
+   * The device where OTP verification was completed.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  deviceId?: string;
+
+  @IsOptional()
+  @IsEnum(DevicePlatform)
+  platform?: DevicePlatform;
 }
 
 export class ResendOtpDto {
@@ -101,12 +151,16 @@ export class ResetPasswordDto {
 
   @IsNotEmpty()
   @IsString()
-  @Matches(/^\d{4}$/, { message: 'OTP must be exactly 4 digits' })
+  @Matches(/^\d{4}$/, {
+    message: 'OTP must be exactly 4 digits',
+  })
   otp: string;
 
   @IsNotEmpty()
   @IsString()
-  @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  @MinLength(8, {
+    message: 'Password must be at least 8 characters long',
+  })
   @Matches(strongPasswordRegex, {
     message:
       'Password must contain at least one uppercase letter, one number, and one special character',

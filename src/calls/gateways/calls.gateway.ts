@@ -17,9 +17,18 @@ import { User } from '../../users/entities/user.entity';
 import { InitiateCallDto } from '../dto/initiate-call.dto';
 import { CallOrchestratorService } from '../services/call-orchestrator.service';
 import { CallRealtimeService } from '../services/call-realtime.service';
+import { UserDeviceService } from 'src/devices/services/user-device.service';
+import { SessionSocketRegistryService } from 'src/auth/session-socket-registry.service';
 
 interface CallIdPayload {
   callId: string;
+}
+
+interface CallSocketJwtPayload {
+  sub?: string;
+  id?: string;
+  sid?: string;
+  did?: string;
 }
 
 @WebSocketGateway({
@@ -34,8 +43,14 @@ export class CallsGateway
 
   constructor(
     private readonly jwtService: JwtService,
+
     private readonly callOrchestratorService: CallOrchestratorService,
+
     private readonly callRealtimeService: CallRealtimeService,
+
+    private readonly userDeviceService: UserDeviceService,
+
+    private readonly sessionSocketRegistry: SessionSocketRegistryService,
 
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -56,17 +71,34 @@ export class CallsGateway
         return;
       }
 
-      const payload = this.jwtService.verify<{
-        sub?: string;
-        id?: string;
-      }>(token);
+      const payload = this.jwtService.verify<CallSocketJwtPayload>(token);
 
       const userId = payload.sub ?? payload.id;
 
-      if (!userId) {
+      const sessionId = payload.sid?.trim();
+
+      const deviceId = payload.did?.trim();
+
+      if (!userId || !sessionId || !deviceId) {
+        this.logger.warn(
+          'Call socket JWT does not contain user, session, or device information',
+        );
+
         client.disconnect(true);
         return;
       }
+
+      /*
+       * Check PostgreSQL before allowing the socket.
+       *
+       * After logout, assertAuthSessionActive() throws
+       * UnauthorizedException because the session is revoked.
+       */
+      await this.userDeviceService.assertAuthSessionActive({
+        userId,
+        sessionId,
+        deviceId,
+      });
 
       const user = await this.userRepository.findOne({
         where: {
@@ -80,6 +112,16 @@ export class CallsGateway
       }
 
       client.data.userId = user.id;
+      client.data.authSessionId = sessionId;
+      client.data.deviceId = deviceId;
+
+      /*
+       * Register this call socket under the authentication
+       * session ID.
+       *
+       * Logout can now disconnect this socket immediately.
+       */
+      this.sessionSocketRegistry.register(sessionId, client);
 
       await client.join(this.callRealtimeService.userRoom(user.id));
 
@@ -105,6 +147,19 @@ export class CallsGateway
   }
 
   handleDisconnect(client: Socket): void {
+    const sessionId = client.data.authSessionId as string | undefined;
+
+    /*
+     * Remove this socket from the authentication-session
+     * registry.
+     */
+    if (sessionId) {
+      this.sessionSocketRegistry.unregister(sessionId, client.id);
+    }
+
+    /*
+     * Keep your existing call realtime cleanup.
+     */
     const userId = this.callRealtimeService.unregister(client.id);
 
     if (userId) {

@@ -4,9 +4,17 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+
+import type { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+
 import { AuthService } from './auth.service';
+
 import {
   CreateAdminDto,
   ForgotPasswordDto,
@@ -16,10 +24,12 @@ import {
   SignupDto,
   VerifyOtpDto,
 } from './dto/auth.dto';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+
+interface AuthenticatedSession {
+  userId: string;
+  sessionId: string;
+  deviceId: string;
+}
 
 @Controller('auth')
 export class AuthController {
@@ -31,8 +41,6 @@ export class AuthController {
   }
 
   @Post('admin/create')
-  // @UseGuards(JwtAuthGuard, RolesGuard)
-  // @Roles(UserRole.ADMIN)
   async createAdmin(@Body() createAdminDto: CreateAdminDto) {
     return this.authService.createAdmin(createAdminDto);
   }
@@ -65,5 +73,42 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logout(@Req() request: AuthenticatedRequest) {
+    const session = this.getAuthenticatedSession(request);
+
+    return this.authService.logout(
+      session.userId,
+      session.sessionId,
+      session.deviceId,
+    );
+  }
+
+  private getAuthenticatedSession(
+    request: AuthenticatedRequest,
+  ): AuthenticatedSession {
+    const userId = request.user?.id ?? request.user?.sub;
+
+    const sessionId = request.user?.sessionId;
+
+    const deviceId = request.user?.deviceId;
+
+    if (!userId) {
+      throw new UnauthorizedException('Authenticated user not found');
+    }
+
+    if (!sessionId || !deviceId) {
+      throw new UnauthorizedException('Authentication session not found');
+    }
+
+    return {
+      userId,
+      sessionId,
+      deviceId,
+    };
   }
 }

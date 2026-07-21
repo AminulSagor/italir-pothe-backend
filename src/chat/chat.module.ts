@@ -29,9 +29,11 @@ import { WebinarModule } from '../webinar/webinar.module';
 import { DeviceController } from 'src/devices/controllers/user-device.controller';
 import { UserDevice } from 'src/devices/entities/user-device.entity';
 import { UserDeviceService } from 'src/devices/services/user-device.service';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [
+    AuthModule,
     PresenceModule,
     UserBlocksModule,
     WebinarModule,

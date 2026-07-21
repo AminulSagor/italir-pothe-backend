@@ -1,5 +1,10 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OtpPurpose } from 'src/users/entities/otp.entity';
 
 interface SmsNetResponse<T = unknown> {
   error: number;
@@ -33,35 +38,50 @@ export class SmsService {
   private readonly smsApiBaseUrl = 'https://api.sms.net.bd';
 
   constructor(private configService: ConfigService) {
-    this.isBypass = this.configService.get<string>('SMS_BYPASS')?.trim() === 'true';
+    this.isBypass =
+      this.configService.get<string>('SMS_BYPASS')?.trim() === 'true';
     this.smsApiKey = this.configService.get<string>('SMS_API_KEY');
     this.smsSenderId = this.configService.get<string>('SMS_SENDER_ID');
   }
 
-  async sendOtp(phone: string, otp: string): Promise<void> {
+  async sendOtp(
+    phone: string,
+    otp: string,
+    purpose: OtpPurpose = OtpPurpose.ACCOUNT_VERIFICATION,
+  ): Promise<void> {
+    const message =
+      purpose === OtpPurpose.PASSWORD_RESET
+        ? `Italir Pothe password reset code: ${otp}. Expires in 10 minutes. Do not share this code.`
+        : `Italir Pothe verification code: ${otp}. Expires in 10 minutes. Do not share this code.`;
+
     if (this.isBypass) {
-      this.logger.log(`[BYPASS MODE] OTP for ${phone} is: ${otp}`);
+      this.logger.log(`[BYPASS MODE] SMS for ${phone}: ${message}`);
       return;
     }
 
     if (phone.startsWith('+39')) {
-      await this.sendItalianSms(phone, otp);
+      await this.sendItalianSms(phone, message);
     } else {
-      await this.sendAlphaSms(phone, otp);
+      await this.sendAlphaSms(phone, message);
     }
   }
 
-  private async sendAlphaSms(phone: string, otp: string) {
-    await this.sendSmsViaSmsNet(phone, otp);
+  private async sendAlphaSms(phone: string, message: string): Promise<void> {
+    await this.sendSmsViaSmsNet(phone, message);
   }
 
-  private async sendItalianSms(phone: string, otp: string) {
-    await this.sendSmsViaSmsNet(phone, otp);
+  private async sendItalianSms(phone: string, message: string): Promise<void> {
+    await this.sendSmsViaSmsNet(phone, message);
   }
 
-  private async sendSmsViaSmsNet(phone: string, otp: string) {
+  private async sendSmsViaSmsNet(
+    phone: string,
+    message: string,
+  ): Promise<void> {
     if (!this.smsApiKey) {
-      this.logger.error('SMS API key is not configured. Set SMS_API_KEY in environment.');
+      this.logger.error(
+        'SMS API key is not configured. Set SMS_API_KEY in environment.',
+      );
       throw new InternalServerErrorException('SMS API key is not configured.');
     }
 
@@ -69,7 +89,7 @@ export class SmsService {
     const url = `${this.smsApiBaseUrl}/sendsms`;
     const body = new URLSearchParams({
       api_key: this.smsApiKey,
-      msg: otp,
+      msg: message,
       to: recipient,
     });
 
@@ -85,14 +105,19 @@ export class SmsService {
       body: body.toString(),
     });
 
-    const result = (await response.json()) as SmsNetResponse<{ request_id: number }>;
+    const result = (await response.json()) as SmsNetResponse<{
+      request_id: number;
+    }>;
 
     if (response.ok && result.error === 0) {
-      this.logger.log(`SMS request submitted for ${recipient}. request_id=${result.data?.request_id}`);
+      this.logger.log(
+        `SMS request submitted for ${recipient}. request_id=${result.data?.request_id}`,
+      );
       return;
     }
 
-    const errorMessage = result?.msg || `SMS provider returned status ${response.status}`;
+    const errorMessage =
+      result?.msg || `SMS provider returned status ${response.status}`;
     this.logger.error(`SMS send failed for ${recipient}: ${errorMessage}`);
     throw new InternalServerErrorException(`SMS send failed: ${errorMessage}`);
   }
@@ -112,9 +137,14 @@ export class SmsService {
       return result.data;
     }
 
-    const errorMessage = result?.msg || `SMS provider returned status ${response.status}`;
-    this.logger.error(`SMS report fetch failed for request_id=${requestId}: ${errorMessage}`);
-    throw new InternalServerErrorException(`SMS report fetch failed: ${errorMessage}`);
+    const errorMessage =
+      result?.msg || `SMS provider returned status ${response.status}`;
+    this.logger.error(
+      `SMS report fetch failed for request_id=${requestId}: ${errorMessage}`,
+    );
+    throw new InternalServerErrorException(
+      `SMS report fetch failed: ${errorMessage}`,
+    );
   }
 
   async getBalance() {
@@ -132,9 +162,12 @@ export class SmsService {
       return result.data;
     }
 
-    const errorMessage = result?.msg || `SMS provider returned status ${response.status}`;
+    const errorMessage =
+      result?.msg || `SMS provider returned status ${response.status}`;
     this.logger.error(`SMS balance fetch failed: ${errorMessage}`);
-    throw new InternalServerErrorException(`SMS balance fetch failed: ${errorMessage}`);
+    throw new InternalServerErrorException(
+      `SMS balance fetch failed: ${errorMessage}`,
+    );
   }
 
   private normalizePhoneNumber(phone: string): string {

@@ -5,10 +5,12 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomInt } from 'crypto';
+
 import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import { Repository } from 'typeorm';
 
 import {
@@ -20,13 +22,21 @@ import {
   SignupDto,
   VerifyOtpDto,
 } from './dto/auth.dto';
+
 import { EmailService } from '../common/services/email.service';
 import { SmsService } from '../common/services/sms.service';
+
+import { DevicePlatform } from '../devices/enums/device.enums';
+import { UserDeviceService } from '../devices/services/user-device.service';
+
+import { AccountModerationStatusService } from '../moderation/account-moderation-status.service';
+
+import { StoreWalletService } from '../package-store/services/store-wallet.service';
+
 import { Otp, OtpPurpose } from '../users/entities/otp.entity';
+
 import { User, UserRole } from '../users/entities/user.entity';
-import { ConfigService } from '@nestjs/config';
-import { StoreWalletService } from 'src/package-store/services/store-wallet.service';
-import { AccountModerationStatusService } from 'src/moderation/account-moderation-status.service';
+import { SessionSocketRegistryService } from './session-socket-registry.service';
 
 @Injectable()
 export class AuthService {
@@ -44,12 +54,19 @@ export class AuthService {
     private readonly smsService: SmsService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+
     private readonly storeWalletService: StoreWalletService,
+
     private readonly accountModerationStatusService: AccountModerationStatusService,
+
+    private readonly userDeviceService: UserDeviceService,
+
+    private readonly sessionSocketRegistry: SessionSocketRegistryService,
   ) {}
 
   private normalizeIdentifier(identifier: string): string {
     const normalized = identifier.trim();
+
     return normalized.includes('@') ? normalized.toLowerCase() : normalized;
   }
 
@@ -59,12 +76,17 @@ export class AuthService {
 
   private async findUserByIdentifier(identifier: string): Promise<User | null> {
     const normalizedIdentifier = this.normalizeIdentifier(identifier);
+
     const isEmail = this.isEmailIdentifier(normalizedIdentifier);
 
     return this.userRepository.findOne({
       where: isEmail
-        ? { email: normalizedIdentifier }
-        : { phone: normalizedIdentifier },
+        ? {
+            email: normalizedIdentifier,
+          }
+        : {
+            phone: normalizedIdentifier,
+          },
     });
   }
 
@@ -80,9 +102,11 @@ export class AuthService {
     });
 
     const code = randomInt(1000, 10000).toString();
+
     const codeHash = await bcrypt.hash(code, 10);
 
     const expiresAt = new Date();
+
     expiresAt.setMinutes(expiresAt.getMinutes() + this.otpExpiryMinutes);
 
     const otpRecord = this.otpRepository.create({
@@ -119,15 +143,21 @@ export class AuthService {
       throw new BadRequestException('No OTP found. Please request a new code.');
     }
 
-    if (new Date() > otpRecord.expiresAt) {
-      await this.otpRepository.delete({ id: otpRecord.id });
+    if (new Date().getTime() > otpRecord.expiresAt.getTime()) {
+      await this.otpRepository.delete({
+        id: otpRecord.id,
+      });
+
       throw new BadRequestException(
         'OTP has expired. Please request a new code.',
       );
     }
 
     if (otpRecord.attemptCount >= this.maxOtpAttempts) {
-      await this.otpRepository.delete({ id: otpRecord.id });
+      await this.otpRepository.delete({
+        id: otpRecord.id,
+      });
+
       throw new BadRequestException(
         'Too many invalid attempts. Please request a new code.',
       );
@@ -137,11 +167,15 @@ export class AuthService {
 
     if (!isOtpValid) {
       otpRecord.attemptCount += 1;
+
       await this.otpRepository.save(otpRecord);
+
       throw new BadRequestException('Invalid verification code.');
     }
 
-    await this.otpRepository.delete({ id: otpRecord.id });
+    await this.otpRepository.delete({
+      id: otpRecord.id,
+    });
   }
 
   private async sendOtp(
@@ -153,20 +187,23 @@ export class AuthService {
 
     if (this.isEmailIdentifier(normalizedIdentifier)) {
       await this.emailService.sendOtpEmail(normalizedIdentifier, otp, purpose);
+
       return;
     }
 
-    await this.smsService.sendOtp(normalizedIdentifier, otp);
+    await this.smsService.sendOtp(normalizedIdentifier, otp, purpose);
   }
 
-  private getDevOtpResponse(otp: string) {
+  private getDevOtpResponse(otp: string): Record<string, string> {
     const isProduction = process.env.NODE_ENV === 'production';
 
     const emailBypass =
-      this.configService.get<string>('EMAIL_BYPASS')?.trim() === 'true';
+      this.configService.get<string>('EMAIL_BYPASS')?.trim().toLowerCase() ===
+      'true';
 
     const smsBypass =
-      this.configService.get<string>('SMS_BYPASS')?.trim() === 'true';
+      this.configService.get<string>('SMS_BYPASS')?.trim().toLowerCase() ===
+      'true';
 
     if (isProduction || (!emailBypass && !smsBypass)) {
       return {};
@@ -179,7 +216,9 @@ export class AuthService {
 
   async signup(signupDto: SignupDto) {
     const fullName = signupDto.fullName.trim();
+
     const email = signupDto.email?.trim().toLowerCase() || null;
+
     const phone = signupDto.phone?.trim() || null;
 
     if (!email && !phone) {
@@ -188,7 +227,9 @@ export class AuthService {
 
     if (email) {
       const existingEmail = await this.userRepository.findOne({
-        where: { email },
+        where: {
+          email,
+        },
       });
 
       if (existingEmail) {
@@ -198,7 +239,9 @@ export class AuthService {
 
     if (phone) {
       const existingPhone = await this.userRepository.findOne({
-        where: { phone },
+        where: {
+          phone,
+        },
       });
 
       if (existingPhone) {
@@ -234,11 +277,6 @@ export class AuthService {
 
     await this.sendOtp(identifier, otp, OtpPurpose.ACCOUNT_VERIFICATION);
 
-    // return {
-    //   message: 'Account created successfully. Please verify your OTP.',
-    //   identifier,
-    // };
-
     return {
       message: 'Account created successfully. Please verify your OTP.',
       identifier,
@@ -248,7 +286,9 @@ export class AuthService {
 
   async createAdmin(createAdminDto: CreateAdminDto) {
     const fullName = createAdminDto.fullName.trim();
+
     const email = createAdminDto.email?.trim().toLowerCase() || null;
+
     const phone = createAdminDto.phone?.trim() || null;
 
     if (!email && !phone) {
@@ -257,7 +297,9 @@ export class AuthService {
 
     if (email) {
       const existingEmail = await this.userRepository.findOne({
-        where: { email },
+        where: {
+          email,
+        },
       });
 
       if (existingEmail) {
@@ -267,7 +309,9 @@ export class AuthService {
 
     if (phone) {
       const existingPhone = await this.userRepository.findOne({
-        where: { phone },
+        where: {
+          phone,
+        },
       });
 
       if (existingPhone) {
@@ -302,6 +346,7 @@ export class AuthService {
 
   async login(loginDto: LoginDto) {
     const identifier = this.normalizeIdentifier(loginDto.identifier);
+
     const user = await this.findUserByIdentifier(identifier);
 
     if (!user) {
@@ -323,7 +368,26 @@ export class AuthService {
       throw new UnauthorizedException('Please verify your account first');
     }
 
-    return this.generateToken(user);
+    return this.generateToken(user, loginDto.deviceId, loginDto.platform);
+  }
+
+  async logout(userId: string, sessionId: string, deviceId: string) {
+    await this.userDeviceService.deactivateAuthSession({
+      userId,
+      sessionId,
+      deviceId,
+    });
+
+    /*
+     * Immediately disconnect all chat/call sockets
+     * that were authenticated by this session.
+     */
+    this.sessionSocketRegistry.disconnectSession(sessionId);
+
+    return {
+      ok: true,
+      message: 'Logged out successfully',
+    };
   }
 
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
@@ -352,16 +416,24 @@ export class AuthService {
     }
 
     await this.userRepository.save(user);
+
     await this.accountModerationStatusService.assertAccountIsActive(user);
+
+    const tokenResult = await this.generateToken(
+      user,
+      verifyOtpDto.deviceId,
+      verifyOtpDto.platform,
+    );
 
     return {
       message: 'Account successfully verified',
-      ...this.generateToken(user),
+      ...tokenResult,
     };
   }
 
   async resendSignupOtp(resendOtpDto: ResendOtpDto) {
     const identifier = this.normalizeIdentifier(resendOtpDto.identifier);
+
     const user = await this.findUserByIdentifier(identifier);
 
     if (!user) {
@@ -379,10 +451,6 @@ export class AuthService {
 
     await this.sendOtp(identifier, otp, OtpPurpose.ACCOUNT_VERIFICATION);
 
-    // return {
-    //   message: 'Verification code sent successfully.',
-    // };
-
     return {
       message: 'Verification code sent successfully.',
       ...this.getDevOtpResponse(otp),
@@ -391,8 +459,12 @@ export class AuthService {
 
   async requestPasswordReset(forgotPasswordDto: ForgotPasswordDto) {
     const identifier = this.normalizeIdentifier(forgotPasswordDto.identifier);
+
     const user = await this.findUserByIdentifier(identifier);
 
+    /*
+     * Do not reveal whether the supplied account exists.
+     */
     if (!user) {
       return {
         message: 'If an account exists, a reset code has been sent.',
@@ -405,10 +477,6 @@ export class AuthService {
     );
 
     await this.sendOtp(identifier, otp, OtpPurpose.PASSWORD_RESET);
-
-    // return {
-    //   message: 'If an account exists, a reset code has been sent.',
-    // };
 
     return {
       message: 'If an account exists, a reset code has been sent.',
@@ -443,17 +511,71 @@ export class AuthService {
     }
 
     user.password = await bcrypt.hash(resetPasswordDto.newPassword, 10);
+
     await this.userRepository.save(user);
+
+    /*
+     * Password changes invalidate every device session.
+     * This also removes FCM and VoIP tokens from all
+     * registered devices for this user.
+     */
+    const revokedSessionIds =
+      await this.userDeviceService.deactivateAllAuthSessions(user.id);
+
+    for (const sessionId of revokedSessionIds) {
+      this.sessionSocketRegistry.disconnectSession(sessionId);
+    }
 
     return {
       message: 'Password has been successfully updated.',
     };
   }
 
-  private generateToken(user: User) {
+  private async generateToken(
+    user: User,
+    deviceId?: string,
+    platform?: DevicePlatform,
+  ) {
+    /*
+     * Create a PostgreSQL-backed session before
+     * generating the JWT.
+     */
+    const sessionResult = await this.userDeviceService.startAuthSession(
+      user.id,
+      {
+        deviceId,
+        platform,
+        expiresAt: this.getSessionExpiresAt(),
+      },
+    );
+
+    /*
+     * A new login on the same installation may revoke
+     * an older session. Disconnect its sockets now.
+     */
+    for (const revokedSessionId of sessionResult.revokedSessionIds) {
+      this.sessionSocketRegistry.disconnectSession(revokedSessionId);
+    }
+
+    const sessionId = sessionResult.device.authSessionId;
+
+    if (!sessionId) {
+      throw new UnauthorizedException(
+        'Unable to create authentication session',
+      );
+    }
+
     const payload = {
       sub: user.id,
       id: user.id,
+
+      /*
+       * sid connects the JWT to the PostgreSQL session.
+       * did identifies the app installation.
+       */
+      sid: sessionId,
+      did: sessionResult.device.deviceId,
+
       fullName: user.fullName,
       email: user.email,
       phone: user.phone,
@@ -462,7 +584,9 @@ export class AuthService {
 
     return {
       accessToken: this.jwtService.sign(payload),
+
       tokenType: 'Bearer',
+
       user: {
         id: user.id,
         fullName: user.fullName,
@@ -476,5 +600,18 @@ export class AuthService {
         hapticsEnabled: user.hapticsEnabled,
       },
     };
+  }
+
+  private getSessionExpiresAt(): Date {
+    const configuredDays = Number(
+      this.configService.get<string>('AUTH_SESSION_TTL_DAYS') ?? '7',
+    );
+
+    const validDays =
+      Number.isFinite(configuredDays) && configuredDays > 0
+        ? Math.floor(configuredDays)
+        : 7;
+
+    return new Date(Date.now() + validDays * 24 * 60 * 60 * 1000);
   }
 }

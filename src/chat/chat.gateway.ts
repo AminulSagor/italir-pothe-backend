@@ -23,6 +23,15 @@ import {
   NotificationType,
 } from '../notifications/entities/notification-event.entity';
 import { NotificationsService } from '../notifications/services/notifications.service';
+import { UserDeviceService } from 'src/devices/services/user-device.service';
+import { SessionSocketRegistryService } from 'src/auth/session-socket-registry.service';
+
+interface SocketJwtPayload {
+  sub?: string;
+  id?: string;
+  sid?: string;
+  did?: string;
+}
 
 @WebSocketGateway({
   namespace: 'chat',
@@ -67,6 +76,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     private readonly presenceService: PresenceService,
     private readonly notificationsService: NotificationsService,
+    private readonly userDeviceService: UserDeviceService,
+    private readonly sessionSocketRegistry: SessionSocketRegistryService,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
@@ -89,11 +100,37 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const payload = this.jwtService.verify<{ sub: string }>(token);
-      const userId = payload.sub;
+      const payload = this.jwtService.verify<SocketJwtPayload>(token);
+
+      const userId = payload.sub ?? payload.id;
+
+      const sessionId = payload.sid?.trim();
+
+      const deviceId = payload.did?.trim();
+
+      if (!userId || !sessionId || !deviceId) {
+        this.logger.warn(
+          'Socket JWT does not contain user, session, or device information',
+        );
+
+        client.disconnect(true);
+        return;
+      }
+
+      /*
+       * Check PostgreSQL to confirm that logout has not
+       * revoked this authentication session.
+       */
+      await this.userDeviceService.assertAuthSessionActive({
+        userId,
+        sessionId,
+        deviceId,
+      });
 
       const user = await this.userRepo.findOne({
-        where: { id: userId },
+        where: {
+          id: userId,
+        },
       });
 
       if (!user || user.isBanned) {
@@ -102,6 +139,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       client.data.user = user;
+      client.data.authSessionId = sessionId;
+      client.data.deviceId = deviceId;
+
+      this.sessionSocketRegistry.register(sessionId, client);
 
       const userConnections =
         this.connections.get(user.id) ?? new Set<string>();
@@ -158,6 +199,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   async handleDisconnect(client: Socket): Promise<void> {
+    const sessionId = client.data.authSessionId as string | undefined;
+
+    if (sessionId) {
+      this.sessionSocketRegistry.unregister(sessionId, client.id);
+    }
+
     const user = client.data.user as User | undefined;
 
     if (!user) {

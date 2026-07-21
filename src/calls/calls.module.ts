@@ -16,11 +16,12 @@ import { CallAgoraTokenService } from './services/call-agora-token.service';
 import { CallOrchestratorService } from './services/call-orchestrator.service';
 import { CallRealtimeService } from './services/call-realtime.service';
 import { CallService } from './services/call.service';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [
     ConfigModule,
-
+    AuthModule,
     UserBlocksModule,
     DevicesModule,
     FirebaseModule,

@@ -17,6 +17,10 @@ import { DeviceAppState, DevicePlatform } from '../enums/device.enums';
 @Index('IDX_user_devices_userId', ['userId'])
 @Index('IDX_user_devices_deviceId', ['deviceId'])
 @Index('IDX_user_devices_fcmToken', ['fcmToken'])
+@Index('UQ_user_devices_auth_session_id', ['authSessionId'], {
+  unique: true,
+  where: '"authSessionId" IS NOT NULL',
+})
 @Unique('UQ_user_devices_user_device', ['userId', 'deviceId'])
 export class UserDevice {
   @PrimaryGeneratedColumn('uuid')
@@ -97,6 +101,24 @@ export class UserDevice {
     nullable: true,
   })
   deactivatedAt: Date | null;
+
+  @Column({
+    type: 'uuid',
+    nullable: true,
+  })
+  authSessionId: string | null;
+
+  @Column({
+    type: 'boolean',
+    default: false,
+  })
+  isSessionActive: boolean;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  authSessionExpiresAt: Date | null;
 
   @CreateDateColumn({
     type: 'timestamptz',
