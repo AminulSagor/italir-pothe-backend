@@ -48,6 +48,7 @@ import { HomeModule } from './home/home.module';
 import { ContactModule } from './contact/contact.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { UserReportsModule } from './user-reports/user-reports.module';
+import { AiContentReportsModule } from './ai-content-reports/ai-content-reports.module';
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { UserReportsModule } from './user-reports/user-reports.module';
     DevicesModule,
     CourseCommerceModule,
     AiTutorModule,
+    AiContentReportsModule,
     LeaderboardModule,
     PackageStoreModule,
     CallsModule,

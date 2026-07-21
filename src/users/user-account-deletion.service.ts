@@ -102,15 +102,20 @@ export class UserAccountDeletionService {
       // Keep device rows for audit, but disable every token.
       await manager.query(
         `
-            UPDATE user_devices
-            SET
-              "isActive" = false,
-              "fcmToken" = NULL,
-              "voipToken" = NULL,
-              "deactivatedAt" = $2,
-              "lastActiveAt" = $2
-            WHERE "userId" = $1
-          `,
+    UPDATE "user_devices"
+    SET
+      "isActive" = false,
+      "fcmToken" = NULL,
+      "voipToken" = NULL,
+
+      "authSessionId" = NULL,
+      "isSessionActive" = false,
+      "authSessionExpiresAt" = NULL,
+
+      "deactivatedAt" = $2,
+      "lastActiveAt" = $2
+    WHERE "userId" = $1
+  `,
         [user.id, now],
       );
 
