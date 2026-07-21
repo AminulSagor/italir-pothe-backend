@@ -10,7 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 
 import * as bcrypt from 'bcrypt';
-import { randomInt } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import { Repository } from 'typeorm';
 
 import {
@@ -21,6 +21,7 @@ import {
   ResetPasswordDto,
   SignupDto,
   VerifyOtpDto,
+  VerifyPasswordResetOtpDto,
 } from './dto/auth.dto';
 
 import { EmailService } from '../common/services/email.service';
@@ -41,6 +42,7 @@ import { SessionSocketRegistryService } from './session-socket-registry.service'
 @Injectable()
 export class AuthService {
   private readonly otpExpiryMinutes = 10;
+  private readonly resetTokenExpiryMinutes = 10;
   private readonly maxOtpAttempts = 5;
 
   constructor(
@@ -115,6 +117,9 @@ export class AuthService {
       code: codeHash,
       expiresAt,
       attemptCount: 0,
+      resetTokenHash: null,
+      resetTokenExpiresAt: null,
+      verifiedAt: null,
     });
 
     await this.otpRepository.save(otpRecord);
@@ -161,6 +166,10 @@ export class AuthService {
       throw new BadRequestException(
         'Too many invalid attempts. Please request a new code.',
       );
+    }
+
+    if (!otpRecord.code) {
+      throw new BadRequestException('Verification code has already been used');
     }
 
     const isOtpValid = await bcrypt.compare(code, otpRecord.code);
@@ -212,6 +221,10 @@ export class AuthService {
     return {
       devOtp: otp,
     };
+  }
+
+  private hashPasswordResetToken(resetToken: string): string {
+    return createHash('sha256').update(resetToken).digest('hex');
   }
 
   async signup(signupDto: SignupDto) {
@@ -484,16 +497,119 @@ export class AuthService {
     };
   }
 
-  async resetPassword(resetPasswordDto: ResetPasswordDto) {
-    const identifier = this.normalizeIdentifier(resetPasswordDto.identifier);
+  async verifyPasswordResetOtp(verifyDto: VerifyPasswordResetOtpDto) {
+    const identifier = this.normalizeIdentifier(verifyDto.identifier);
 
-    await this.validateAndConsumeOtp(
-      identifier,
-      resetPasswordDto.otp,
-      OtpPurpose.PASSWORD_RESET,
+    const otpRecord = await this.otpRepository.findOne({
+      where: {
+        identifier,
+        purpose: OtpPurpose.PASSWORD_RESET,
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+
+    if (!otpRecord || !otpRecord.code) {
+      throw new BadRequestException(
+        'No password reset code was found. Please request a new code.',
+      );
+    }
+
+    if (otpRecord.expiresAt.getTime() <= Date.now()) {
+      await this.otpRepository.delete({
+        id: otpRecord.id,
+      });
+
+      throw new BadRequestException(
+        'Reset code has expired. Please request a new code.',
+      );
+    }
+
+    if (otpRecord.attemptCount >= this.maxOtpAttempts) {
+      await this.otpRepository.delete({
+        id: otpRecord.id,
+      });
+
+      throw new BadRequestException(
+        'Too many invalid attempts. Please request a new code.',
+      );
+    }
+
+    const isOtpValid = await bcrypt.compare(verifyDto.otp, otpRecord.code);
+
+    if (!isOtpValid) {
+      otpRecord.attemptCount += 1;
+
+      await this.otpRepository.save(otpRecord);
+
+      throw new BadRequestException('Invalid verification code.');
+    }
+
+    /*
+     * Generate a cryptographically secure one-time token.
+     *
+     * Flutter receives the original token.
+     * PostgreSQL stores only its SHA-256 hash.
+     */
+    const resetToken = randomBytes(32).toString('hex');
+
+    const now = new Date();
+
+    const resetTokenExpiresAt = new Date(
+      now.getTime() + this.resetTokenExpiryMinutes * 60 * 1000,
     );
 
-    const user = await this.findUserByIdentifier(identifier);
+    otpRecord.code = null;
+    otpRecord.verifiedAt = now;
+    otpRecord.resetTokenHash = this.hashPasswordResetToken(resetToken);
+    otpRecord.resetTokenExpiresAt = resetTokenExpiresAt;
+
+    await this.otpRepository.save(otpRecord);
+
+    return {
+      message: 'Reset code verified successfully.',
+      resetToken,
+      expiresInSeconds: this.resetTokenExpiryMinutes * 60,
+    };
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto) {
+    const resetToken = resetPasswordDto.resetToken.trim().toLowerCase();
+
+    const resetTokenHash = this.hashPasswordResetToken(resetToken);
+
+    const resetRequest = await this.otpRepository.findOne({
+      where: {
+        purpose: OtpPurpose.PASSWORD_RESET,
+        resetTokenHash,
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+
+    if (
+      !resetRequest ||
+      !resetRequest.verifiedAt ||
+      !resetRequest.resetTokenExpiresAt
+    ) {
+      throw new BadRequestException(
+        'Password reset session is invalid or expired.',
+      );
+    }
+
+    if (resetRequest.resetTokenExpiresAt.getTime() <= Date.now()) {
+      await this.otpRepository.delete({
+        id: resetRequest.id,
+      });
+
+      throw new BadRequestException(
+        'Password reset session has expired. Please request a new code.',
+      );
+    }
+
+    const user = await this.findUserByIdentifier(resetRequest.identifier);
 
     if (!user) {
       throw new NotFoundException('User not found');
@@ -510,14 +626,37 @@ export class AuthService {
       );
     }
 
-    user.password = await bcrypt.hash(resetPasswordDto.newPassword, 10);
+    const newPasswordHash = await bcrypt.hash(resetPasswordDto.newPassword, 10);
+
+    /*
+     * Atomically consume the token before changing
+     * the password. Only one request can consume it.
+     */
+    const consumeResult = await this.otpRepository
+      .createQueryBuilder()
+      .delete()
+      .from(Otp)
+      .where('"id" = :id', {
+        id: resetRequest.id,
+      })
+      .andWhere('"resetTokenHash" = :resetTokenHash', {
+        resetTokenHash,
+      })
+      .execute();
+
+    if (consumeResult.affected !== 1) {
+      throw new BadRequestException(
+        'Password reset token has already been used.',
+      );
+    }
+
+    user.password = newPasswordHash;
 
     await this.userRepository.save(user);
 
     /*
-     * Password changes invalidate every device session.
-     * This also removes FCM and VoIP tokens from all
-     * registered devices for this user.
+     * Log the user out from every device after the
+     * password has been changed.
      */
     const revokedSessionIds =
       await this.userDeviceService.deactivateAllAuthSessions(user.id);

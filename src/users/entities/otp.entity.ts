@@ -15,11 +15,19 @@ export enum OtpPurpose {
 
 @Entity('otps')
 @Index(['identifier', 'purpose'])
+@Index('UQ_otps_reset_token_hash', ['resetTokenHash'], {
+  unique: true,
+  where: '"resetTokenHash" IS NOT NULL',
+})
 export class Otp {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 320, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 320,
+    nullable: true,
+  })
   identifier: string;
 
   @Column({
@@ -29,15 +37,50 @@ export class Otp {
   })
   purpose: OtpPurpose;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  code: string;
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  code: string | null;
 
-  @Column({ type: 'timestamptz', nullable: true })
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
   expiresAt: Date;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({
+    type: 'integer',
+    default: 0,
+  })
   attemptCount: number;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  /*
+   * Only the SHA-256 hash is stored.
+   * The real reset token is returned once to Flutter.
+   */
+  @Column({
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  resetTokenHash: string | null;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  resetTokenExpiresAt: Date | null;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  verifiedAt: Date | null;
+
+  @CreateDateColumn({
+    type: 'timestamptz',
+  })
   createdAt: Date;
 }

@@ -23,6 +23,7 @@ import {
   ResetPasswordDto,
   SignupDto,
   VerifyOtpDto,
+  VerifyPasswordResetOtpDto,
 } from './dto/auth.dto';
 
 interface AuthenticatedSession {
@@ -67,6 +68,15 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
     return this.authService.requestPasswordReset(forgotPasswordDto);
+  }
+
+  @Post('verify-reset-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyResetOtp(
+    @Body()
+    verifyDto: VerifyPasswordResetOtpDto,
+  ) {
+    return this.authService.verifyPasswordResetOtp(verifyDto);
   }
 
   @Post('reset-password')

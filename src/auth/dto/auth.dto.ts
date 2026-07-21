@@ -141,7 +141,7 @@ export class ForgotPasswordDto {
   identifier: string;
 }
 
-export class ResetPasswordDto {
+export class VerifyPasswordResetOtpDto {
   @IsNotEmpty()
   @IsString()
   @Transform(({ value }) =>
@@ -155,6 +155,18 @@ export class ResetPasswordDto {
     message: 'OTP must be exactly 4 digits',
   })
   otp: string;
+}
+
+export class ResetPasswordDto {
+  @IsNotEmpty()
+  @IsString()
+  @Matches(/^[a-f0-9]{64}$/, {
+    message: 'Password reset session is invalid or expired',
+  })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
+  resetToken: string;
 
   @IsNotEmpty()
   @IsString()
