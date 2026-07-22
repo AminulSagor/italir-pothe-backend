@@ -49,6 +49,7 @@ import { ContactModule } from './contact/contact.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { UserReportsModule } from './user-reports/user-reports.module';
 import { AiContentReportsModule } from './ai-content-reports/ai-content-reports.module';
+import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 
 @Module({
   imports: [
@@ -115,6 +116,7 @@ import { AiContentReportsModule } from './ai-content-reports/ai-content-reports.
     AdminDashboardModule,
     GooglePlayBillingModule,
     GooglePlayRtdnModule,
+    AccountDeletionModule,
     GooglePlayReconciliationModule,
     AppStoreNotificationsModule,
     HomeModule,

@@ -49,21 +49,42 @@ export class SmsService {
     otp: string,
     purpose: OtpPurpose = OtpPurpose.ACCOUNT_VERIFICATION,
   ): Promise<void> {
-    const message =
-      purpose === OtpPurpose.PASSWORD_RESET
-        ? `Italir Pothe password reset code: ${otp}. Expires in 10 minutes. Do not share this code.`
-        : `Italir Pothe verification code: ${otp}. Expires in 10 minutes. Do not share this code.`;
+    let message: string;
+
+    switch (purpose) {
+      case OtpPurpose.PASSWORD_RESET:
+        message =
+          `Italir Pothe password reset code: ${otp}. ` +
+          'Expires in 10 minutes. Do not share this code.';
+        break;
+
+      case OtpPurpose.ACCOUNT_DELETION:
+        message =
+          `Italir Pothe account deletion code: ${otp}. ` +
+          'Expires in 10 minutes. Account deletion is permanent. ' +
+          'Do not share this code.';
+        break;
+
+      case OtpPurpose.ACCOUNT_VERIFICATION:
+      default:
+        message =
+          `Italir Pothe verification code: ${otp}. ` +
+          'Expires in 10 minutes. Do not share this code.';
+        break;
+    }
 
     if (this.isBypass) {
       this.logger.log(`[BYPASS MODE] SMS for ${phone}: ${message}`);
+
       return;
     }
 
     if (phone.startsWith('+39')) {
       await this.sendItalianSms(phone, message);
-    } else {
-      await this.sendAlphaSms(phone, message);
+      return;
     }
+
+    await this.sendAlphaSms(phone, message);
   }
 
   private async sendAlphaSms(phone: string, message: string): Promise<void> {

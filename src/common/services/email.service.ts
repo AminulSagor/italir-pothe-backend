@@ -46,77 +46,128 @@ export class EmailService {
   ): Promise<void> {
     if (this.configService.get<string>('EMAIL_BYPASS') === 'true') {
       this.logger.log(`[BYPASS MODE] Email OTP for ${email} is: ${otp}`);
+
       return;
     }
 
     const fromEmail = this.getFromEmail();
     const fromName = this.getFromName();
-
     const recipientEmail = email.trim().toLowerCase();
 
-    const isPasswordReset = purpose === OtpPurpose.PASSWORD_RESET;
+    let subject: string;
+    let instruction: string;
+    let securityMessage: string;
 
-    const subject = isPasswordReset
-      ? 'Reset your Italir Pothe password'
-      : 'Verify your Italir Pothe account';
+    switch (purpose) {
+      case OtpPurpose.PASSWORD_RESET:
+        subject = 'Reset your Italir Pothe password';
 
-    const message = isPasswordReset
-      ? `Your Italir Pothe password reset code is: ${otp}. This code will expire in 10 minutes.`
-      : `Your Italir Pothe verification code is: ${otp}. This code will expire in 10 minutes.`;
+        instruction =
+          'Use the following code to reset your Italir Pothe password:';
+
+        securityMessage =
+          'If you did not request a password reset, you can safely ignore this email.';
+
+        break;
+
+      case OtpPurpose.ACCOUNT_DELETION:
+        subject = 'Confirm your Italir Pothe account deletion';
+
+        instruction =
+          'Use the following code to permanently delete your Italir Pothe account:';
+
+        securityMessage =
+          'If you did not request account deletion, do not share this code and safely ignore this email.';
+
+        break;
+
+      case OtpPurpose.ACCOUNT_VERIFICATION:
+      default:
+        subject = 'Verify your Italir Pothe account';
+
+        instruction =
+          'Use the following code to verify your Italir Pothe account:';
+
+        securityMessage =
+          'If you did not request this verification code, you can safely ignore this email.';
+
+        break;
+    }
 
     const htmlBody = `
-      <div
+    <div
+      style="
+        max-width:600px;
+        margin:0 auto;
+        padding:24px;
+        font-family:Arial,Helvetica,sans-serif;
+        color:#17211d;
+        line-height:1.6;
+      "
+    >
+      <h2
         style="
-          max-width:600px;
-          margin:0 auto;
-          padding:24px;
-          font-family:Arial,Helvetica,sans-serif;
-          color:#17211d;
-          line-height:1.6;
+          color:#006b3f;
+          margin-bottom:16px;
         "
       >
-        <h2 style="color:#006b3f;margin-bottom:16px">
-          ${this.escapeHtml(subject)}
-        </h2>
+        ${this.escapeHtml(subject)}
+      </h2>
 
-        <p>Hello,</p>
+      <p>Hello,</p>
 
-        <p>
-          ${
-            isPasswordReset
-              ? 'Use the following code to reset your Italir Pothe password:'
-              : 'Use the following code to verify your Italir Pothe account:'
-          }
-        </p>
+      <p>
+        ${this.escapeHtml(instruction)}
+      </p>
 
-        <div
-          style="
-            margin:24px 0;
-            padding:18px;
-            border-radius:12px;
-            background:#f0faf4;
-            color:#006b3f;
-            font-size:32px;
-            font-weight:700;
-            letter-spacing:8px;
-            text-align:center;
-          "
-        >
-          ${this.escapeHtml(otp)}
-        </div>
-
-        <p>This code will expire in 10 minutes.</p>
-
-        <p style="color:#657069">
-          If you did not request this code, you can safely ignore this email.
-        </p>
-
-        <p>
-          Regards,<br />
-          <strong>Italir Pothe</strong>
-        </p>
+      <div
+        style="
+          margin:24px 0;
+          padding:18px;
+          border-radius:12px;
+          background:#f0faf4;
+          color:#006b3f;
+          font-size:32px;
+          font-weight:700;
+          letter-spacing:8px;
+          text-align:center;
+        "
+      >
+        ${this.escapeHtml(otp)}
       </div>
-    `;
+
+      <p>
+        This code will expire in 10 minutes.
+      </p>
+
+      ${
+        purpose === OtpPurpose.ACCOUNT_DELETION
+          ? `
+            <p
+              style="
+                padding:14px;
+                border-radius:10px;
+                background:#fff1f2;
+                color:#b42318;
+                font-weight:600;
+              "
+            >
+              Account deletion is permanent and cannot be undone.
+            </p>
+          `
+          : ''
+      }
+
+      <p style="color:#657069">
+        ${this.escapeHtml(securityMessage)}
+      </p>
+
+      <p>
+        Regards,<br />
+        <strong>Italir Pothe</strong>
+      </p>
+    </div>
+  `;
 
     try {
       await this.sendEmail({
