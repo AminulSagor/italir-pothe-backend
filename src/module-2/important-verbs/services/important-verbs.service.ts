@@ -1,21 +1,25 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { InjectRepository } from "@nestjs/typeorm";
-import { In, Repository } from "typeorm";
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
 
-import { DailyChallengesService } from "src/module-2/daily-challenges/services/daily-challenges.service";
-import { LearningActivityType } from "src/module-2/daily-challenges/types/daily-challenge.type";
+import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
+import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 import {
   ImportantVerbListQueryDto,
   ImportantVerbSearchQueryDto,
-} from "../dto/important-verb-query.dto";
-import { ReviewImportantVerbDto } from "../dto/important-verb-progress.dto";
-import { ImportantVerb } from "../entities/important-verb.entity";
-import { UserImportantVerbProgress } from "../entities/user-important-verb-progress.entity";
-import { UserSavedImportantVerb } from "../entities/user-saved-important-verb.entity";
+} from '../dto/important-verb-query.dto';
+import { ReviewImportantVerbDto } from '../dto/important-verb-progress.dto';
+import { ImportantVerb } from '../entities/important-verb.entity';
+import { UserImportantVerbProgress } from '../entities/user-important-verb-progress.entity';
+import { UserSavedImportantVerb } from '../entities/user-saved-important-verb.entity';
 import {
   ImportantVerbLanguage,
   ImportantVerbPersonKey,
-} from "../types/important-verb.type";
+} from '../types/important-verb.type';
+import {
+  buildItalianConjugationTtsText,
+  normalizeItalianConjugation,
+} from '../utils/italian-text.util';
 
 @Injectable()
 export class ImportantVerbsService {
@@ -41,16 +45,16 @@ export class ImportantVerbsService {
     const limit = params.query.limit ?? 20;
 
     const queryBuilder = this.verbRepository
-      .createQueryBuilder("verb")
-      .where("verb.isPublished = :isPublished", {
+      .createQueryBuilder('verb')
+      .where('verb.isPublished = :isPublished', {
         isPublished: true,
       });
 
     if (params.savedOnly) {
       queryBuilder.innerJoin(
         UserSavedImportantVerb,
-        "saved",
-        "saved.verbId = verb.id AND saved.userId = :userId",
+        'saved',
+        'saved.verbId = verb.id AND saved.userId = :userId',
         { userId: params.userId },
       );
     }
@@ -70,21 +74,21 @@ export class ImportantVerbsService {
     }
 
     if (params.query.regularity) {
-      queryBuilder.andWhere("verb.regularity = :regularity", {
+      queryBuilder.andWhere('verb.regularity = :regularity', {
         regularity: params.query.regularity,
       });
     }
 
     if (params.query.endingType) {
-      queryBuilder.andWhere("verb.endingType = :endingType", {
+      queryBuilder.andWhere('verb.endingType = :endingType', {
         endingType: params.query.endingType,
       });
     }
 
     queryBuilder
-      .orderBy("verb.frequencyRank", "ASC", "NULLS LAST")
-      .addOrderBy("verb.sortOrder", "ASC")
-      .addOrderBy("verb.infinitive", "ASC")
+      .orderBy('verb.frequencyRank', 'ASC', 'NULLS LAST')
+      .addOrderBy('verb.sortOrder', 'ASC')
+      .addOrderBy('verb.infinitive', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -159,7 +163,7 @@ export class ImportantVerbsService {
     });
 
     if (!verb) {
-      throw new NotFoundException("Important verb not found.");
+      throw new NotFoundException('Important verb not found.');
     }
 
     const isSaved = await this.savedVerbRepository.exist({
@@ -206,6 +210,7 @@ export class ImportantVerbsService {
             .map((conjugation) => {
               const examples = [
                 ...(conjugation.examples ?? []),
+
                 ...formExamples.filter(
                   (example) =>
                     example.conjugationId === conjugation.id &&
@@ -213,11 +218,35 @@ export class ImportantVerbsService {
                       (existing) => existing.id === example.id,
                     ),
                 ),
-              ].sort((a, b) => a.sortOrder - b.sortOrder);
+              ].sort((first, second) => first.sortOrder - second.sortOrder);
+
+              /*
+               * The imported database value may contain pronunciation-only
+               * stress marks such as "abbandóno".
+               *
+               * The API should return normal Italian spelling:
+               * "abbandono".
+               */
+              const canonicalConjugatedText = normalizeItalianConjugation(
+                conjugation.conjugatedText,
+              );
+
+              /*
+               * Previously TTS received only:
+               * "abbandóno"
+               *
+               * It will now receive:
+               * "io abbandono"
+               */
+              const completeTtsText = buildItalianConjugationTtsText(
+                conjugation.pronounIt,
+                canonicalConjugatedText,
+              );
 
               return {
                 id: conjugation.id,
                 personKey: conjugation.personKey,
+
                 pronoun: this.selectByLanguage(
                   {
                     en: conjugation.pronounEn,
@@ -226,44 +255,66 @@ export class ImportantVerbsService {
                   },
                   params.language,
                 ),
+
                 pronounIt: conjugation.pronounIt,
                 pronounEn: conjugation.pronounEn,
                 pronounBn: conjugation.pronounBn,
-                conjugatedText: conjugation.conjugatedText,
+
+                // Show the normal spelling in Flutter.
+                conjugatedText: canonicalConjugatedText,
+
+                // Pronounce the complete Italian phrase.
                 tts: {
-                  locale: "it-IT",
-                  text: conjugation.conjugatedText,
+                  locale: 'it-IT',
+                  text: completeTtsText,
                 },
+
                 meaning: this.selectByLanguage(
                   {
                     en: conjugation.englishMeaning,
+
                     bn: conjugation.banglaMeaning ?? conjugation.englishMeaning,
-                    it: conjugation.conjugatedText,
+
+                    it: canonicalConjugatedText,
                   },
                   params.language,
                 ),
+
                 englishMeaning: conjugation.englishMeaning,
+
                 banglaMeaning: conjugation.banglaMeaning,
+
                 sortOrder: conjugation.sortOrder,
+
                 examples: examples.map((example) => ({
                   id: example.id,
+
                   italianText: example.italianText,
+
                   tts: {
-                    locale: "it-IT",
+                    locale: 'it-IT',
                     text: example.italianText,
                   },
+
                   englishText: example.englishText,
+
                   banglaText: example.banglaText,
+
                   displayText: this.selectByLanguage(
                     {
                       en: example.englishText,
+
                       bn: example.banglaText ?? example.englishText,
+
                       it: example.italianText,
                     },
                     params.language,
                   ),
+
                   source: example.source,
+
                   sourceReference: example.sourceReference,
+
                   sourceLicense: example.sourceLicense,
                 })),
               };
@@ -275,15 +326,15 @@ export class ImportantVerbsService {
       ...this.buildVerbSummary(verb, isSaved, params.language),
       title: verb.infinitive.toUpperCase(),
       tts: {
-        locale: "it-IT",
+        locale: 'it-IT',
         text: verb.infinitive,
       },
       information: {
         title: this.selectByLanguage(
           {
-            en: "Verb Information",
-            bn: "ক্রিয়ার তথ্য",
-            it: "Informazioni sul verbo",
+            en: 'Verb Information',
+            bn: 'ক্রিয়ার তথ্য',
+            it: 'Informazioni sul verbo',
           },
           params.language,
         ),
@@ -298,12 +349,12 @@ export class ImportantVerbsService {
     await this.ensureVerbExists(verbId);
 
     await this.savedVerbRepository.upsert({ userId, verbId }, [
-      "userId",
-      "verbId",
+      'userId',
+      'verbId',
     ]);
 
     return {
-      message: "Important verb saved successfully.",
+      message: 'Important verb saved successfully.',
       verbId,
       isSaved: true,
     };
@@ -316,7 +367,7 @@ export class ImportantVerbsService {
     });
 
     return {
-      message: "Important verb removed from saved list.",
+      message: 'Important verb removed from saved list.',
       verbId,
       isSaved: false,
     };
@@ -359,7 +410,7 @@ export class ImportantVerbsService {
     });
 
     return {
-      message: "Important verb reviewed successfully.",
+      message: 'Important verb reviewed successfully.',
       progress: savedProgress,
     };
   }
@@ -370,7 +421,7 @@ export class ImportantVerbsService {
         userId,
       },
       order: {
-        lastReviewedAt: "DESC",
+        lastReviewedAt: 'DESC',
       },
     });
 
@@ -409,7 +460,7 @@ export class ImportantVerbsService {
     });
 
     if (!exists) {
-      throw new NotFoundException("Important verb not found.");
+      throw new NotFoundException('Important verb not found.');
     }
   }
 
@@ -461,9 +512,9 @@ export class ImportantVerbsService {
       ),
       combinedMeaning: [verb.englishMeaning, verb.banglaMeaning]
         .filter(Boolean)
-        .join(" / "),
+        .join(' / '),
       tts: {
-        locale: "it-IT",
+        locale: 'it-IT',
         text: verb.infinitive,
       },
       isSaved,
@@ -475,9 +526,9 @@ export class ImportantVerbsService {
     language: ImportantVerbLanguage,
   ) {
     const regularity = {
-      en: verb.regularity === "regular" ? "Regular Verb" : "Irregular Verb",
-      bn: verb.regularity === "regular" ? "নিয়মিত ক্রিয়া" : "অনিয়মিত ক্রিয়া",
-      it: verb.regularity === "regular" ? "Verbo regolare" : "Verbo irregolare",
+      en: verb.regularity === 'regular' ? 'Regular Verb' : 'Irregular Verb',
+      bn: verb.regularity === 'regular' ? 'নিয়মিত ক্রিয়া' : 'অনিয়মিত ক্রিয়া',
+      it: verb.regularity === 'regular' ? 'Verbo regolare' : 'Verbo irregolare',
     };
     const ending = {
       en: `${verb.endingType.toUpperCase()} Verb`,
@@ -503,8 +554,8 @@ export class ImportantVerbsService {
   ) {
     const descriptions = {
       en: `A ${verb.regularity} ${verb.endingType} Italian verb. It normally uses ${verb.auxiliary} in compound tenses.`,
-      bn: `এটি একটি ${verb.regularity === "regular" ? "নিয়মিত" : "অনিয়মিত"} ${verb.endingType} ইতালীয় ক্রিয়া। যৌগিক কালে সাধারণত ${verb.auxiliary} ব্যবহৃত হয়।`,
-      it: `Un verbo italiano ${verb.regularity === "regular" ? "regolare" : "irregolare"} in ${verb.endingType}. Nei tempi composti usa normalmente ${verb.auxiliary}.`,
+      bn: `এটি একটি ${verb.regularity === 'regular' ? 'নিয়মিত' : 'অনিয়মিত'} ${verb.endingType} ইতালীয় ক্রিয়া। যৌগিক কালে সাধারণত ${verb.auxiliary} ব্যবহৃত হয়।`,
+      it: `Un verbo italiano ${verb.regularity === 'regular' ? 'regolare' : 'irregolare'} in ${verb.endingType}. Nei tempi composti usa normalmente ${verb.auxiliary}.`,
     };
 
     return descriptions[language];
