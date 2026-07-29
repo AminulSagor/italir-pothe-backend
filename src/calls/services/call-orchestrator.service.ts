@@ -171,27 +171,43 @@ export class CallOrchestratorService implements OnModuleDestroy {
   async acknowledgeIncoming(userId: string, callId: string) {
     const normalizedCallId = callId.trim();
 
-    const pending = this.pendingIncomingAcks.get(normalizedCallId);
+    // Validate using the database so acknowledgements can still work
+    // after the temporary 2-second foreground ACK waiter expires.
+    const call = await this.callService.getParticipantCall(
+      normalizedCallId,
+      userId,
+    );
 
-    if (!pending) {
-      throw new ConflictException({
-        code: 'CALL_ACK_NOT_PENDING',
-        message: 'The incoming-call acknowledgement window has expired',
-      });
-    }
-
-    if (pending.receiverId !== userId) {
+    if (call.receiverId !== userId) {
       throw new ConflictException({
         code: 'CALL_ACK_FORBIDDEN',
         message: 'Only the call receiver can acknowledge this incoming call',
       });
     }
 
+    // Resolve the foreground waiter when it still exists.
     this.resolveIncomingAcknowledgement(normalizedCallId, true);
+
+    // Do not tell the caller it is ringing if the call has already
+    // been answered, rejected, cancelled, missed, or ended.
+    if (call.status !== CallStatus.RINGING) {
+      return {
+        callId: normalizedCallId,
+        acknowledged: false,
+        status: call.status,
+      };
+    }
+
+    // Receiver device has now displayed/started ringing the call.
+    this.callRealtimeService.emitToUser(call.callerId, 'call:ringing', {
+      call: this.presentCall(call),
+      acknowledgedBy: userId,
+    });
 
     return {
       callId: normalizedCallId,
       acknowledged: true,
+      status: call.status,
     };
   }
 
