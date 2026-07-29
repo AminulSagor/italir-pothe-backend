@@ -30,6 +30,17 @@ export class CallsController {
     );
   }
 
+  @Post(':callId/incoming-ack')
+  acknowledgeIncomingCall(
+    @Req() request: AuthenticatedRequest,
+    @Param('callId') callId: string,
+  ) {
+    return this.callOrchestratorService.acknowledgeIncoming(
+      this.requireUserId(request),
+      callId,
+    );
+  }
+
   @Post(':callId/answer')
   answerCall(
     @Req() request: AuthenticatedRequest,
