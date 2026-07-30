@@ -213,7 +213,8 @@ export class ImportantVerbsService {
 
                 ...formExamples.filter(
                   (example) =>
-                    example.conjugationId === conjugation.id &&
+                    (example.conjugationId === null ||
+                      example.conjugationId === conjugation.id) &&
                     !(conjugation.examples ?? []).some(
                       (existing) => existing.id === example.id,
                     ),
