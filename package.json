@@ -19,6 +19,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "verbs:sync": "ts-node -r tsconfig-paths/register src/module-2/important-verbs/scripts/sync-important-verbs.ts",
+    "verbs:import-static": "ts-node -r tsconfig-paths/register src/module-2/important-verbs/scripts/import-compact-important-verbs.ts",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts"
   },
   "dependencies": {
