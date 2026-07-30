@@ -1,14 +1,14 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
-import { NestFactory } from "@nestjs/core";
-import { DataSource } from "typeorm";
+import { NestFactory } from '@nestjs/core';
+import { DataSource } from 'typeorm';
 
-import { AppModule } from "../../../app.module";
-import { ImportantVerbConjugation } from "../entities/important-verb-conjugation.entity";
-import { ImportantVerbExample } from "../entities/important-verb-example.entity";
-import { ImportantVerbForm } from "../entities/important-verb-form.entity";
-import { ImportantVerb } from "../entities/important-verb.entity";
+import { AppModule } from '../../../app.module';
+import { ImportantVerbConjugation } from '../entities/important-verb-conjugation.entity';
+import { ImportantVerbExample } from '../entities/important-verb-example.entity';
+import { ImportantVerbForm } from '../entities/important-verb-form.entity';
+import { ImportantVerb } from '../entities/important-verb.entity';
 import {
   ImportantVerbAuxiliary,
   ImportantVerbEndingType,
@@ -16,7 +16,7 @@ import {
   ImportantVerbFormKey,
   ImportantVerbPersonKey,
   ImportantVerbRegularity,
-} from "../types/important-verb.type";
+} from '../types/important-verb.type';
 
 type LanguageTriple = [english: string, bangla: string, italian: string];
 type TranslationRow = [italian: string, english: string, bangla: string];
@@ -86,18 +86,18 @@ function validateRows(
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: ["log", "error", "warn"],
+    logger: ['log', 'error', 'warn'],
   });
 
   try {
     const dataSource = app.get(DataSource);
     const filePath = join(
       __dirname,
-      "../data/important-verbs-108-compact.json",
+      '../data/important-verbs-108-compact.json',
     );
 
     const dataset = JSON.parse(
-      await readFile(filePath, "utf8"),
+      await readFile(filePath, 'utf8'),
     ) as CompactDataset;
 
     await dataSource.transaction(async (manager) => {
@@ -127,11 +127,7 @@ async function bootstrap(): Promise<void> {
           regularity: verbData.regularity,
           endingType: verbData.ending,
           auxiliary: verbData.auxiliary,
-          tags: [
-            verbData.regularity,
-            verbData.ending,
-            "static-json",
-          ],
+          tags: [verbData.regularity, verbData.ending, 'static-json'],
           frequencyRank: null,
           sortOrder: verbIndex + 1,
           isPublished: true,
@@ -185,27 +181,38 @@ async function bootstrap(): Promise<void> {
           await exampleRepository.delete({ formId: form.id });
           await conjugationRepository.delete({ formId: form.id });
 
-          const conjugations = formData.rows.map((row, rowIndex) => {
+          const conjugations = formData.rows.flatMap((row, rowIndex) => {
+            // Some modal verbs (dovere, potere, volere) do not normally use
+            // the imperative. Their compact JSON rows contain null instead
+            // of an Italian conjugated form, so skip those placeholder rows.
+            if (!row[0]) {
+              return [];
+            }
+
             const personKey = formMeta.persons[rowIndex];
             const person = dataset.persons[personKey];
 
-            return conjugationRepository.create({
-              formId: form.id,
-              personKey,
-              pronounIt: person.it || null,
-              pronounEn: person.en || null,
-              pronounBn: person.bn || null,
-              conjugatedText: row[0],
-              englishMeaning: row[1],
-              banglaMeaning: row[2],
-              sourceTags: ["static-json", "curated"],
-              sortOrder: rowIndex + 1,
-              sourceHash: null,
-              translationSourceHash: null,
-            });
+            return [
+              conjugationRepository.create({
+                formId: form.id,
+                personKey,
+                pronounIt: person.it || null,
+                pronounEn: person.en || null,
+                pronounBn: person.bn || null,
+                conjugatedText: row[0],
+                englishMeaning: row[1],
+                banglaMeaning: row[2],
+                sourceTags: ['static-json', 'curated'],
+                sortOrder: rowIndex + 1,
+                sourceHash: null,
+                translationSourceHash: null,
+              }),
+            ];
           });
 
-          await conjugationRepository.save(conjugations);
+          if (conjugations.length > 0) {
+            await conjugationRepository.save(conjugations);
+          }
 
           await exampleRepository.save(
             exampleRepository.create({
@@ -215,8 +222,8 @@ async function bootstrap(): Promise<void> {
               englishText: formData.example[1],
               banglaText: formData.example[2],
               source: ImportantVerbExampleSource.TEMPLATE,
-              sourceReference: "important-verbs-108-compact.json",
-              sourceLicense: "internal-static",
+              sourceReference: 'important-verbs-108-compact.json',
+              sourceLicense: 'internal-static',
               sortOrder: 1,
               sourceHash: null,
               translationSourceHash: null,
