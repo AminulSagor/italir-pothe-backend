@@ -207,18 +207,16 @@ export class ImportantVerbsService {
           sortOrder: form.sortOrder,
           conjugations: [...(form.conjugations ?? [])]
             .sort((a, b) => a.sortOrder - b.sortOrder)
-            .map((conjugation) => {
+            .map((conjugation, index) => {
               const examples = [
                 ...(conjugation.examples ?? []),
 
-                ...formExamples.filter(
-                  (example) =>
-                    (example.conjugationId === null ||
-                      example.conjugationId === conjugation.id) &&
-                    !(conjugation.examples ?? []).some(
-                      (existing) => existing.id === example.id,
-                    ),
-                ),
+                // Show the shared tense example only on the first conjugation.
+                ...(index === 0
+                  ? formExamples.filter(
+                      (example) => example.conjugationId === null,
+                    )
+                  : []),
               ].sort((first, second) => first.sortOrder - second.sortOrder);
 
               /*
