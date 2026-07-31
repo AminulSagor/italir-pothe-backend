@@ -15,6 +15,7 @@ import { VocabularyReviewSessionItem } from './entities/vocabulary-review-sessio
 import { VocabularyFlashcardsController } from './controllers/vocabulary-flashcards.controller';
 import { VocabularyFlashcardsService } from './services/vocabulary-flashcards.service';
 import { DailyChallengesModule } from '../daily-challenges/daily-challenges.module';
+import { CourseCommerceModule } from '../course-commerce/course-commerce.module';
 
 @Module({
   imports: [
@@ -26,6 +27,8 @@ import { DailyChallengesModule } from '../daily-challenges/daily-challenges.modu
       VocabularyReviewSession,
       VocabularyReviewSessionItem,
     ]),
+
+    CourseCommerceModule,
     FilesModule,
     DailyChallengesModule,
   ],

@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { bigintNumberTransformer } from './bigint-number.transformer';
 
 export enum FilePurpose {
   COURSE_COVER = 'course_cover',
@@ -70,7 +71,10 @@ export class File {
   @Column({ type: 'varchar', length: 120 })
   mimeType: string;
 
-  @Column({ type: 'integer' })
+  @Column({
+    type: 'bigint',
+    transformer: bigintNumberTransformer,
+  })
   sizeBytes: number;
 
   @Column({ type: 'varchar', length: 80 })

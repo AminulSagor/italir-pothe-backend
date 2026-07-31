@@ -22,7 +22,6 @@ export class CreateSignedUploadUrlDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(300 * 1024 * 1024)
   sizeBytes: number;
 
   @IsNotEmpty()
