@@ -217,7 +217,9 @@ export class VideoTranscodeWorkerService
   }
 
   private async claimNextJob(): Promise<VideoTranscodeJob | null> {
-    const rows = await this.dataSource.query<VideoTranscodeJob[]>(
+    const [returnedRows] = await this.dataSource.query<
+      [VideoTranscodeJob[], number]
+    >(
       `
       WITH candidate AS (
         SELECT "id"
@@ -257,7 +259,7 @@ export class VideoTranscodeWorkerService
       [this.workerId],
     );
 
-    return rows[0] ?? null;
+    return returnedRows[0] ?? null;
   }
 
   private async processJob(job: VideoTranscodeJob): Promise<void> {
