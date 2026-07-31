@@ -217,44 +217,47 @@ export class VideoTranscodeWorkerService
   }
 
   private async claimNextJob(): Promise<VideoTranscodeJob | null> {
-    const rows: Array<{ id: string }> = await this.dataSource.query(
+    const rows = await this.dataSource.query<VideoTranscodeJob[]>(
       `
-          WITH candidate AS (
-            SELECT "id"
-            FROM "video_transcode_jobs"
-            WHERE
-              "status" = 'pending'
-              AND "availableAt" <= now()
-              AND "attempts" < "maxAttempts"
-            ORDER BY "createdAt" ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1
-          )
-          UPDATE "video_transcode_jobs" AS job
-          SET
-            "status" = 'processing',
-            "attempts" = job."attempts" + 1,
-            "lockedAt" = now(),
-            "lockedBy" = $1,
-            "updatedAt" = now()
-          FROM candidate
-          WHERE job."id" = candidate."id"
-          RETURNING job."id"
-        `,
+      WITH candidate AS (
+        SELECT "id"
+        FROM "video_transcode_jobs"
+        WHERE
+          "status" = 'pending'
+          AND "availableAt" <= now()
+          AND "attempts" < "maxAttempts"
+        ORDER BY "createdAt" ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      UPDATE "video_transcode_jobs" AS job
+      SET
+        "status" = 'processing',
+        "attempts" = job."attempts" + 1,
+        "lockedAt" = now(),
+        "lockedBy" = $1,
+        "updatedAt" = now()
+      FROM candidate
+      WHERE job."id" = candidate."id"
+      RETURNING
+        job."id",
+        job."mediaAssetId",
+        job."sourceFileId",
+        job."status",
+        job."attempts",
+        job."maxAttempts",
+        job."availableAt",
+        job."lockedAt",
+        job."lockedBy",
+        job."lastError",
+        job."completedAt",
+        job."createdAt",
+        job."updatedAt"
+    `,
       [this.workerId],
     );
 
-    const jobId = rows[0]?.id;
-
-    if (!jobId) {
-      return null;
-    }
-
-    return this.jobRepository.findOne({
-      where: {
-        id: jobId,
-      },
-    });
+    return rows[0] ?? null;
   }
 
   private async processJob(job: VideoTranscodeJob): Promise<void> {
