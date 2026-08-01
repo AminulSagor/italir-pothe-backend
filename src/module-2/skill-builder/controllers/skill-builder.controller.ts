@@ -48,6 +48,11 @@ export class SkillBuilderController {
     );
   }
 
+  @Get('career-tracks/:trackId/video-access')
+  async getCareerTrackVideoAccess(@Param('trackId') trackId: string) {
+    return this.skillBuilderService.getCareerTrackVideoAccess(trackId);
+  }
+
   @Post('career-tracks/:trackId/video-progress')
   async recordCareerTrackVideoProgress(
     @Param('trackId') trackId: string,

@@ -54,7 +54,7 @@ export class AdminSkillBuilderService {
   ) {}
 
   async createCareerTrack(dto: CreateCareerTrackDto, adminId: string) {
-    await this.assertVideoFile(dto.introVideoFileId);
+    await this.assertOptionalVideoFile(dto.introVideoFileId);
     await this.assertPdfFile(dto.theoryResourceFileId);
 
     const track = this.careerTrackRepository.create({
@@ -63,7 +63,7 @@ export class AdminSkillBuilderService {
       description: dto.description?.trim() || null,
       iconKey: dto.iconKey?.trim() || 'briefcase',
       cardColor: dto.cardColor?.trim() || '#FFEDE3',
-      introVideoFileId: dto.introVideoFileId,
+      introVideoFileId: dto.introVideoFileId ?? null,
       theoryResourceFileId: dto.theoryResourceFileId,
       status: CareerTrackStatus.PUBLISHED,
       sortOrder: dto.sortOrder ?? 0,

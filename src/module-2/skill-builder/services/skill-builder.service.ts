@@ -243,6 +243,17 @@ export class SkillBuilderService {
     };
   }
 
+  async getCareerTrackVideoAccess(trackId: string) {
+    const track = await this.findPublishedTrackOrFail(trackId);
+
+    if (!track.introVideoFileId) {
+      throw new NotFoundException(
+        'This career track does not have an introduction video.',
+      );
+    }
+
+    return this.filesService.getVideoPlaybackAccess(track.introVideoFileId);
+  }
   async recordCareerTrackVideoProgress(params: {
     userId: string;
     trackId: string;

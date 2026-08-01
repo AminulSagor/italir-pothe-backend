@@ -50,8 +50,9 @@ export class CreateCareerTrackDto {
   @IsHexColor()
   cardColor?: string;
 
+  @IsOptional()
   @IsUUID()
-  introVideoFileId: string;
+  introVideoFileId?: string;
 
   @IsUUID()
   theoryResourceFileId: string;
