@@ -6,13 +6,11 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Length,
   Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
-
-const strongPasswordRegex =
-  /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]+$/;
 
 const phoneRegex = /^(?:\+8801\d{9}|\+39\d{8,11})$/;
 
@@ -91,14 +89,15 @@ export class ChangePasswordDto {
 
   @IsNotEmpty()
   @IsString()
-  @MinLength(8)
-  @Matches(strongPasswordRegex, {
-    message:
-      'Password must contain at least one uppercase letter, one number, and one special character',
+  @Length(6, 6, {
+    message: 'New password must be exactly 6 characters long',
   })
   newPassword: string;
 
   @IsNotEmpty()
   @IsString()
+  @Length(6, 6, {
+    message: 'Confirm password must be exactly 6 characters long',
+  })
   confirmNewPassword: string;
 }
