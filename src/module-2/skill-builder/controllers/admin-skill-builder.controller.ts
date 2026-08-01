@@ -65,11 +65,6 @@ export class AdminSkillBuilderController {
     return this.adminSkillBuilderService.findCareerTrackDetails(trackId);
   }
 
-  @Get('career-tracks/:trackId/video-access')
-  async getCareerTrackVideoAccess(@Param('trackId') trackId: string) {
-    return this.skillBuilderService.getCareerTrackVideoAccess(trackId);
-  }
-
   @Patch('career-tracks/:trackId')
   async updateCareerTrack(
     @Param('trackId') trackId: string,
