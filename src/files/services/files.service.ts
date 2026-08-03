@@ -44,6 +44,8 @@ export interface FileRequestUser {
   role: UserRole | string;
 }
 
+import { posix as pathPosix } from 'node:path';
+
 @Injectable()
 export class FilesService {
   private readonly imageMaxSize: number;
@@ -497,6 +499,7 @@ export class FilesService {
         mediaAssetId: mediaAsset.id,
         status: mediaAsset.transcodeStatus,
         streamUrl: null,
+        qualities: [],
         durationSeconds: mediaAsset.durationSeconds,
         width: mediaAsset.sourceWidth,
         height: mediaAsset.sourceHeight,
@@ -509,6 +512,10 @@ export class FilesService {
         mediaAsset.hlsMasterKey,
       );
 
+    const hlsDirectory = pathPosix.dirname(mediaAsset.hlsMasterKey);
+
+    const qualityNames = this.getVideoQualityNames(mediaAsset.sourceHeight);
+
     return {
       fileId: file.id,
       mediaAssetId: mediaAsset.id,
@@ -516,8 +523,14 @@ export class FilesService {
 
       streamUrl: this.s3Service.createCloudFrontUrl(mediaAsset.hlsMasterKey),
 
-      durationSeconds: mediaAsset.durationSeconds,
+      qualities: qualityNames.map((qualityName) => ({
+        label: qualityName,
+        streamUrl: this.s3Service.createCloudFrontUrl(
+          `${hlsDirectory}/${qualityName}/index.m3u8`,
+        ),
+      })),
 
+      durationSeconds: mediaAsset.durationSeconds,
       width: mediaAsset.sourceWidth,
       height: mediaAsset.sourceHeight,
 
@@ -1080,5 +1093,25 @@ export class FilesService {
     }
 
     return `${Number((sizeBytes / mebibyte).toFixed(2))} MiB`;
+  }
+
+  private getVideoQualityNames(sourceHeight: number | null): string[] {
+    if (!sourceHeight || sourceHeight <= 0) {
+      return [];
+    }
+
+    const heights = [360, 480, 720, 1080];
+
+    const qualityNames = heights
+      .filter((height) => height <= sourceHeight)
+      .map((height) => `${height}p`);
+
+    if (qualityNames.length > 0) {
+      return qualityNames;
+    }
+
+    const evenHeight = Math.max(2, sourceHeight - (sourceHeight % 2));
+
+    return [`${evenHeight}p`];
   }
 }
