@@ -61,6 +61,7 @@ export class CourseCommerceController {
       userId: this.getUserId(request),
       orderId,
       dto,
+      source: 'APP_VERIFY',
     });
   }
 

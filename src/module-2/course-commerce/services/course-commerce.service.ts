@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -74,6 +75,7 @@ type CalculatedCourseQuote = {
 
 @Injectable()
 export class CourseCommerceService {
+  private readonly logger = new Logger(CourseCommerceService.name);
   constructor(
     @InjectRepository(Course)
     private readonly courseRepository: Repository<Course>,
@@ -434,119 +436,324 @@ export class CourseCommerceService {
     userId: string;
     orderId: string;
     dto: VerifyCourseGooglePlayPurchaseDto;
+    source?: 'APP_VERIFY' | 'RTDN';
   }) {
-    const order = await this.getOwnedOrder(params.userId, params.orderId);
-
-    this.assertConfirmableProvider(order, CoursePaymentProvider.GOOGLE_PLAY);
-
+    const source = params.source ?? 'APP_VERIFY';
     const productId = params.dto.productId.trim();
     const purchaseToken = params.dto.purchaseToken.trim();
 
-    if (productId !== order.providerSnapshot.productId) {
-      throw new BadRequestException(
-        'Google Play product ID does not match the ordered course.',
-      );
-    }
+    // Never log the actual purchase token.
+    const tokenRef = createHash('sha256')
+      .update(purchaseToken)
+      .digest('hex')
+      .slice(0, 12);
 
-    if (
-      order.providerSnapshot.productType !==
-      CourseProviderProductType.NON_CONSUMABLE
-    ) {
-      throw new BadRequestException(
-        'A lifetime course must use a non-consumable Google Play product.',
-      );
-    }
+    let currentStep = 'LOAD_ORDER';
 
-    if (!this.googlePlayBillingService.isRealVerificationEnabled()) {
-      this.demoPaymentGateway.assertDemoModeEnabled();
+    try {
+      const order = await this.getOwnedOrder(params.userId, params.orderId);
 
-      const tokenHash = createHash('sha256')
-        .update(purchaseToken)
+      this.logger.log({
+        source,
+        step: 'START',
+        orderId: order.id,
+        userId: order.userId,
+        orderStatus: order.status,
+        productId,
+        tokenRef,
+        timestamp: new Date().toISOString(),
+      });
+
+      currentStep = 'VALIDATE_PROVIDER';
+
+      this.assertConfirmableProvider(order, CoursePaymentProvider.GOOGLE_PLAY);
+
+      if (productId !== order.providerSnapshot.productId) {
+        throw new BadRequestException(
+          'Google Play product ID does not match the ordered course.',
+        );
+      }
+
+      if (
+        order.providerSnapshot.productType !==
+        CourseProviderProductType.NON_CONSUMABLE
+      ) {
+        throw new BadRequestException(
+          'A lifetime course must use a non-consumable Google Play product.',
+        );
+      }
+
+      /*
+       * Development/demo verification flow
+       */
+      if (!this.googlePlayBillingService.isRealVerificationEnabled()) {
+        currentStep = 'DEMO_MODE_VALIDATION';
+
+        this.demoPaymentGateway.assertDemoModeEnabled();
+
+        const tokenHash = createHash('sha256')
+          .update(purchaseToken)
+          .digest('hex');
+
+        const providerReference =
+          params.dto.transactionId?.trim() || `google-play:${tokenHash}`;
+
+        this.logger.log({
+          source,
+          step: 'MARK_PROVIDER_TRANSACTION_START',
+          mode: 'DEVELOPMENT',
+          orderId: order.id,
+          tokenRef,
+          providerReference,
+        });
+
+        currentStep = 'MARK_PROVIDER_TRANSACTION';
+
+        await this.markProviderTransactionVerified({
+          order,
+          tokenHash,
+          providerTransactionId: providerReference,
+          environment: CourseProviderEnvironment.DEVELOPMENT,
+          payload: {
+            source: 'development_google_play_verifier',
+          },
+        });
+
+        this.logger.log({
+          source,
+          step: 'MARK_PROVIDER_TRANSACTION_SUCCESS',
+          mode: 'DEVELOPMENT',
+          orderId: order.id,
+          tokenRef,
+        });
+
+        this.logger.log({
+          source,
+          step: 'COMPLETE_PAYMENT_START',
+          mode: 'DEVELOPMENT',
+          orderId: order.id,
+          tokenRef,
+        });
+
+        currentStep = 'COMPLETE_PAYMENT';
+
+        const completion = await this.completePayment({
+          orderId: order.id,
+          provider: CoursePaymentProvider.GOOGLE_PLAY,
+          providerReference,
+        });
+
+        this.logger.log({
+          source,
+          step: 'COMPLETE_PAYMENT_SUCCESS',
+          mode: 'DEVELOPMENT',
+          orderId: order.id,
+          tokenRef,
+          orderStatus: completion.order.status,
+          enrollmentStatus: completion.enrollment.status,
+          timestamp: new Date().toISOString(),
+        });
+
+        return completion;
+      }
+
+      /*
+       * Real Google Play verification flow
+       */
+      const expectedObfuscatedAccountId = createHash('sha256')
+        .update(order.userId)
         .digest('hex');
 
+      this.logger.log({
+        source,
+        step: 'GOOGLE_VERIFY_START',
+        orderId: order.id,
+        productId,
+        tokenRef,
+        timestamp: new Date().toISOString(),
+      });
+
+      currentStep = 'GOOGLE_VERIFY';
+
+      const verifiedPurchase =
+        await this.googlePlayBillingService.verifyOneTimeProduct({
+          purchaseToken,
+          expectedProductId: order.providerSnapshot.productId,
+          expectedOfferId: order.providerSnapshot.offerId,
+          expectedObfuscatedAccountId,
+        });
+
+      this.logger.log({
+        source,
+        step: 'GOOGLE_VERIFY_SUCCESS',
+        orderId: order.id,
+        productId: verifiedPurchase.productId,
+        tokenRef,
+        googleOrderId: verifiedPurchase.orderId,
+        purchaseState: verifiedPurchase.purchaseState,
+        acknowledgementState: verifiedPurchase.acknowledgementState,
+        consumptionState: verifiedPurchase.consumptionState,
+        quantity: verifiedPurchase.quantity,
+        isTestPurchase: verifiedPurchase.isTestPurchase,
+        timestamp: new Date().toISOString(),
+      });
+
+      currentStep = 'VALIDATE_VERIFIED_PURCHASE';
+
+      if (verifiedPurchase.quantity !== 1) {
+        throw new BadRequestException(
+          'Course purchases must have a quantity of exactly one.',
+        );
+      }
+
       const providerReference =
-        params.dto.transactionId?.trim() || `google-play:${tokenHash}`;
+        verifiedPurchase.orderId ||
+        `google-play:${verifiedPurchase.purchaseTokenHash}`;
+
+      this.logger.log({
+        source,
+        step: 'MARK_PROVIDER_TRANSACTION_START',
+        orderId: order.id,
+        tokenRef,
+        providerReference,
+        timestamp: new Date().toISOString(),
+      });
+
+      currentStep = 'MARK_PROVIDER_TRANSACTION';
 
       await this.markProviderTransactionVerified({
         order,
-        tokenHash,
+        tokenHash: verifiedPurchase.purchaseTokenHash,
         providerTransactionId: providerReference,
-        environment: CourseProviderEnvironment.DEVELOPMENT,
+        environment: verifiedPurchase.isTestPurchase
+          ? CourseProviderEnvironment.SANDBOX
+          : CourseProviderEnvironment.PRODUCTION,
         payload: {
-          source: 'development_google_play_verifier',
+          source: 'google_play_developer_api',
+          productId: verifiedPurchase.productId,
+          orderId: verifiedPurchase.orderId,
+          purchaseOptionId: verifiedPurchase.purchaseOptionId,
+          offerId: verifiedPurchase.offerId,
+          purchaseState: verifiedPurchase.purchaseState,
+          acknowledgementState: verifiedPurchase.acknowledgementState,
+          consumptionState: verifiedPurchase.consumptionState,
+          purchaseCompletionTime: verifiedPurchase.purchaseCompletionTime,
+          regionCode: verifiedPurchase.regionCode,
+          isTestPurchase: verifiedPurchase.isTestPurchase,
         },
       });
 
-      return this.completePayment({
+      this.logger.log({
+        source,
+        step: 'MARK_PROVIDER_TRANSACTION_SUCCESS',
+        orderId: order.id,
+        tokenRef,
+        providerReference,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log({
+        source,
+        step: 'COMPLETE_PAYMENT_START',
+        orderId: order.id,
+        tokenRef,
+        timestamp: new Date().toISOString(),
+      });
+
+      currentStep = 'COMPLETE_PAYMENT';
+
+      const completion = await this.completePayment({
         orderId: order.id,
         provider: CoursePaymentProvider.GOOGLE_PLAY,
         providerReference,
       });
-    }
 
-    const expectedObfuscatedAccountId = createHash('sha256')
-      .update(order.userId)
-      .digest('hex');
-
-    const verifiedPurchase =
-      await this.googlePlayBillingService.verifyOneTimeProduct({
-        purchaseToken,
-        expectedProductId: order.providerSnapshot.productId,
-        expectedOfferId: order.providerSnapshot.offerId,
-        expectedObfuscatedAccountId,
+      this.logger.log({
+        source,
+        step: 'COMPLETE_PAYMENT_SUCCESS',
+        orderId: order.id,
+        tokenRef,
+        orderStatus: completion.order.status,
+        enrollmentStatus: completion.enrollment.status,
+        timestamp: new Date().toISOString(),
       });
 
-    if (verifiedPurchase.quantity !== 1) {
-      throw new BadRequestException(
-        'Course purchases must have a quantity of exactly one.',
-      );
-    }
-
-    const providerReference =
-      verifiedPurchase.orderId ||
-      `google-play:${verifiedPurchase.purchaseTokenHash}`;
-
-    await this.markProviderTransactionVerified({
-      order,
-      tokenHash: verifiedPurchase.purchaseTokenHash,
-      providerTransactionId: providerReference,
-      environment: verifiedPurchase.isTestPurchase
-        ? CourseProviderEnvironment.SANDBOX
-        : CourseProviderEnvironment.PRODUCTION,
-      payload: {
-        source: 'google_play_developer_api',
-        productId: verifiedPurchase.productId,
-        orderId: verifiedPurchase.orderId,
-        purchaseOptionId: verifiedPurchase.purchaseOptionId,
-        offerId: verifiedPurchase.offerId,
-        purchaseState: verifiedPurchase.purchaseState,
-        acknowledgementState: verifiedPurchase.acknowledgementState,
-        consumptionState: verifiedPurchase.consumptionState,
-        purchaseCompletionTime: verifiedPurchase.purchaseCompletionTime,
-        regionCode: verifiedPurchase.regionCode,
-        isTestPurchase: verifiedPurchase.isTestPurchase,
-      },
-    });
-
-    const completion = await this.completePayment({
-      orderId: order.id,
-      provider: CoursePaymentProvider.GOOGLE_PLAY,
-      providerReference,
-    });
-
-    const acknowledgement =
-      await this.googlePlayBillingService.acknowledgeOneTimeProduct({
+      this.logger.log({
+        source,
+        step: 'ACKNOWLEDGE_START',
+        orderId: order.id,
         productId: order.providerSnapshot.productId,
-        purchaseToken,
+        tokenRef,
+        timestamp: new Date().toISOString(),
       });
 
-    return {
-      ...completion,
-      googlePlayProcessing: {
+      currentStep = 'ACKNOWLEDGE';
+
+      const acknowledgement =
+        await this.googlePlayBillingService.acknowledgeOneTimeProduct({
+          productId: order.providerSnapshot.productId,
+          purchaseToken,
+        });
+
+      this.logger.log({
+        source,
+        step: 'ACKNOWLEDGE_SUCCESS',
+        orderId: order.id,
+        tokenRef,
         acknowledged: acknowledgement.acknowledged,
         alreadyAcknowledged: acknowledgement.alreadyAcknowledged,
-      },
-    };
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log({
+        source,
+        step: 'PURCHASE_PROCESSING_SUCCESS',
+        orderId: order.id,
+        tokenRef,
+        finalOrderStatus: completion.order.status,
+        finalEnrollmentStatus: completion.enrollment.status,
+        timestamp: new Date().toISOString(),
+      });
+
+      return {
+        ...completion,
+        googlePlayProcessing: {
+          acknowledged: acknowledgement.acknowledged,
+          alreadyAcknowledged: acknowledgement.alreadyAcknowledged,
+        },
+      };
+    } catch (error: unknown) {
+      const googleError = error as {
+        response?: {
+          status?: number;
+          data?: unknown;
+        };
+        status?: number;
+        statusCode?: number;
+      };
+
+      this.logger.error({
+        source,
+        step: 'PURCHASE_PROCESSING_FAILED',
+        failedAt: currentStep,
+        orderId: params.orderId,
+        userId: params.userId,
+        productId,
+        tokenRef,
+        transactionId: params.dto.transactionId?.trim(),
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+        message: error instanceof Error ? error.message : String(error),
+        status:
+          googleError.response?.status ??
+          googleError.status ??
+          googleError.statusCode,
+        googleResponse: googleError.response?.data,
+        stack: error instanceof Error ? error.stack : undefined,
+        timestamp: new Date().toISOString(),
+      });
+
+      throw error;
+    }
   }
 
   async verifyAppStorePurchase(params: {
@@ -935,6 +1142,7 @@ export class CourseCommerceService {
       await repository.save(transaction);
     });
   }
+
   private async completePayment(params: {
     orderId: string;
     provider: CoursePaymentProvider;

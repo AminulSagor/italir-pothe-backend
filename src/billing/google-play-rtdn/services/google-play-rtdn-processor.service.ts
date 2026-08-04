@@ -676,14 +676,12 @@ export class GooglePlayRtdnProcessorService {
 
       await this.courseCommerceService.verifyGooglePlayPurchase({
         userId: order.userId,
-
         orderId: order.id,
-
         dto: {
           productId: item.sku,
-
           purchaseToken: item.purchaseToken,
         },
+        source: 'RTDN',
       });
 
       return {
