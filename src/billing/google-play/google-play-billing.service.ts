@@ -751,18 +751,22 @@ export class GooglePlayBillingService implements OnModuleInit {
 
     if (!params.received) {
       if (requireAccountId) {
-        throw new BadRequestException(
-          'Google Play did not return the expected application account identifier.',
-        );
+        throw new ConflictException({
+          code: 'GOOGLE_PLAY_ACCOUNT_IDENTIFIER_MISSING',
+          message:
+            'Google Play did not return the expected application account identifier.',
+        });
       }
 
       return;
     }
 
     if (params.received !== params.expected) {
-      throw new BadRequestException(
-        'The Google Play purchase belongs to another application user.',
-      );
+      throw new ConflictException({
+        code: 'GOOGLE_PLAY_PURCHASE_LINKED_TO_ANOTHER_USER',
+        message:
+          'The Google Play purchase belongs to another application user.',
+      });
     }
   }
 

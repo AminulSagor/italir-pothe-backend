@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   Logger,
@@ -610,6 +611,59 @@ export class CourseCommerceService {
         verifiedPurchase.orderId ||
         `google-play:${verifiedPurchase.purchaseTokenHash}`;
 
+      currentStep = 'RESTORE_EXISTING_PURCHASE';
+
+      const restoredCompletion =
+        await this.restoreExistingGooglePlayCoursePurchase({
+          currentOrder: order,
+          tokenHash: verifiedPurchase.purchaseTokenHash,
+          providerReference,
+          environment: verifiedPurchase.isTestPurchase
+            ? CourseProviderEnvironment.SANDBOX
+            : CourseProviderEnvironment.PRODUCTION,
+          payload: {
+            source: 'google_play_developer_api',
+            productId: verifiedPurchase.productId,
+            orderId: verifiedPurchase.orderId,
+            purchaseOptionId: verifiedPurchase.purchaseOptionId,
+            offerId: verifiedPurchase.offerId,
+            purchaseState: verifiedPurchase.purchaseState,
+            acknowledgementState: verifiedPurchase.acknowledgementState,
+            consumptionState: verifiedPurchase.consumptionState,
+            purchaseCompletionTime: verifiedPurchase.purchaseCompletionTime,
+            regionCode: verifiedPurchase.regionCode,
+            isTestPurchase: verifiedPurchase.isTestPurchase,
+            restoredFromExistingOrder: true,
+          },
+        });
+
+      if (restoredCompletion) {
+        this.logger.log({
+          source,
+          step: 'RESTORE_EXISTING_PURCHASE_SUCCESS',
+          requestedOrderId: order.id,
+          restoredOrderId: restoredCompletion.order.id,
+          tokenRef,
+          timestamp: new Date().toISOString(),
+        });
+
+        currentStep = 'ACKNOWLEDGE_RESTORED_PURCHASE';
+
+        const acknowledgement =
+          await this.googlePlayBillingService.acknowledgeOneTimeProduct({
+            productId: order.providerSnapshot.productId,
+            purchaseToken,
+          });
+
+        return {
+          ...restoredCompletion,
+          googlePlayProcessing: {
+            acknowledged: acknowledgement.acknowledged,
+            alreadyAcknowledged: acknowledgement.alreadyAcknowledged,
+          },
+        };
+      }
+
       this.logger.log({
         source,
         step: 'MARK_PROVIDER_TRANSACTION_START',
@@ -723,6 +777,34 @@ export class CourseCommerceService {
         },
       };
     } catch (error: unknown) {
+      const failure = this.extractHttpFailure(error);
+
+      if (this.isPermanentGooglePlayVerificationFailure(failure.code)) {
+        try {
+          await this.markGooglePlayOrderFailed({
+            orderId: params.orderId,
+            tokenRef,
+            failureCode: failure.code as string,
+            failureMessage: failure.message,
+          });
+        } catch (markFailureError) {
+          this.logger.error({
+            source,
+            step: 'MARK_GOOGLE_PLAY_ORDER_FAILED_ERROR',
+            orderId: params.orderId,
+            tokenRef,
+            message:
+              markFailureError instanceof Error
+                ? markFailureError.message
+                : String(markFailureError),
+            stack:
+              markFailureError instanceof Error
+                ? markFailureError.stack
+                : undefined,
+          });
+        }
+      }
+
       const googleError = error as {
         response?: {
           status?: number;
@@ -742,8 +824,10 @@ export class CourseCommerceService {
         tokenRef,
         transactionId: params.dto.transactionId?.trim(),
         errorName: error instanceof Error ? error.name : 'UnknownError',
-        message: error instanceof Error ? error.message : String(error),
+        errorCode: failure.code,
+        message: failure.message,
         status:
+          failure.status ??
           googleError.response?.status ??
           googleError.status ??
           googleError.statusCode,
@@ -1026,6 +1110,350 @@ export class CourseCommerceService {
       enrollmentId: enrollment.id,
       lastAccessedAt: enrollment.lastAccessedAt,
     };
+  }
+
+  private extractHttpFailure(error: unknown): {
+    code: string | null;
+    message: string;
+    status: number | null;
+  } {
+    let code: string | null = null;
+    let message = error instanceof Error ? error.message : String(error);
+    let status: number | null = null;
+
+    if (error instanceof HttpException) {
+      status = error.getStatus();
+
+      const response = error.getResponse();
+
+      if (typeof response === 'string') {
+        message = response;
+      } else if (typeof response === 'object' && response !== null) {
+        const body = response as Record<string, unknown>;
+
+        if (typeof body.code === 'string') {
+          code = body.code.trim() || null;
+        }
+
+        if (typeof body.message === 'string') {
+          message = body.message;
+        } else if (Array.isArray(body.message)) {
+          message = body.message.map((item) => String(item)).join(', ');
+        }
+      }
+    }
+
+    return {
+      code,
+      message,
+      status,
+    };
+  }
+
+  private isPermanentGooglePlayVerificationFailure(
+    code: string | null,
+  ): boolean {
+    return (
+      code === 'GOOGLE_PLAY_PURCHASE_LINKED_TO_ANOTHER_USER' ||
+      code === 'GOOGLE_PLAY_ACCOUNT_IDENTIFIER_MISSING' ||
+      code === 'GOOGLE_PLAY_PURCHASE_LINKED_TO_ANOTHER_COURSE' ||
+      code === 'GOOGLE_PLAY_PURCHASE_NOT_RESTORABLE'
+    );
+  }
+
+  private async restoreExistingGooglePlayCoursePurchase(params: {
+    currentOrder: CoursePurchaseOrder;
+    tokenHash: string;
+    providerReference: string;
+    environment: CourseProviderEnvironment;
+    payload: Record<string, unknown>;
+  }) {
+    const transactionRepository = this.dataSource.getRepository(
+      CourseOrderProviderTransaction,
+    );
+
+    const existingTransaction = await transactionRepository
+      .createQueryBuilder('providerTransaction')
+      .leftJoinAndSelect('providerTransaction.order', 'purchaseOrder')
+      .leftJoinAndSelect('purchaseOrder.providerSnapshot', 'providerSnapshot')
+      .where('providerTransaction.provider = :provider', {
+        provider: CoursePaymentProvider.GOOGLE_PLAY,
+      })
+      .andWhere('providerTransaction.orderId != :currentOrderId', {
+        currentOrderId: params.currentOrder.id,
+      })
+      .andWhere(
+        `(
+          providerTransaction.tokenHash = :tokenHash
+          OR providerTransaction.providerTransactionId = :providerReference
+        )`,
+        {
+          tokenHash: params.tokenHash,
+          providerReference: params.providerReference,
+        },
+      )
+      .getOne();
+
+    if (!existingTransaction) {
+      return null;
+    }
+
+    const existingOrder = existingTransaction.order;
+
+    if (!existingOrder || !existingOrder.providerSnapshot) {
+      throw new ConflictException({
+        code: 'GOOGLE_PLAY_PURCHASE_NOT_RESTORABLE',
+        message:
+          'The existing Google Play purchase is missing its course order records.',
+      });
+    }
+
+    if (existingOrder.userId !== params.currentOrder.userId) {
+      throw new ConflictException({
+        code: 'GOOGLE_PLAY_PURCHASE_LINKED_TO_ANOTHER_USER',
+        message:
+          'The Google Play purchase belongs to another application user.',
+      });
+    }
+
+    const sameCourse = existingOrder.courseId === params.currentOrder.courseId;
+    const expectedProductId = params.currentOrder.providerSnapshot.productId;
+    const sameProduct =
+      existingTransaction.productId === expectedProductId &&
+      existingOrder.providerSnapshot.productId === expectedProductId;
+
+    if (!sameCourse || !sameProduct) {
+      throw new ConflictException({
+        code: 'GOOGLE_PLAY_PURCHASE_LINKED_TO_ANOTHER_COURSE',
+        message:
+          'The Google Play purchase is already linked to another course.',
+      });
+    }
+
+    if (
+      existingTransaction.verificationStatus !==
+      CourseProviderVerificationStatus.VERIFIED
+    ) {
+      await this.markProviderTransactionVerified({
+        order: existingOrder,
+        tokenHash: params.tokenHash,
+        providerTransactionId: params.providerReference,
+        environment: params.environment,
+        payload: params.payload,
+      });
+    }
+
+    await this.reopenGooglePlayOrderForRestore(existingOrder.id);
+
+    const completion = await this.completePayment({
+      orderId: existingOrder.id,
+      provider: CoursePaymentProvider.GOOGLE_PLAY,
+      providerReference: params.providerReference,
+    });
+
+    await this.markSupersededGooglePlayOrder({
+      orderId: params.currentOrder.id,
+      restoredOrderId: existingOrder.id,
+    });
+
+    return completion;
+  }
+
+  private async reopenGooglePlayOrderForRestore(
+    orderId: string,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(CoursePurchaseOrder);
+
+      const order = await orderRepository
+        .createQueryBuilder('purchaseOrder')
+        .setLock('pessimistic_write')
+        .where('purchaseOrder.id = :orderId', { orderId })
+        .getOne();
+
+      if (!order) {
+        throw new NotFoundException('Purchase order not found.');
+      }
+
+      if (order.status === CoursePurchaseStatus.REFUNDED) {
+        throw new ConflictException({
+          code: 'GOOGLE_PLAY_PURCHASE_NOT_RESTORABLE',
+          message:
+            'The Google Play purchase was refunded and cannot be restored.',
+        });
+      }
+
+      if (
+        order.status === CoursePurchaseStatus.FAILED ||
+        order.status === CoursePurchaseStatus.CANCELLED
+      ) {
+        order.status = CoursePurchaseStatus.PROCESSING;
+        order.paidAt = null;
+        order.refundedAt = null;
+        await orderRepository.save(order);
+      }
+    });
+  }
+
+  private async markSupersededGooglePlayOrder(params: {
+    orderId: string;
+    restoredOrderId: string;
+  }): Promise<void> {
+    if (params.orderId === params.restoredOrderId) {
+      return;
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(CoursePurchaseOrder);
+      const transactionRepository = manager.getRepository(
+        CourseOrderProviderTransaction,
+      );
+
+      const order = await orderRepository
+        .createQueryBuilder('purchaseOrder')
+        .setLock('pessimistic_write')
+        .where('purchaseOrder.id = :orderId', {
+          orderId: params.orderId,
+        })
+        .getOne();
+
+      if (
+        !order ||
+        order.status === CoursePurchaseStatus.PAID ||
+        order.status === CoursePurchaseStatus.REFUNDED
+      ) {
+        return;
+      }
+
+      order.status = CoursePurchaseStatus.CANCELLED;
+      order.paidAt = null;
+      await orderRepository.save(order);
+
+      const providerTransaction = await transactionRepository.findOne({
+        where: {
+          orderId: order.id,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (
+        providerTransaction &&
+        providerTransaction.verificationStatus !==
+          CourseProviderVerificationStatus.VERIFIED
+      ) {
+        providerTransaction.verificationStatus =
+          CourseProviderVerificationStatus.FAILED;
+        providerTransaction.verifiedAt = null;
+        providerTransaction.verificationPayload = {
+          source: 'google_play_existing_purchase_restore',
+          restoredOrderId: params.restoredOrderId,
+        };
+
+        await transactionRepository.save(providerTransaction);
+      }
+    });
+  }
+
+  private async markGooglePlayOrderFailed(params: {
+    orderId: string;
+    tokenRef: string;
+    failureCode: string;
+    failureMessage: string;
+  }): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(CoursePurchaseOrder);
+      const transactionRepository = manager.getRepository(
+        CourseOrderProviderTransaction,
+      );
+      const attemptRepository = manager.getRepository(CoursePaymentAttempt);
+
+      const order = await orderRepository
+        .createQueryBuilder('purchaseOrder')
+        .setLock('pessimistic_write')
+        .where('purchaseOrder.id = :orderId', {
+          orderId: params.orderId,
+        })
+        .getOne();
+
+      if (
+        !order ||
+        order.status === CoursePurchaseStatus.PAID ||
+        order.status === CoursePurchaseStatus.REFUNDED ||
+        order.status === CoursePurchaseStatus.CANCELLED
+      ) {
+        return;
+      }
+
+      order.status = CoursePurchaseStatus.FAILED;
+      order.paidAt = null;
+      await orderRepository.save(order);
+
+      const providerTransaction = await transactionRepository.findOne({
+        where: {
+          orderId: order.id,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      if (
+        providerTransaction &&
+        providerTransaction.verificationStatus !==
+          CourseProviderVerificationStatus.VERIFIED
+      ) {
+        providerTransaction.verificationStatus =
+          CourseProviderVerificationStatus.FAILED;
+        providerTransaction.verifiedAt = null;
+        providerTransaction.verificationPayload = {
+          source: 'google_play_verification_failure',
+          failureCode: params.failureCode,
+          failureMessage: params.failureMessage.slice(0, 500),
+          tokenRef: params.tokenRef,
+        };
+
+        await transactionRepository.save(providerTransaction);
+      }
+
+      const providerReference =
+        `google-play-failure:${order.id}:` +
+        `${params.failureCode}:${params.tokenRef}`;
+
+      let attempt = await attemptRepository.findOne({
+        where: {
+          paymentProvider: CoursePaymentProvider.GOOGLE_PLAY,
+          providerReference,
+        },
+        lock: {
+          mode: 'pessimistic_write',
+        },
+      });
+
+      const now = new Date();
+
+      if (!attempt) {
+        attempt = attemptRepository.create({
+          orderId: order.id,
+          paymentProvider: CoursePaymentProvider.GOOGLE_PLAY,
+          status: CoursePaymentAttemptStatus.FAILED,
+          providerReference,
+          amount: order.paymentAmount,
+          currency: order.paymentCurrency,
+          failureCode: params.failureCode.slice(0, 80),
+          failureMessage: params.failureMessage.slice(0, 500),
+          completedAt: now,
+        });
+      } else {
+        attempt.status = CoursePaymentAttemptStatus.FAILED;
+        attempt.failureCode = params.failureCode.slice(0, 80);
+        attempt.failureMessage = params.failureMessage.slice(0, 500);
+        attempt.completedAt = now;
+      }
+
+      await attemptRepository.save(attempt);
+    });
   }
 
   private async markProviderTransactionVerified(params: {
