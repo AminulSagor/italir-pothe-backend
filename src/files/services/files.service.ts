@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +21,7 @@ import {
   FilePurpose,
   FileUploadStatus,
   FileVisibility,
+  PdfProcessingStatus,
 } from '../entities/file.entity';
 import {
   MediaAsset,
@@ -45,9 +47,11 @@ export interface FileRequestUser {
 }
 
 import { posix as pathPosix } from 'node:path';
+import { PdfProcessingService } from './pdf-processing.service';
 
 @Injectable()
 export class FilesService {
+  private readonly logger = new Logger(FilesService.name);
   private readonly imageMaxSize: number;
   private readonly audioMaxSize: number;
   private readonly pdfMaxSize: number;
@@ -75,6 +79,7 @@ export class FilesService {
     private readonly configService: ConfigService,
     private readonly s3Service: S3Service,
     private readonly cloudFrontSignerService: CloudFrontSignerService,
+    private readonly pdfProcessingService: PdfProcessingService,
   ) {
     this.imageMaxSize = this.getConfiguredPositiveInteger(
       'FILE_MAX_IMAGE_SIZE_BYTES',
@@ -194,7 +199,7 @@ export class FilesService {
       expectedMimeType: normalizedMimeType,
     });
 
-    return this.persistUploadedFile({
+    const persisted = await this.persistUploadedFile({
       storageKey: dto.storageKey,
       originalName: dto.originalName,
       mimeType: normalizedMimeType,
@@ -207,6 +212,16 @@ export class FilesService {
       thumbnailFileId: dto.thumbnailFileId,
       currentUser,
     });
+
+    const finalizedFile = await this.finalizePdfFile(persisted.file, {
+      failUploadOnError: true,
+    });
+
+    return {
+      ...persisted,
+      file: finalizedFile,
+      publicUrl: this.s3Service.createPublicUrl(finalizedFile.storageKey),
+    };
   }
 
   /**
@@ -541,7 +556,15 @@ export class FilesService {
   }
 
   async createSignedReadUrl(fileId: string) {
-    const file = await this.findActiveFileById(fileId);
+    const activeFile = await this.findActiveFileById(fileId);
+
+    /*
+     * Process legacy PDFs lazily. A processing failure here must not
+     * remove the existing ability to read an already uploaded file.
+     */
+    const file = await this.finalizePdfFile(activeFile, {
+      failUploadOnError: false,
+    });
 
     const signedReadUrl = await this.s3Service.createSignedReadUrl({
       storageKey: file.storageKey,
@@ -553,6 +576,7 @@ export class FilesService {
     return {
       signedReadUrl,
       expiresInSeconds: this.s3Service.getReadUrlExpiresInSeconds(),
+      pageCount: file.pageCount,
       file: {
         id: file.id,
         originalName: file.originalName,
@@ -561,6 +585,10 @@ export class FilesService {
         filePurpose: file.filePurpose,
         visibility: file.visibility,
         uploadStatus: file.uploadStatus,
+        pageCount: file.pageCount,
+        pdfProcessingStatus: file.pdfProcessingStatus,
+        pdfLinearized: file.pdfLinearized,
+        pdfProcessedAt: file.pdfProcessedAt,
         publicUrl: this.s3Service.createPublicUrl(file.storageKey),
       },
     };
@@ -644,12 +672,24 @@ export class FilesService {
       visibility: FileVisibility.PRIVATE,
       uploadStatus: FileUploadStatus.UPLOADED,
       uploadedAt: new Date(),
+      pageCount: null,
+      pdfProcessingStatus:
+        normalizedMimeType === 'application/pdf'
+          ? PdfProcessingStatus.PENDING
+          : PdfProcessingStatus.NOT_REQUIRED,
+      pdfLinearized: false,
+      pdfProcessingError: null,
+      pdfProcessedAt: null,
     });
 
     const savedFile = await this.fileRepository.save(file);
 
+    const finalizedFile = await this.finalizePdfFile(savedFile, {
+      failUploadOnError: true,
+    });
+
     return {
-      file: savedFile,
+      file: finalizedFile,
       publicUrl: this.s3Service.createPublicUrl(storageKey),
     };
   }
@@ -733,6 +773,14 @@ export class FilesService {
         visibility: params.visibility,
         uploadStatus: FileUploadStatus.UPLOADED,
         uploadedAt: new Date(),
+        pageCount: null,
+        pdfProcessingStatus:
+          normalizedMimeType === 'application/pdf'
+            ? PdfProcessingStatus.PENDING
+            : PdfProcessingStatus.NOT_REQUIRED,
+        pdfLinearized: false,
+        pdfProcessingError: null,
+        pdfProcessedAt: null,
       });
 
       const savedFile = await fileRepository.save(file);
@@ -814,6 +862,111 @@ export class FilesService {
 
       mediaAsset: result.mediaAsset,
     };
+  }
+
+  private async finalizePdfFile(
+    file: File,
+    options: {
+      failUploadOnError: boolean;
+    },
+  ): Promise<File> {
+    const normalizedMimeType = file.mimeType.trim().toLowerCase();
+
+    if (normalizedMimeType !== 'application/pdf') {
+      return file;
+    }
+
+    /*
+     * READY means linearization succeeded. SKIPPED means it was disabled.
+     * FAILED with a page count means metadata succeeded but optional
+     * linearization failed, so the original PDF remains usable.
+     */
+    if (
+      file.pdfProcessingStatus === PdfProcessingStatus.READY ||
+      file.pdfProcessingStatus === PdfProcessingStatus.SKIPPED ||
+      (file.pdfProcessingStatus === PdfProcessingStatus.FAILED &&
+        file.pageCount !== null)
+    ) {
+      return file;
+    }
+
+    /*
+     * Avoid processing the same PDF twice when requests arrive together.
+     * A processing state older than five minutes is considered abandoned.
+     */
+    const processingIsFresh =
+      file.pdfProcessingStatus === PdfProcessingStatus.PROCESSING &&
+      Date.now() - file.updatedAt.getTime() < 5 * 60 * 1000;
+
+    if (processingIsFresh) {
+      return file;
+    }
+
+    file.pdfProcessingStatus = PdfProcessingStatus.PROCESSING;
+    file.pdfProcessingError = null;
+
+    await this.fileRepository.save(file);
+
+    try {
+      const result = await this.pdfProcessingService.processUploadedPdf(
+        file.storageKey,
+      );
+
+      file.sizeBytes = result.sizeBytes;
+      file.pageCount = result.pageCount;
+      file.pdfProcessingStatus = result.status;
+      file.pdfLinearized = result.linearized;
+      file.pdfProcessingError = result.error;
+      file.pdfProcessedAt = result.processedAt;
+
+      return this.fileRepository.save(file);
+    } catch (error) {
+      file.pdfProcessingStatus = PdfProcessingStatus.FAILED;
+      file.pdfLinearized = false;
+      file.pdfProcessingError = this.getPdfProcessingErrorMessage(error);
+      file.pdfProcessedAt = new Date();
+
+      if (options.failUploadOnError) {
+        file.uploadStatus = FileUploadStatus.FAILED;
+      }
+
+      await this.fileRepository.save(file).catch(() => undefined);
+
+      if (options.failUploadOnError) {
+        /*
+         * Keep the existing record for diagnostics, but do not leave a
+         * failed newly uploaded PDF as an active media asset.
+         */
+        await this.mediaAssetRepository
+          .update(
+            {
+              fileId: file.id,
+            },
+            {
+              status: MediaAssetStatus.ARCHIVED,
+            },
+          )
+          .catch(() => undefined);
+
+        throw error;
+      }
+
+      /*
+       * Preserve legacy behavior: an existing PDF still receives its signed
+       * read URL even when lazy metadata processing fails.
+       */
+      this.logger.warn(
+        `PDF processing failed for file ${file.id}: ${file.pdfProcessingError}`,
+      );
+
+      return file;
+    }
+  }
+
+  private getPdfProcessingErrorMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return message.slice(0, 2000);
   }
 
   private async getMultipartSession(

@@ -45,8 +45,11 @@ export class SignupDto {
 
   @IsNotEmpty()
   @IsString()
-  @Length(6, 6, {
-    message: 'Password must be exactly 6 characters long',
+  @MinLength(6, {
+    message: 'Password must be at least 6 characters long',
+  })
+  @MaxLength(128, {
+    message: 'Password must not exceed 128 characters',
   })
   password: string;
 }
@@ -164,8 +167,11 @@ export class ResetPasswordDto {
 
   @IsNotEmpty()
   @IsString()
-  @Length(6, 6, {
-    message: 'Password must be exactly 6 characters long',
+  @MinLength(6, {
+    message: 'Password must be at least 6 characters long',
+  })
+  @MaxLength(128, {
+    message: 'Password must not exceed 128 characters',
   })
   newPassword: string;
 }

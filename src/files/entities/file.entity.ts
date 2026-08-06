@@ -48,6 +48,15 @@ export enum FileUploadStatus {
   ARCHIVED = 'archived',
 }
 
+export enum PdfProcessingStatus {
+  NOT_REQUIRED = 'not_required',
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  READY = 'ready',
+  FAILED = 'failed',
+  SKIPPED = 'skipped',
+}
+
 @Entity('files')
 export class File {
   @PrimaryGeneratedColumn('uuid')
@@ -96,6 +105,25 @@ export class File {
 
   @Column({ type: 'timestamptz', nullable: true })
   uploadedAt: Date | null;
+
+  @Column({ type: 'integer', nullable: true })
+  pageCount: number | null;
+
+  @Column({
+    type: 'varchar',
+    length: 30,
+    default: PdfProcessingStatus.NOT_REQUIRED,
+  })
+  pdfProcessingStatus: PdfProcessingStatus;
+
+  @Column({ type: 'boolean', default: false })
+  pdfLinearized: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  pdfProcessingError: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  pdfProcessedAt: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

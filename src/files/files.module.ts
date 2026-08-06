@@ -9,6 +9,7 @@ import { FilesController } from './files.controller';
 import { MultipartUploadSession } from './entities/multipart-upload-session.entity';
 import { VideoTranscodeJob } from './entities/video-transcode-job.entity';
 import { CloudFrontSignerService } from './services/cloudfront-signer.service';
+import { PdfProcessingService } from './services/pdf-processing.service';
 
 @Module({
   imports: [
@@ -20,7 +21,12 @@ import { CloudFrontSignerService } from './services/cloudfront-signer.service';
     ]),
   ],
   controllers: [FilesController],
-  providers: [FilesService, S3Service, CloudFrontSignerService],
+  providers: [
+    FilesService,
+    S3Service,
+    CloudFrontSignerService,
+    PdfProcessingService,
+  ],
   exports: [FilesService, S3Service, CloudFrontSignerService],
 })
 export class FilesModule {}
