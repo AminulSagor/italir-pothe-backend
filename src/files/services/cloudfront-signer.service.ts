@@ -1,4 +1,4 @@
-import { getSignedCookies } from '@aws-sdk/cloudfront-signer';
+import { getSignedCookies, getSignedUrl } from '@aws-sdk/cloudfront-signer';
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { posix as pathPosix } from 'node:path';
@@ -6,15 +6,27 @@ import { posix as pathPosix } from 'node:path';
 @Injectable()
 export class CloudFrontSignerService {
   private readonly enabled: boolean;
+
+  private readonly signedUrlsEnabled: boolean;
+
   private readonly baseUrl?: string;
   private readonly keyPairId?: string;
   private readonly privateKey?: string;
+
   private readonly expiresInSeconds: number;
+
+  private readonly urlExpiresInSeconds: number;
 
   constructor(private readonly configService: ConfigService) {
     this.enabled =
       this.configService
         .get<string>('CLOUDFRONT_SIGNED_COOKIES_ENABLED')
+        ?.trim()
+        .toLowerCase() === 'true';
+
+    this.signedUrlsEnabled =
+      this.configService
+        .get<string>('CLOUDFRONT_SIGNED_URLS_ENABLED')
         ?.trim()
         .toLowerCase() === 'true';
 
@@ -39,10 +51,19 @@ export class CloudFrontSignerService {
       'CLOUDFRONT_COOKIE_EXPIRES_SECONDS',
       3600,
     );
+
+    this.urlExpiresInSeconds = this.getPositiveInteger(
+      'CLOUDFRONT_URL_EXPIRES_SECONDS',
+      3600,
+    );
   }
 
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  areSignedUrlsEnabled(): boolean {
+    return this.signedUrlsEnabled;
   }
 
   createSignedCookiesForHlsMaster(hlsMasterKey: string) {
@@ -50,14 +71,14 @@ export class CloudFrontSignerService {
       return null;
     }
 
-    if (!this.baseUrl || !this.keyPairId || !this.privateKey) {
-      throw new InternalServerErrorException(
-        'CloudFront signed-cookie configuration is incomplete.',
-      );
-    }
+    this.assertSigningConfiguration(
+      'CloudFront signed-cookie configuration is incomplete.',
+    );
 
     const hlsDirectory = pathPosix.dirname(hlsMasterKey);
+
     const resource = `${this.baseUrl}/${hlsDirectory}/*`;
+
     const expiresAt = new Date(Date.now() + this.expiresInSeconds * 1000);
 
     const policy = JSON.stringify({
@@ -74,8 +95,8 @@ export class CloudFrontSignerService {
     });
 
     const cookies = getSignedCookies({
-      keyPairId: this.keyPairId,
-      privateKey: this.privateKey,
+      keyPairId: this.keyPairId!,
+      privateKey: this.privateKey!,
       policy,
     });
 
@@ -85,6 +106,48 @@ export class CloudFrontSignerService {
       expiresInSeconds: this.expiresInSeconds,
       resource,
     };
+  }
+
+  createSignedUrlForFile(storageKey: string) {
+    if (!this.signedUrlsEnabled) {
+      return null;
+    }
+
+    this.assertSigningConfiguration(
+      'CloudFront signed-URL configuration is incomplete.',
+    );
+
+    const normalizedStorageKey = storageKey.trim().replace(/^\/+/, '');
+
+    if (!normalizedStorageKey) {
+      throw new InternalServerErrorException(
+        'CloudFront storage key cannot be empty.',
+      );
+    }
+
+    const resourceUrl = `${this.baseUrl}/${normalizedStorageKey}`;
+
+    const expiresAt = new Date(Date.now() + this.urlExpiresInSeconds * 1000);
+
+    const signedUrl = getSignedUrl({
+      url: resourceUrl,
+      keyPairId: this.keyPairId!,
+      privateKey: this.privateKey!,
+      dateLessThan: expiresAt.toISOString(),
+    });
+
+    return {
+      signedUrl,
+      expiresAt: expiresAt.toISOString(),
+      expiresInSeconds: this.urlExpiresInSeconds,
+      resource: resourceUrl,
+    };
+  }
+
+  private assertSigningConfiguration(errorMessage: string): void {
+    if (!this.baseUrl || !this.keyPairId || !this.privateKey) {
+      throw new InternalServerErrorException(errorMessage);
+    }
   }
 
   private getPositiveInteger(

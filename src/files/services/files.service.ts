@@ -558,25 +558,36 @@ export class FilesService {
   async createSignedReadUrl(fileId: string) {
     const activeFile = await this.findActiveFileById(fileId);
 
-    /*
-     * Process legacy PDFs lazily. A processing failure here must not
-     * remove the existing ability to read an already uploaded file.
-     */
     const file = await this.finalizePdfFile(activeFile, {
       failUploadOnError: false,
     });
 
-    const signedReadUrl = await this.s3Service.createSignedReadUrl({
-      storageKey: file.storageKey,
-      mimeType: file.mimeType,
-      originalName: file.originalName,
-      dispositionType: 'inline',
-    });
+    const shouldUseCloudFrontForPdf =
+      file.mimeType.trim().toLowerCase() === 'application/pdf' &&
+      String(file.filePurpose).endsWith('_pdf');
+
+    const cloudFrontAccess = shouldUseCloudFrontForPdf
+      ? this.cloudFrontSignerService.createSignedUrlForFile(file.storageKey)
+      : null;
+
+    const signedReadUrl =
+      cloudFrontAccess?.signedUrl ??
+      (await this.s3Service.createSignedReadUrl({
+        storageKey: file.storageKey,
+        mimeType: file.mimeType,
+        originalName: file.originalName,
+        dispositionType: 'inline',
+      }));
+
+    const expiresInSeconds =
+      cloudFrontAccess?.expiresInSeconds ??
+      this.s3Service.getReadUrlExpiresInSeconds();
 
     return {
       signedReadUrl,
-      expiresInSeconds: this.s3Service.getReadUrlExpiresInSeconds(),
+      expiresInSeconds,
       pageCount: file.pageCount,
+
       file: {
         id: file.id,
         originalName: file.originalName,
@@ -589,6 +600,10 @@ export class FilesService {
         pdfProcessingStatus: file.pdfProcessingStatus,
         pdfLinearized: file.pdfLinearized,
         pdfProcessedAt: file.pdfProcessedAt,
+
+        /*
+         * Keep this unchanged for compatibility.
+         */
         publicUrl: this.s3Service.createPublicUrl(file.storageKey),
       },
     };
