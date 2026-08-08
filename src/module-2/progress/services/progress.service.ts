@@ -427,14 +427,23 @@ export class ProgressService {
   }
 
   private async refreshCourseProgress(userId: string, courseId: string) {
-    const lessonProgressList = await this.lessonProgressRepository.find({
-      where: { userId, courseId },
+    const totalLessons = await this.lessonRepository.count({
+      where: {
+        courseId,
+        status: LessonStatus.PUBLISHED,
+      },
     });
 
-    const totalLessons = lessonProgressList.length;
-    const completedLessons = lessonProgressList.filter(
-      (item) => item.isCompleted,
-    ).length;
+    const completedLessons = await this.lessonProgressRepository
+      .createQueryBuilder('progress')
+      .innerJoin(Lesson, 'lesson', 'lesson.id = progress.lessonId')
+      .where('progress.userId = :userId', { userId })
+      .andWhere('progress.courseId = :courseId', { courseId })
+      .andWhere('progress.isCompleted = true')
+      .andWhere('lesson.status = :status', {
+        status: LessonStatus.PUBLISHED,
+      })
+      .getCount();
 
     const completionPercent =
       totalLessons === 0
@@ -442,7 +451,10 @@ export class ProgressService {
         : Math.round((completedLessons / totalLessons) * 100);
 
     let courseProgress = await this.courseProgressRepository.findOne({
-      where: { userId, courseId },
+      where: {
+        userId,
+        courseId,
+      },
     });
 
     if (!courseProgress) {
