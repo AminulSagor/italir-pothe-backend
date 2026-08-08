@@ -333,21 +333,7 @@ export class ProgressService {
   }
 
   async getCourseProgress(userId: string, courseId: string) {
-    const progress = await this.courseProgressRepository.findOne({
-      where: { userId, courseId },
-    });
-
-    if (!progress) {
-      return {
-        userId,
-        courseId,
-        completedLessons: 0,
-        totalLessons: 0,
-        completionPercent: 0,
-      };
-    }
-
-    return progress;
+    return this.refreshCourseProgress(userId, courseId);
   }
 
   async getCourseCompletionPercent(userId: string, courseId: string) {
