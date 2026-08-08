@@ -195,11 +195,15 @@ export class ProgressService {
     return this.getCourseProgress(params.user.id, params.courseId);
   }
 
-
   async getCurrentChapter(userId: string) {
     const activeProgress = await this.lessonProgressRepository.findOne({
-      where: { userId, isCompleted: false },
-      order: { updatedAt: 'DESC' },
+      where: {
+        userId,
+        isCompleted: false,
+      },
+      order: {
+        updatedAt: 'DESC',
+      },
     });
 
     let lesson: Lesson | null = null;
@@ -211,8 +215,13 @@ export class ProgressService {
 
     if (!lesson) {
       const latestCourse = await this.courseProgressRepository.findOne({
-        where: { userId },
-        order: { lastActivityAt: 'DESC', updatedAt: 'DESC' },
+        where: {
+          userId,
+        },
+        order: {
+          lastActivityAt: 'DESC',
+          updatedAt: 'DESC',
+        },
       });
 
       if (latestCourse?.courseId) {
@@ -224,7 +233,10 @@ export class ProgressService {
 
       if (lesson) {
         progress = await this.lessonProgressRepository.findOne({
-          where: { userId, lessonId: lesson.id },
+          where: {
+            userId,
+            lessonId: lesson.id,
+          },
         });
       }
     }
@@ -233,22 +245,70 @@ export class ProgressService {
       return null;
     }
 
-    const progressPercent = progress?.isCompleted
-      ? 100
-      : Math.max(
-          progress?.videoWatchPercent ?? 0,
-          progress?.isTheoryRead ? 50 : 0,
-        );
+    /*
+     * Get the real number of published lessons
+     * inside the current chapter.
+     */
+    const totalLessons = await this.lessonRepository
+      .createQueryBuilder('chapterLesson')
+      .where('chapterLesson.chapterId = :chapterId', {
+        chapterId: lesson.chapterId,
+      })
+      .andWhere('chapterLesson.status = :lessonStatus', {
+        lessonStatus: LessonStatus.PUBLISHED,
+      })
+      .getCount();
+
+    /*
+     * Count only completed progress records
+     * belonging to published lessons in this
+     * exact chapter.
+     */
+    const completedLessons = await this.lessonProgressRepository
+      .createQueryBuilder('progress')
+      .innerJoin(
+        Lesson,
+        'chapterLesson',
+        'chapterLesson.id = progress.lessonId',
+      )
+      .where('progress.userId = :userId', {
+        userId,
+      })
+      .andWhere('progress.isCompleted = true')
+      .andWhere('chapterLesson.chapterId = :chapterId', {
+        chapterId: lesson.chapterId,
+      })
+      .andWhere('chapterLesson.status = :lessonStatus', {
+        lessonStatus: LessonStatus.PUBLISHED,
+      })
+      .getCount();
+
+    const progressPercent =
+      totalLessons > 0
+        ? Math.round((completedLessons / totalLessons) * 100)
+        : 0;
 
     return {
       lessonId: lesson.id,
       courseId: lesson.courseId,
       chapterId: lesson.chapterId,
+
       courseTitle: lesson.course?.title ?? '',
+
       chapterTitle: lesson.chapter?.title ?? '',
+
       lessonTitle: lesson.title,
+
       subtitle: lesson.course?.subtitle ?? '',
+
       progressPercent,
+
+      /*
+       * Optional but useful for debugging
+       * and future UI.
+       */
+      completedLessons,
+      totalLessons,
     };
   }
 
