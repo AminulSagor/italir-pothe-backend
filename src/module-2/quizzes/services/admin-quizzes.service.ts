@@ -89,6 +89,9 @@ export class AdminQuizzesService {
       description: dto.description ?? null,
       totalQuestions: 0,
       sortOrder: dto.sortOrder ?? 0,
+      unlockRequirementEnabled: dto.unlockRequirementEnabled ?? false,
+
+      unlockVideoWatchPercent: dto.unlockVideoWatchPercent ?? 80,
       status: dto.status ?? QuizStatus.DRAFT,
     });
 
@@ -152,6 +155,14 @@ export class AdminQuizzesService {
 
     if (dto.sortOrder !== undefined) {
       quiz.sortOrder = dto.sortOrder;
+    }
+
+    if (dto.unlockRequirementEnabled !== undefined) {
+      quiz.unlockRequirementEnabled = dto.unlockRequirementEnabled;
+    }
+
+    if (dto.unlockVideoWatchPercent !== undefined) {
+      quiz.unlockVideoWatchPercent = dto.unlockVideoWatchPercent;
     }
 
     if (dto.status !== undefined) {

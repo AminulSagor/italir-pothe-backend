@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -32,6 +33,16 @@ export class CreateQuizDto {
   sortOrder?: number;
 
   @IsOptional()
+  @IsBoolean()
+  unlockRequirementEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  unlockVideoWatchPercent?: number;
+
+  @IsOptional()
   @IsEnum(QuizStatus)
   status?: QuizStatus;
 }
@@ -50,6 +61,16 @@ export class UpdateQuizDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  unlockRequirementEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  unlockVideoWatchPercent?: number;
 
   @IsOptional()
   @IsEnum(QuizStatus)

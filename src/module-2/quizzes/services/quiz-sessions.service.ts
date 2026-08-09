@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -49,6 +50,7 @@ import {
 import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 import { LeaderboardXpService } from 'src/module-2/leaderboard/services/leaderboard-xp.service';
+import { UserLessonProgress } from 'src/module-2/progress/entities/user-lesson-progress.entity';
 
 interface QuizRequestUser {
   id: string;
@@ -64,6 +66,9 @@ export class QuizSessionsService {
   constructor(
     @InjectRepository(Quiz)
     private readonly quizRepository: Repository<Quiz>,
+
+    @InjectRepository(UserLessonProgress)
+    private readonly lessonProgressRepository: Repository<UserLessonProgress>,
 
     @InjectRepository(QuizQuestion)
     private readonly questionRepository: Repository<QuizQuestion>,
@@ -96,6 +101,9 @@ export class QuizSessionsService {
         lessonId,
         status: QuizStatus.PUBLISHED,
       },
+      relations: {
+        lesson: true,
+      },
       order: {
         sortOrder: 'ASC',
         createdAt: 'DESC',
@@ -104,6 +112,27 @@ export class QuizSessionsService {
 
     if (!quiz) {
       throw new NotFoundException('Published quiz not found for this lesson');
+    }
+
+    const hasVideo = Boolean(quiz.lesson?.videoFileId);
+
+    if (quiz.unlockRequirementEnabled && hasVideo) {
+      const progress = await this.lessonProgressRepository.findOne({
+        where: {
+          userId: user.id,
+          lessonId,
+        },
+      });
+
+      const watchedPercent = progress?.videoWatchPercent ?? 0;
+
+      if (watchedPercent < quiz.unlockVideoWatchPercent) {
+        throw new ForbiddenException(
+          `You need to watch ${
+            quiz.unlockVideoWatchPercent
+          }% of the lesson video before starting the quiz.`,
+        );
+      }
     }
 
     const questions = await this.findPublishedQuizQuestions(quiz);
@@ -137,6 +166,7 @@ export class QuizSessionsService {
         lessonId,
         status: QuizStatus.PUBLISHED,
       },
+
       order: {
         sortOrder: 'ASC',
         createdAt: 'DESC',
@@ -163,6 +193,9 @@ export class QuizSessionsService {
       title: quiz.title,
       description: quiz.description,
       totalQuestions: questions.length,
+      unlockRequirementEnabled: quiz.unlockRequirementEnabled,
+
+      unlockVideoWatchPercent: quiz.unlockVideoWatchPercent,
     };
   }
 

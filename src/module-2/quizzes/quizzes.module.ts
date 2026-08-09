@@ -19,12 +19,14 @@ import { QuizGradingService } from './services/quiz-grading.service';
 import { ScoringModule } from '../scoring/scoring.module';
 import { DailyChallengesModule } from '../daily-challenges/daily-challenges.module';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+import { UserLessonProgress } from '../progress/entities/user-lesson-progress.entity';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       Lesson,
       Quiz,
+      UserLessonProgress,
       QuizQuestion,
       QuizQuestionOption,
       QuizMatchingPair,

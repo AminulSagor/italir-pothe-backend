@@ -49,6 +49,18 @@ export class Quiz {
   sortOrder: number;
 
   @Column({
+    type: 'boolean',
+    default: false,
+  })
+  unlockRequirementEnabled: boolean;
+
+  @Column({
+    type: 'integer',
+    default: 80,
+  })
+  unlockVideoWatchPercent: number;
+
+  @Column({
     type: 'enum',
     enum: QuizStatus,
     default: QuizStatus.DRAFT,
