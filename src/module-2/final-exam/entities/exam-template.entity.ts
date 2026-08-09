@@ -46,6 +46,9 @@ export class ExamTemplate {
   @Column({ type: 'integer', default: 80 })
   unlockCompletionPercent: number;
 
+  @Column({ type: 'boolean', default: false })
+  unlockRequirementEnabled: boolean;
+
   @Column({ type: 'boolean', default: true })
   plagiarismMonitorEnabled: boolean;
 

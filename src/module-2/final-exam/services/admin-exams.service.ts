@@ -110,6 +110,7 @@ export class AdminExamsService {
       overallPassingPercent: dto.overallPassingPercent ?? 70,
       totalDurationMinutes: dto.totalDurationMinutes ?? 60,
       unlockCompletionPercent: dto.unlockCompletionPercent ?? 80,
+      unlockRequirementEnabled: dto.unlockRequirementEnabled ?? false,
       plagiarismMonitorEnabled: dto.plagiarismMonitorEnabled ?? true,
       copyPasteMonitorEnabled: dto.copyPasteMonitorEnabled ?? true,
       resultNotice:
@@ -287,6 +288,7 @@ export class AdminExamsService {
       overallPassingPercent: exam.overallPassingPercent,
       totalDurationMinutes: exam.totalDurationMinutes,
       unlockCompletionPercent: exam.unlockCompletionPercent,
+      unlockRequirementEnabled: exam.unlockRequirementEnabled,
       plagiarismMonitorEnabled: exam.plagiarismMonitorEnabled,
       copyPasteMonitorEnabled: exam.copyPasteMonitorEnabled,
       resultNotice: exam.resultNotice,
@@ -323,6 +325,10 @@ export class AdminExamsService {
 
     if (dto.unlockCompletionPercent !== undefined) {
       exam.unlockCompletionPercent = dto.unlockCompletionPercent;
+    }
+
+    if (dto.unlockRequirementEnabled !== undefined) {
+      exam.unlockRequirementEnabled = dto.unlockRequirementEnabled;
     }
 
     if (dto.plagiarismMonitorEnabled !== undefined) {
@@ -1409,9 +1415,9 @@ export class AdminExamsService {
 
     const checklist = {
       globalRulesConfigured: Boolean(
-        exam.unlockCompletionPercent &&
         exam.totalDurationMinutes &&
-        exam.overallPassingPercent,
+        exam.overallPassingPercent &&
+        (!exam.unlockRequirementEnabled || exam.unlockCompletionPercent),
       ),
       coreQuizReady: coreQuizCount === this.coreQuizTargetQuestions,
       listeningLabReady: listeningCount === this.listeningTargetQuestions,

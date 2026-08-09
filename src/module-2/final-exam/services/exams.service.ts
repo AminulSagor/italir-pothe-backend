@@ -129,8 +129,9 @@ export class ExamsService {
       course.id,
       userId,
     );
-
-    const isUnlocked = courseProgressPercent >= exam.unlockCompletionPercent;
+    const isUnlocked =
+      !exam.unlockRequirementEnabled ||
+      courseProgressPercent >= exam.unlockCompletionPercent;
 
     // Always use the newest attempt.
     const existingAttempt = await this.examAttemptRepository.findOne({
@@ -189,6 +190,7 @@ export class ExamsService {
         description: exam.description,
         totalDurationMinutes: exam.totalDurationMinutes,
         unlockCompletionPercent: exam.unlockCompletionPercent,
+        unlockRequirementEnabled: exam.unlockRequirementEnabled,
         resultNotice: exam.resultNotice,
         resultNoticeBn: exam.resultNoticeBn,
       },
@@ -216,9 +218,14 @@ export class ExamsService {
       userId,
     );
 
-    if (courseProgressPercent < exam.unlockCompletionPercent) {
+    if (
+      exam.unlockRequirementEnabled &&
+      courseProgressPercent < exam.unlockCompletionPercent
+    ) {
       throw new ForbiddenException(
-        `Final exam requires ${exam.unlockCompletionPercent}% course completion`,
+        `Final exam requires ${
+          exam.unlockCompletionPercent
+        }% course completion`,
       );
     }
 

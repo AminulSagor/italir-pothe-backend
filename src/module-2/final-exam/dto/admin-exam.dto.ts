@@ -90,6 +90,10 @@ export class CreateExamTemplateDto {
 
   @IsOptional()
   @IsBoolean()
+  unlockRequirementEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   plagiarismMonitorEnabled?: boolean;
 
   @IsOptional()
@@ -143,6 +147,10 @@ export class UpdateExamTemplateDto {
   @Min(1)
   @Max(100)
   unlockCompletionPercent?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  unlockRequirementEnabled?: boolean;
 
   @IsOptional()
   @IsBoolean()
