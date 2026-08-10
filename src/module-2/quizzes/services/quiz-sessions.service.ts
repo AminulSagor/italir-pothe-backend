@@ -1371,6 +1371,24 @@ export class QuizSessionsService {
   }
 
   private shuffleItems<T>(items: T[]): T[] {
-    return [...items].sort(() => Math.random() - 0.5);
+    if (items.length <= 1) return [...items];
+
+    const shuffled = [...items];
+
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    // Don't allow original order
+    const sameOrder = shuffled.every((item, index) => item === items[index]);
+
+    if (sameOrder) {
+      // Guaranteed small change
+      [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+    }
+
+    return shuffled;
   }
 }
