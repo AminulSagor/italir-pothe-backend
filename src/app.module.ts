@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-
+import { TtsModule } from './tts/tts.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -110,6 +110,7 @@ import { AccountDeletionModule } from './account-deletion/account-deletion.modul
     LeaderboardModule,
     PackageStoreModule,
     CallsModule,
+    TtsModule,
     UserSettingsModule,
     LearningActivityModule,
     RevenueAnalyticsModule,
