@@ -50,6 +50,7 @@ import { ModerationModule } from './moderation/moderation.module';
 import { UserReportsModule } from './user-reports/user-reports.module';
 import { AiContentReportsModule } from './ai-content-reports/ai-content-reports.module';
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
+import { ResumeStudioModule } from './resume-studio/resume-studio.module';
 
 @Module({
   imports: [
@@ -121,6 +122,7 @@ import { AccountDeletionModule } from './account-deletion/account-deletion.modul
     GooglePlayReconciliationModule,
     AppStoreNotificationsModule,
     HomeModule,
+    ResumeStudioModule,
   ],
   controllers: [AppController],
   providers: [AppService],

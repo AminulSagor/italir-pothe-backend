@@ -1,0 +1,33 @@
+export const RESUME_LIMITS = {
+  templateName: 120,
+  templateDescription: 600,
+  templateHtml: 220_000,
+  templateCss: 220_000,
+  fullName: 140,
+  jobTitle: 160,
+  email: 254,
+  phone: 40,
+  location: 180,
+  url: 500,
+  summary: 1_200,
+  shortText: 220,
+  description: 2_500,
+  bullet: 500,
+  bulletsPerItem: 8,
+  experienceItems: 15,
+  educationItems: 10,
+  skillItems: 40,
+  projectItems: 15,
+  languageItems: 10,
+  certificationItems: 15,
+  referenceItems: 8,
+  profilePhotoBytes: 5 * 1024 * 1024,
+  recommendedPages: 2,
+  hardMaxPages: 6,
+} as const;
+
+export const RESUME_ALLOWED_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
