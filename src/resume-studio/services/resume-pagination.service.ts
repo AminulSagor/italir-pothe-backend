@@ -17,41 +17,28 @@ export class ResumePaginationService {
   async apply(page: ResumePaginationPageLike): Promise<ResumePaginationResult> {
     return page.evaluate(() => {
       /*
-       * A4 is 297mm high.
-       *
-       * We measure 297mm inside Chromium instead of relying on a
-       * hard-coded px value because Chromium/Puppeteer scaling can vary.
+       * Chromium's CSS pixel size can vary with environment/device scale,
+       * so measure 297mm in the actual rendering context instead of relying
+       * only on a hard-coded A4 pixel height.
        */
       const probe = document.createElement('div');
-
       probe.style.position = 'absolute';
       probe.style.visibility = 'hidden';
       probe.style.pointerEvents = 'none';
       probe.style.width = '1px';
       probe.style.height = '297mm';
-
       document.body.appendChild(probe);
 
       const measuredPageHeight = probe.getBoundingClientRect().height;
-
       probe.remove();
 
       const pageHeight = measuredPageHeight > 0 ? measuredPageHeight : 1122.52;
 
       const EPSILON = 2;
       const PAGE_START_TOLERANCE = 5;
-
-      /*
-       * A section smaller than this percentage of one page is treated
-       * as a "small section".
-       *
-       * Example:
-       * Languages, Certifications, References.
-       *
-       * If such a section would split, move the entire section.
-       */
+      const OVERSIZED_ENTRY_TOLERANCE = 8;
       const SMALL_SECTION_MAX_RATIO = 0.48;
-
+      const HEADING_WITH_FIRST_ENTRY_MAX_RATIO = 0.5;
       const MAX_PASSES = 4;
 
       let movedSections = 0;
@@ -60,9 +47,14 @@ export class ResumePaginationService {
       let orphanHeadingsFixed = 0;
       let passes = 0;
 
-      const getRect = (element: Element) => {
-        const rect = element.getBoundingClientRect();
+      type Rect = {
+        top: number;
+        bottom: number;
+        height: number;
+      };
 
+      const getRect = (element: Element): Rect => {
+        const rect = element.getBoundingClientRect();
         const top = rect.top + window.scrollY;
         const bottom = rect.bottom + window.scrollY;
 
@@ -73,26 +65,22 @@ export class ResumePaginationService {
         };
       };
 
-      const isVisible = (element: Element) => {
+      const isVisible = (element: Element): boolean => {
         const style = window.getComputedStyle(element);
         const rect = element.getBoundingClientRect();
 
         return (
           style.display !== 'none' &&
           style.visibility !== 'hidden' &&
+          rect.width > 0 &&
           rect.height > 0
         );
       };
 
-      const pageIndex = (position: number) => {
-        return Math.floor(Math.max(0, position - EPSILON) / pageHeight);
-      };
+      const pageIndex = (position: number): number =>
+        Math.floor(Math.max(0, position - EPSILON) / pageHeight);
 
-      const crossesPage = (rect: {
-        top: number;
-        bottom: number;
-        height: number;
-      }) => {
+      const crossesPage = (rect: Rect): boolean => {
         if (rect.height <= 0) {
           return false;
         }
@@ -103,16 +91,20 @@ export class ResumePaginationService {
         );
       };
 
-      const isAtPageStart = (top: number) => {
+      const isAtPageStart = (top: number): boolean => {
         const offset = ((top % pageHeight) + pageHeight) % pageHeight;
-
         return offset <= PAGE_START_TOLERANCE;
+      };
+
+      const forceLayout = (): void => {
+        void document.documentElement.offsetHeight;
       };
 
       const forceBreakBefore = (
         element: Element,
         type: 'section' | 'entry',
-      ) => {
+        options?: { lockChildren?: boolean },
+      ): boolean => {
         if (element.classList.contains('resume-page-break-before')) {
           return false;
         }
@@ -120,21 +112,29 @@ export class ResumePaginationService {
         const htmlElement = element as HTMLElement;
 
         element.classList.add('resume-page-break-before');
+        element.setAttribute('data-resume-pagination-moved', type);
 
         htmlElement.style.setProperty('break-before', 'page', 'important');
-
         htmlElement.style.setProperty(
           'page-break-before',
           'always',
           'important',
         );
 
-        element.setAttribute('data-resume-pagination-moved', type);
+        /*
+         * When a whole small section is moved, it becomes the pagination
+         * unit. Its child entries must not receive additional page breaks.
+         * This prevents grid/list children (for example Languages) from
+         * creating extra blank pages.
+         */
+        if (options?.lockChildren) {
+          element.setAttribute('data-resume-pagination-lock-children', 'true');
+        }
 
         return true;
       };
 
-      const allowSplit = (element: Element) => {
+      const allowSplit = (element: Element): boolean => {
         if (element.classList.contains('resume-allow-split')) {
           return false;
         }
@@ -142,19 +142,54 @@ export class ResumePaginationService {
         const htmlElement = element as HTMLElement;
 
         element.classList.add('resume-allow-split');
+        element.setAttribute('data-resume-pagination-split', 'true');
 
         htmlElement.style.setProperty('break-inside', 'auto', 'important');
-
         htmlElement.style.setProperty('page-break-inside', 'auto', 'important');
-
-        element.setAttribute('data-resume-pagination-split', 'true');
 
         return true;
       };
 
+      const isInsideLockedSection = (element: Element): boolean => {
+        const section = element.closest(
+          '[data-resume-section][data-resume-pagination-lock-children="true"]',
+        );
+
+        return section !== null && section !== element;
+      };
+
       /*
-       * Remove pagination changes if apply() somehow runs twice
-       * against the same page.
+       * Page-break-before on children of CSS grid/multi-column layouts is not
+       * reliable across Chromium versions. In those layouts the parent should
+       * be treated as the pagination unit when possible.
+       */
+      const isInsideComplexFragmentationLayout = (
+        element: Element,
+      ): boolean => {
+        const section = element.closest('[data-resume-section]');
+        let current = element.parentElement;
+
+        while (current && current !== section) {
+          const style = window.getComputedStyle(current);
+
+          if (style.display === 'grid' || style.display === 'inline-grid') {
+            return true;
+          }
+
+          const columnCount = Number.parseInt(style.columnCount, 10);
+          if (Number.isFinite(columnCount) && columnCount > 1) {
+            return true;
+          }
+
+          current = current.parentElement;
+        }
+
+        return false;
+      };
+
+      /*
+       * Reset changes first so apply() is idempotent if it is ever called more
+       * than once against the same Chromium page.
        */
       document
         .querySelectorAll('[data-resume-pagination-moved]')
@@ -162,8 +197,8 @@ export class ResumePaginationService {
           const htmlElement = element as HTMLElement;
 
           element.classList.remove('resume-page-break-before');
-
           element.removeAttribute('data-resume-pagination-moved');
+          element.removeAttribute('data-resume-pagination-lock-children');
 
           htmlElement.style.removeProperty('break-before');
           htmlElement.style.removeProperty('page-break-before');
@@ -175,40 +210,37 @@ export class ResumePaginationService {
           const htmlElement = element as HTMLElement;
 
           element.classList.remove('resume-allow-split');
-
           element.removeAttribute('data-resume-pagination-split');
 
           htmlElement.style.removeProperty('break-inside');
           htmlElement.style.removeProperty('page-break-inside');
         });
 
+      forceLayout();
+
       for (let pass = 0; pass < MAX_PASSES; pass += 1) {
         passes = pass + 1;
-
         let changed = false;
 
         /*
-         * --------------------------------------------------
-         * 1. HANDLE OVERSIZED ENTRIES
-         * --------------------------------------------------
+         * 1. Oversized entries
          *
-         * If one job/education/project is itself taller than
-         * one A4 page, keeping it together is impossible.
-         *
-         * Allow Chromium to split only that entry.
+         * A block taller than a full A4 page cannot be kept together. Allow
+         * Chromium to fragment only that block instead of forcing impossible
+         * page-break rules.
          */
         const entries = Array.from(
           document.querySelectorAll('[data-resume-entry]'),
         );
 
         for (const entry of entries) {
-          if (!isVisible(entry)) {
+          if (!isVisible(entry) || isInsideLockedSection(entry)) {
             continue;
           }
 
           const rect = getRect(entry);
 
-          if (rect.height >= pageHeight - 8) {
+          if (rect.height >= pageHeight - OVERSIZED_ENTRY_TOLERANCE) {
             if (allowSplit(entry)) {
               splitEntries += 1;
               changed = true;
@@ -216,19 +248,16 @@ export class ResumePaginationService {
           }
         }
 
+        if (changed) {
+          forceLayout();
+        }
+
         /*
-         * --------------------------------------------------
-         * 2. SMALL SECTION PROTECTION
-         * --------------------------------------------------
+         * 2. Small-section protection
          *
-         * Example from your screenshot:
-         *
-         * LANGUAGES
-         * English / French on page 1
-         * German / Spanish on page 2
-         *
-         * If the entire Languages section fits on one page,
-         * move the complete section to page 2 instead.
+         * If an entire small section fits on one page but currently crosses a
+         * page boundary, move the whole section. Once moved, lock its children
+         * from receiving their own page breaks.
          */
         const sections = Array.from(
           document.querySelectorAll('[data-resume-section]'),
@@ -244,34 +273,34 @@ export class ResumePaginationService {
           }
 
           const rect = getRect(section);
-
           const smallEnough =
+            rect.height > 0 &&
             rect.height <= pageHeight * SMALL_SECTION_MAX_RATIO;
 
           if (smallEnough && crossesPage(rect) && !isAtPageStart(rect.top)) {
-            if (forceBreakBefore(section, 'section')) {
+            if (
+              forceBreakBefore(section, 'section', {
+                lockChildren: true,
+              })
+            ) {
               movedSections += 1;
               changed = true;
+              forceLayout();
             }
 
             continue;
           }
 
           /*
-           * ------------------------------------------------
-           * 3. ORPHAN HEADING PROTECTION
-           * ------------------------------------------------
+           * 3. Orphan-heading protection
            *
-           * Prevent:
+           * Keep a section title with at least its first entry when that pair
+           * is reasonably small enough to fit together on one page.
            *
-           * EXPERIENCE
-           * ---------------------
-           *             PAGE END
-           *
-           * Company starts next page.
+           * We intentionally do NOT lock all children here because a long
+           * section may still need entry-level pagination later.
            */
           const heading = section.querySelector('[data-resume-section-title]');
-
           const firstEntry = section.querySelector('[data-resume-entry]');
 
           if (
@@ -286,18 +315,16 @@ export class ResumePaginationService {
           const headingRect = getRect(heading);
           const firstEntryRect = getRect(firstEntry);
 
-          const headingAndFirstEntry = {
+          const headingAndFirstEntry: Rect = {
             top: headingRect.top,
             bottom: firstEntryRect.bottom,
             height: firstEntryRect.bottom - headingRect.top,
           };
 
-          /*
-           * Only move the section start when the heading +
-           * first entry can reasonably fit on one page.
-           */
           if (
-            headingAndFirstEntry.height < pageHeight * 0.5 &&
+            headingAndFirstEntry.height > 0 &&
+            headingAndFirstEntry.height <
+              pageHeight * HEADING_WITH_FIRST_ENTRY_MAX_RATIO &&
             crossesPage(headingAndFirstEntry) &&
             !isAtPageStart(headingAndFirstEntry.top)
           ) {
@@ -305,19 +332,19 @@ export class ResumePaginationService {
               movedSections += 1;
               orphanHeadingsFixed += 1;
               changed = true;
+              forceLayout();
             }
           }
         }
 
         /*
-         * --------------------------------------------------
-         * 4. ENTRY PROTECTION
-         * --------------------------------------------------
+         * 4. Entry protection
          *
-         * Normal entries should not be chopped in half.
-         *
-         * If one starts near the bottom of the page and would
-         * cross the boundary, push it to the next page.
+         * Move normal entries that would split across a boundary, except when:
+         * - the entry is allowed to split because it is taller than a page;
+         * - an ancestor section was already moved as one protected unit;
+         * - the entry lives in a CSS grid/multi-column layout where individual
+         *   break-before rules are unreliable and can create blank pages.
          */
         const currentEntries = Array.from(
           document.querySelectorAll('[data-resume-entry]'),
@@ -336,28 +363,28 @@ export class ResumePaginationService {
             continue;
           }
 
+          if (isInsideLockedSection(entry)) {
+            continue;
+          }
+
+          if (isInsideComplexFragmentationLayout(entry)) {
+            continue;
+          }
+
           const rect = getRect(entry);
 
           if (crossesPage(rect) && !isAtPageStart(rect.top)) {
             if (forceBreakBefore(entry, 'entry')) {
               movedEntries += 1;
               changed = true;
+              forceLayout();
             }
           }
         }
 
-        /*
-         * Layout is stable.
-         */
         if (!changed) {
           break;
         }
-
-        /*
-         * Force Chromium to synchronously recalculate layout
-         * before the next pass.
-         */
-        void document.body.offsetHeight;
       }
 
       return {
