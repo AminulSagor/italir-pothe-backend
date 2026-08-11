@@ -18,6 +18,7 @@ import { ResumeRendererService } from './services/resume-renderer.service';
 import { ResumeSchemaService } from './services/resume-schema.service';
 import { ResumeStorageService } from './services/resume-storage.service';
 import { ResumeTemplateEngineService } from './services/resume-template-engine.service';
+import { ResumeTemplateFieldInferenceService } from './services/resume-template-field-inference.service';
 import { ResumeTemplateSecurityService } from './services/resume-template-security.service';
 import { ResumeTemplateService } from './services/resume-template.service';
 
@@ -42,6 +43,7 @@ import { ResumeTemplateService } from './services/resume-template.service';
     ResumeSchemaService,
     ResumeTemplateSecurityService,
     ResumeTemplateEngineService,
+    ResumeTemplateFieldInferenceService,
     ResumeRendererService,
     ResumeStorageService,
     ResumeAssetService,

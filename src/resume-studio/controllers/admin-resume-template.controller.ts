@@ -20,6 +20,7 @@ import type { AuthenticatedRequest } from '../../common/interfaces/authenticated
 import { UserRole } from '../../users/entities/user.entity';
 import {
   CreateResumeTemplateDto,
+  InferResumeTemplateFieldSchemaDto,
   PreviewResumeTemplateDto,
   ResumeTemplateAdminQueryDto,
   SaveResumeTemplateDraftDto,
@@ -36,6 +37,11 @@ export class AdminResumeTemplateController {
   @Get('template-contract')
   contract() {
     return this.templateService.getTemplateContract();
+  }
+
+  @Post('templates/infer-field-schema')
+  inferFieldSchema(@Body() dto: InferResumeTemplateFieldSchemaDto) {
+    return this.templateService.inferFieldSchema(dto);
   }
 
   @Post('templates/preview')

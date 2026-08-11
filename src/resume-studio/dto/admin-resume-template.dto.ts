@@ -103,6 +103,16 @@ export class PreviewResumeTemplateDto extends SaveResumeTemplateDraftDto {
   sampleData?: Record<string, unknown>;
 }
 
+
+export class InferResumeTemplateFieldSchemaDto {
+  @IsString()
+  html: string;
+
+  @IsOptional()
+  @IsObject()
+  currentFieldSchema?: Record<string, unknown>;
+}
+
 export class ResumeTemplateAdminQueryDto {
   @IsOptional()
   @IsString()

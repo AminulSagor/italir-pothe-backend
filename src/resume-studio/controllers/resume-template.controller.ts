@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ResumeTemplateQueryDto } from '../dto/resume-document.dto';
 import { ResumeTemplateService } from '../services/resume-template.service';
@@ -17,4 +17,10 @@ export class ResumeTemplateController {
   categories() {
     return this.templateService.categories();
   }
+
+  @Get(':id/preview')
+  preview(@Param('id') id: string) {
+    return this.templateService.getPublishedPreview(id);
+  }
+
 }
