@@ -40,7 +40,9 @@ COPY package*.json ./
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci
 
 # Install Chrome + required Linux dependencies
-RUN npx puppeteer browsers install chrome --install-deps
+RUN apt-get update \
+    && npx puppeteer browsers install chrome --install-deps \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy project
 COPY . .
