@@ -53,6 +53,10 @@ export class CreateResumeTemplateDto {
 
   @IsObject()
   rendererConfig: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  sampleData?: Record<string, unknown>;
 }
 
 export class UpdateResumeTemplateMetadataDto {
@@ -95,13 +99,13 @@ export class SaveResumeTemplateDraftDto {
 
   @IsObject()
   rendererConfig: Record<string, unknown>;
-}
 
-export class PreviewResumeTemplateDto extends SaveResumeTemplateDraftDto {
   @IsOptional()
   @IsObject()
   sampleData?: Record<string, unknown>;
 }
+
+export class PreviewResumeTemplateDto extends SaveResumeTemplateDraftDto {}
 
 
 export class InferResumeTemplateFieldSchemaDto {

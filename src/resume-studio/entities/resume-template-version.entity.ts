@@ -48,6 +48,9 @@ export class ResumeTemplateVersion {
   @Column({ type: 'jsonb' })
   rendererConfig: ResumeRendererConfig;
 
+  @Column({ type: 'jsonb', nullable: true })
+  sampleData: Record<string, unknown> | null;
+
   @Index()
   @Column({ type: 'varchar', length: 64 })
   checksum: string;
