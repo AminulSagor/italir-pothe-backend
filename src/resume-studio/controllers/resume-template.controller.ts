@@ -18,6 +18,16 @@ export class ResumeTemplateController {
     return this.templateService.categories();
   }
 
+  @Get('builder-contract')
+  builderContract() {
+    return this.templateService.getBuilderContract();
+  }
+
+  @Get('bootstrap')
+  bootstrap(@Query() query: ResumeTemplateQueryDto) {
+    return this.templateService.getMobileBootstrap(query);
+  }
+
   @Get(':id/preview')
   preview(@Param('id') id: string) {
     return this.templateService.getPublishedPreview(id);

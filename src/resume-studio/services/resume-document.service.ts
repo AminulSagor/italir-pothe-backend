@@ -185,7 +185,6 @@ export class ResumeDocumentService {
       id: generation.id,
       documentId: generation.documentId,
       templateId: generation.templateId,
-      templateVersion: generation.templateVersionNumber,
       pageCount: generation.pageCount,
       warnings: generation.warnings,
       cached,

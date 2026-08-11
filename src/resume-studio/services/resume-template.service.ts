@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   ResumeTemplate,
   ResumeTemplateStatus,
@@ -30,6 +30,10 @@ import type { ResumeTemplateQueryDto } from '../dto/resume-document.dto';
 import type { ResumeData } from '../types/resume-data.types';
 import { RESUME_PREVIEW_SAMPLE } from '../testing/resume-sample.fixture';
 import { DEFAULT_RESUME_FIELD_SCHEMA } from '../constants/resume-field-catalog';
+import {
+  RESUME_ALLOWED_IMAGE_MIME_TYPES,
+  RESUME_LIMITS,
+} from '../constants/resume-limits';
 import { ResumeRendererService } from './resume-renderer.service';
 import { ResumeSchemaService } from './resume-schema.service';
 import { ResumeStorageService } from './resume-storage.service';
@@ -264,9 +268,35 @@ export class ResumeTemplateService {
     qb.skip((query.page - 1) * query.limit).take(query.limit);
     const [templates, total] = await qb.getManyAndCount();
 
+    // Fetch every published version for this page in one query. This avoids an
+    // N+1 database round-trip when the mobile gallery loads many templates.
+    const publishedVersionIds = templates
+      .map((template) => template.publishedVersionId)
+      .filter((id): id is string => Boolean(id));
+
+    const publishedVersions = publishedVersionIds.length
+      ? await this.versionRepository.find({
+          where: {
+            id: In(publishedVersionIds),
+            status: ResumeTemplateVersionStatus.PUBLISHED,
+          },
+        })
+      : [];
+
+    const versionById = new Map(
+      publishedVersions.map((version) => [version.id, version]),
+    );
+
     const items = await Promise.all(
       templates.map(async (template) => {
-        const version = await this.requirePublishedVersion(template);
+        const version = template.publishedVersionId
+          ? versionById.get(template.publishedVersionId)
+          : undefined;
+
+        if (!version) {
+          throw new NotFoundException('Published template version was not found');
+        }
+
         return {
           id: template.id,
           slug: template.slug,
@@ -274,17 +304,10 @@ export class ResumeTemplateService {
           description: template.description,
           category: template.category,
           isPremium: template.isPremium,
-          version: version.versionNumber,
+          publishedAt: version.publishedAt,
           fieldSchema: version.fieldSchema,
-          rendererConfig: version.rendererConfig,
           previewImageUrl: template.previewImageStorageKey
             ? await this.storageService.signedImage(template.previewImageStorageKey)
-            : null,
-          previewPdfUrl: template.previewPdfStorageKey
-            ? await this.storageService.signedPdf(
-                template.previewPdfStorageKey,
-                `${template.slug}-preview.pdf`,
-              )
             : null,
         };
       }),
@@ -293,13 +316,25 @@ export class ResumeTemplateService {
     return { items, total, page: query.page, limit: query.limit };
   }
 
+  async getMobileBootstrap(query: ResumeTemplateQueryDto) {
+    const [templates, categories] = await Promise.all([
+      this.listPublished(query),
+      this.categories(),
+    ]);
+
+    return {
+      templates,
+      categories,
+      builderContract: this.getBuilderContract(),
+    };
+  }
+
   async getPublishedPreview(templateId: string) {
-    const { template, version } = await this.getPublishedTemplate(templateId);
+    const { template } = await this.getPublishedTemplate(templateId);
 
     return {
       templateId: template.id,
       slug: template.slug,
-      version: version.versionNumber,
       previewImageUrl: template.previewImageStorageKey
         ? await this.storageService.signedImage(template.previewImageStorageKey)
         : null,
@@ -331,6 +366,26 @@ export class ResumeTemplateService {
     }
     const version = await this.requirePublishedVersion(template);
     return { template, version };
+  }
+
+  getBuilderContract() {
+    return {
+      version: 1,
+      fieldSchema: DEFAULT_RESUME_FIELD_SCHEMA,
+      photoUpload: {
+        filePurpose: 'cv_photo',
+        visibility: 'private',
+        maxBytes: RESUME_LIMITS.profilePhotoBytes,
+        allowedMimeTypes: Array.from(RESUME_ALLOWED_IMAGE_MIME_TYPES),
+      },
+      autosave: {
+        recommendedDebounceMs: 700,
+      },
+      rendering: {
+        sourceOfTruth: 'backend',
+        requiresTemplateForRender: true,
+      },
+    };
   }
 
   getTemplateContract() {
