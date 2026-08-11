@@ -21,6 +21,7 @@ import { ResumeTemplateEngineService } from './services/resume-template-engine.s
 import { ResumeTemplateFieldInferenceService } from './services/resume-template-field-inference.service';
 import { ResumeTemplateSecurityService } from './services/resume-template-security.service';
 import { ResumeTemplateService } from './services/resume-template.service';
+import { ResumePaginationService } from './services/resume-pagination.service';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { ResumeTemplateService } from './services/resume-template.service';
     ResumeDocumentService,
     ResumeLlmClientService,
     ResumeAiSuggestionService,
+    ResumePaginationService,
   ],
   exports: [ResumeTemplateService, ResumeDocumentService],
 })
