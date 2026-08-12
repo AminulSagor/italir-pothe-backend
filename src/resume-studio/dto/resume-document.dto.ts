@@ -88,3 +88,13 @@ export class ResumeDocumentQueryDto {
   @Max(50)
   limit = 20;
 }
+
+
+export class ResumeRecentDocumentQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(8)
+  limit = 4;
+}

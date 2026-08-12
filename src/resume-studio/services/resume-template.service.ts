@@ -329,6 +329,24 @@ export class ResumeTemplateService {
     };
   }
 
+  async getPublishedMobileTemplate(templateId: string) {
+    const { template, version } = await this.getPublishedTemplate(templateId);
+
+    return {
+      id: template.id,
+      slug: template.slug,
+      name: template.name,
+      description: template.description,
+      category: template.category,
+      isPremium: template.isPremium,
+      publishedAt: version.publishedAt,
+      fieldSchema: version.fieldSchema,
+      previewImageUrl: template.previewImageStorageKey
+        ? await this.storageService.signedImage(template.previewImageStorageKey)
+        : null,
+    };
+  }
+
   async getPublishedPreview(templateId: string) {
     const { template } = await this.getPublishedTemplate(templateId);
 

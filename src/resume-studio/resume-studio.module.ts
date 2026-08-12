@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '../files/files.module';
+import { PackageStoreModule } from '../package-store/package-store.module';
 import { File } from '../files/entities/file.entity';
 import { AdminResumeTemplateController } from './controllers/admin-resume-template.controller';
 import { ResumeAiController } from './controllers/resume-ai.controller';
@@ -22,10 +23,12 @@ import { ResumeTemplateFieldInferenceService } from './services/resume-template-
 import { ResumeTemplateSecurityService } from './services/resume-template-security.service';
 import { ResumeTemplateService } from './services/resume-template.service';
 import { ResumePaginationService } from './services/resume-pagination.service';
+import { ResumeCreditService } from './services/resume-credit.service';
 
 @Module({
   imports: [
     FilesModule,
+    PackageStoreModule,
     TypeOrmModule.forFeature([
       File,
       ResumeTemplate,
@@ -53,7 +56,8 @@ import { ResumePaginationService } from './services/resume-pagination.service';
     ResumeLlmClientService,
     ResumeAiSuggestionService,
     ResumePaginationService,
+    ResumeCreditService,
   ],
-  exports: [ResumeTemplateService, ResumeDocumentService],
+  exports: [ResumeTemplateService, ResumeDocumentService, ResumeCreditService],
 })
 export class ResumeStudioModule {}

@@ -17,6 +17,7 @@ import {
   CreateResumeDocumentDto,
   RenderResumeDocumentDto,
   ResumeDocumentQueryDto,
+  ResumeRecentDocumentQueryDto,
 } from '../dto/resume-document.dto';
 import { ResumeDocumentService } from '../services/resume-document.service';
 
@@ -26,13 +27,31 @@ export class ResumeDocumentController {
   constructor(private readonly documentService: ResumeDocumentService) {}
 
   @Post()
-  create(@Req() request: AuthenticatedRequest, @Body() dto: CreateResumeDocumentDto) {
+  create(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: CreateResumeDocumentDto,
+  ) {
     return this.documentService.create(this.requireUserId(request), dto);
   }
 
   @Get()
-  list(@Req() request: AuthenticatedRequest, @Query() query: ResumeDocumentQueryDto) {
+  list(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ResumeDocumentQueryDto,
+  ) {
     return this.documentService.list(this.requireUserId(request), query);
+  }
+
+  // Keep static routes before :id so Nest never treats "recent" as a document id.
+  @Get('recent')
+  recent(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ResumeRecentDocumentQueryDto,
+  ) {
+    return this.documentService.listRecent(
+      this.requireUserId(request),
+      query.limit,
+    );
   }
 
   @Get('generations/:generationId')
@@ -40,7 +59,10 @@ export class ResumeDocumentController {
     @Req() request: AuthenticatedRequest,
     @Param('generationId') generationId: string,
   ) {
-    return this.documentService.generation(this.requireUserId(request), generationId);
+    return this.documentService.generation(
+      this.requireUserId(request),
+      generationId,
+    );
   }
 
   @Get(':id')
@@ -63,7 +85,11 @@ export class ResumeDocumentController {
     @Param('id') id: string,
     @Body() dto: RenderResumeDocumentDto,
   ) {
-    return this.documentService.render(this.requireUserId(request), id, dto.templateId);
+    return this.documentService.render(
+      this.requireUserId(request),
+      id,
+      dto.templateId,
+    );
   }
 
   @Post(':id/archive')
@@ -73,7 +99,9 @@ export class ResumeDocumentController {
 
   private requireUserId(request: AuthenticatedRequest): string {
     const id = request.user?.id ?? request.user?.sub;
-    if (!id) throw new UnauthorizedException('Authenticated user id is missing');
+    if (!id) {
+      throw new UnauthorizedException('Authenticated user id is missing');
+    }
     return id;
   }
 }

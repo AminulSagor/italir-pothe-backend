@@ -6,10 +6,15 @@ import { S3Service } from '../../files/services/s3.service';
 export class ResumeStorageService {
   constructor(private readonly s3Service: S3Service) {}
 
+  /**
+   * Keep exactly one generated PDF object per Resume Studio document.
+   * Edits overwrite this stable key instead of creating an unbounded number
+   * of content-hash objects in S3. The database still stores the current hash
+   * for render caching and diagnostics.
+   */
   async storeGeneratedPdf(params: {
     userId: string;
     documentId: string;
-    contentHash: string;
     buffer: Buffer;
   }): Promise<string> {
     const storageKey = [
@@ -17,13 +22,15 @@ export class ResumeStorageService {
       'generated',
       params.userId,
       params.documentId,
-      `${params.contentHash}.pdf`,
+      'latest.pdf',
     ].join('/');
+
     await this.s3Service.uploadBuffer({
       storageKey,
       buffer: params.buffer,
       mimeType: 'application/pdf',
     });
+
     return storageKey;
   }
 

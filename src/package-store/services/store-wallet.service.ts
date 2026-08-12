@@ -111,6 +111,67 @@ export class StoreWalletService {
     };
   }
 
+  /**
+   * Purchased CV credits only. Resume Studio manages its free-creation quota
+   * separately from the legacy CV generation flow, so it must never consume
+   * the wallet's legacy free allowance here.
+   */
+  async getPurchasedCvCredits(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<number> {
+    if (!manager) {
+      return this.dataSource.transaction((transactionManager) =>
+        this.getPurchasedCvCredits(userId, transactionManager),
+      );
+    }
+
+    const wallet = await this.getOrCreateWallet(userId, manager, true);
+    return wallet.cvCredits;
+  }
+
+  async consumePurchasedCvCredit(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<{ remainingCredits: number }> {
+    if (!manager) {
+      return this.dataSource.transaction((transactionManager) =>
+        this.consumePurchasedCvCredit(userId, transactionManager),
+      );
+    }
+
+    const wallet = await this.getLockedWallet(userId, manager);
+
+    if (wallet.cvCredits <= 0) {
+      throw new PaymentRequiredException(
+        'No CV creation credits are available. Purchase a CV credit to create another CV.',
+      );
+    }
+
+    wallet.cvCredits -= 1;
+    await manager.getRepository(UserStoreWallet).save(wallet);
+
+    return {
+      remainingCredits: wallet.cvCredits,
+    };
+  }
+
+  async refundPurchasedCvCredit(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (!manager) {
+      await this.dataSource.transaction((transactionManager) =>
+        this.refundPurchasedCvCredit(userId, transactionManager),
+      );
+      return;
+    }
+
+    const wallet = await this.getLockedWallet(userId, manager);
+    wallet.cvCredits += 1;
+    await manager.getRepository(UserStoreWallet).save(wallet);
+  }
+
   async consumeCvGenerationAccess(
     userId: string,
     manager?: EntityManager,

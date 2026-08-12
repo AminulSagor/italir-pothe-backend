@@ -14,8 +14,20 @@ export enum ResumeDocumentStatus {
   ARCHIVED = 'archived',
 }
 
+/**
+ * Tracks how the first successful Resume Studio PDF for a document was paid.
+ * Once a document is charged, every later edit/regeneration of that same
+ * document is free.
+ */
+export enum ResumeCreationChargeSource {
+  FREE_ALLOWANCE = 'free_allowance',
+  PAID_CREDIT = 'paid_credit',
+  LEGACY = 'legacy',
+}
+
 @Entity('resume_studio_documents')
 @Index(['userId', 'updatedAt'])
+@Index(['userId', 'creationChargeSource'])
 export class ResumeDocument {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -42,6 +54,16 @@ export class ResumeDocument {
     default: ResumeDocumentStatus.DRAFT,
   })
   status: ResumeDocumentStatus;
+
+  /**
+   * Null means the user has not successfully created a PDF from this draft yet.
+   * A credit/free allowance is consumed only on the first successful render.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  creationChargedAt: Date | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  creationChargeSource: ResumeCreationChargeSource | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   lastAutosavedAt: Date | null;
