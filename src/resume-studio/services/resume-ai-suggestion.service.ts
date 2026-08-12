@@ -45,7 +45,9 @@ export class ResumeAiSuggestionService {
       'Return only valid JSON in this exact shape: {"suggestions":["...","...","..."]}.',
       dto.targetRole ? `Target role: ${dto.targetRole.trim()}` : '',
       dto.currentSummary ? `Current summary: ${dto.currentSummary.trim()}` : '',
-      highlights.length ? `Experience highlights: ${highlights.join(' | ')}` : '',
+      highlights.length
+        ? `Experience highlights: ${highlights.join(' | ')}`
+        : '',
       skills.length ? `Skills: ${skills.join(', ')}` : '',
     ]
       .filter(Boolean)
@@ -58,9 +60,22 @@ export class ResumeAiSuggestionService {
       return this.cleanSuggestions(root.suggestions);
     }
 
-    const candidate = ['reply', 'message', 'text', 'response', 'assistantMessage']
-      .map((key) => root?.[key])
-      .find((value) => typeof value === 'string') as string | undefined;
+    const message = this.asRecord(root?.message);
+
+    const candidate = [
+      root?.reply,
+      root?.text,
+      root?.response,
+      root?.assistantMessage,
+      typeof root?.message === 'string' ? root.message : undefined,
+      message?.primary,
+      message?.text,
+      message?.content,
+    ].find(
+      (value): value is string =>
+        typeof value === 'string' && value.trim().length > 0,
+    );
+
     if (!candidate) return [];
 
     const jsonText = candidate
