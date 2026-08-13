@@ -513,14 +513,39 @@ body > :first-child {
 }
 
 /*
- * Keep normal repeatable CV entries together when practical. avoid is a
- * fragmentation preference, not a forced page break, so Chromium can still
- * split when no valid alternative exists.
+ * Compact entries (certifications, languages, references, short education
+ * rows, etc.) should stay together when practical.
  */
 
 [data-resume-entry] {
   break-inside: avoid;
   page-break-inside: avoid;
+}
+
+/*
+ * Long-form experience and project entries are different: keeping the entire
+ * item together can waste a large part of the previous page even when the
+ * browser has safe break points between paragraphs or bullets. Let Chromium
+ * fragment these entries naturally. Individual list items remain protected
+ * below, so breaks normally occur between bullets rather than inside one.
+ */
+
+[data-resume-section="experience"] [data-resume-entry],
+[data-resume-section="projects"] [data-resume-entry] {
+  break-inside: auto !important;
+  page-break-inside: auto !important;
+}
+
+/*
+ * Keep an entry's leading header block attached to what follows so a job or
+ * project title is not stranded by itself at the bottom of a page.
+ */
+
+[data-resume-entry] > :first-child {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 /*
