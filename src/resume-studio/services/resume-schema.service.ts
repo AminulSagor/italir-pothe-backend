@@ -295,9 +295,12 @@ export class ResumeSchemaService {
         position: this.cleanText(item.position, RESUME_LIMITS.shortText),
         location: this.cleanText(item.location, RESUME_LIMITS.location),
         startDate: this.normalizeDate(item.startDate),
+        // Keep the stored value schema-safe. `Present` is a presentation concern:
+        // templates render it from `isCurrent`, while Flutter hides the end-date
+        // input for current roles. This also prevents `present — Present`.
         endDate:
           item.isCurrent === true
-            ? 'present'
+            ? undefined
             : this.normalizeDate(item.endDate),
         isCurrent: item.isCurrent === true,
         description: this.cleanMultiline(

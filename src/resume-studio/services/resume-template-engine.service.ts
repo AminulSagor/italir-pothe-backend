@@ -52,9 +52,14 @@ export class ResumeTemplateEngineService {
         const path = token.slice(4).trim();
         const match = this.findMatchingClose(template, close + 2, 'if');
         const block = template.slice(close + 2, match.openIndex);
+        const branches = this.splitIfBranches(block);
         const value = this.resolve(path, scopes, root);
-        if (this.isTruthy(value)) {
-          output += this.renderSegment(block, scopes, root);
+        const selectedBlock = this.isTruthy(value)
+          ? branches.truthy
+          : branches.falsy;
+
+        if (selectedBlock) {
+          output += this.renderSegment(selectedBlock, scopes, root);
         }
         cursor = match.closeIndex;
         continue;
@@ -70,6 +75,34 @@ export class ResumeTemplateEngineService {
     }
 
     return output;
+  }
+
+  private splitIfBranches(block: string): { truthy: string; falsy: string } {
+    let cursor = 0;
+    let depth = 0;
+
+    while (cursor < block.length) {
+      const open = block.indexOf('{{', cursor);
+      if (open < 0) break;
+      const close = block.indexOf('}}', open + 2);
+      if (close < 0) break;
+
+      const token = block.slice(open + 2, close).trim();
+      if (token.startsWith('#if ') || token.startsWith('#each ')) {
+        depth += 1;
+      } else if (token === '/if' || token === '/each') {
+        depth = Math.max(0, depth - 1);
+      } else if (token === 'else' && depth === 0) {
+        return {
+          truthy: block.slice(0, open),
+          falsy: block.slice(close + 2),
+        };
+      }
+
+      cursor = close + 2;
+    }
+
+    return { truthy: block, falsy: '' };
   }
 
   private findMatchingClose(
