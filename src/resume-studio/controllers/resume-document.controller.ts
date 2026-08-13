@@ -17,6 +17,7 @@ import {
   CreateResumeDocumentDto,
   RenderResumeDocumentDto,
   ResumeDocumentQueryDto,
+  ResumeLibraryQueryDto,
   ResumeRecentDocumentQueryDto,
 } from '../dto/resume-document.dto';
 import { ResumeDocumentService } from '../services/resume-document.service';
@@ -42,7 +43,15 @@ export class ResumeDocumentController {
     return this.documentService.list(this.requireUserId(request), query);
   }
 
-  // Keep static routes before :id so Nest never treats "recent" as a document id.
+  // Keep static routes before :id so Nest never treats them as document ids.
+  @Get('library')
+  library(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: ResumeLibraryQueryDto,
+  ) {
+    return this.documentService.listLibrary(this.requireUserId(request), query);
+  }
+
   @Get('recent')
   recent(
     @Req() request: AuthenticatedRequest,

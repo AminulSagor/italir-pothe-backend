@@ -6,11 +6,12 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import type {
   AutosaveResumeDocumentDto,
   CreateResumeDocumentDto,
   ResumeDocumentQueryDto,
+  ResumeLibraryQueryDto,
 } from '../dto/resume-document.dto';
 import {
   ResumeDocument,
@@ -20,6 +21,10 @@ import {
   ResumeGeneration,
   ResumeGenerationStatus,
 } from '../entities/resume-generation.entity';
+import {
+  ResumeTemplate,
+  ResumeTemplateStatus,
+} from '../entities/resume-template.entity';
 import { ResumeAssetService } from './resume-asset.service';
 import { ResumeCreditService } from './resume-credit.service';
 import { ResumeRendererService } from './resume-renderer.service';
@@ -34,6 +39,8 @@ export class ResumeDocumentService {
     private readonly documentRepository: Repository<ResumeDocument>,
     @InjectRepository(ResumeGeneration)
     private readonly generationRepository: Repository<ResumeGeneration>,
+    @InjectRepository(ResumeTemplate)
+    private readonly templateRepository: Repository<ResumeTemplate>,
     private readonly dataSource: DataSource,
     private readonly schemaService: ResumeSchemaService,
     private readonly templateService: ResumeTemplateService,
@@ -51,25 +58,50 @@ export class ResumeDocumentService {
   async create(userId: string, dto: CreateResumeDocumentDto) {
     if (dto.templateId) {
       await this.templateService.getPublishedTemplate(dto.templateId);
+
+      const existing = await this.findWorkspaceForTemplate(
+        userId,
+        dto.templateId,
+      );
+
+      if (existing) {
+        return existing;
+      }
     }
 
     const data = dto.data
       ? this.schemaService.normalizeResumeData(dto.data)
       : {};
 
-    return this.documentRepository.save(
-      this.documentRepository.create({
-        userId,
-        title: dto.title.trim(),
-        templateId: dto.templateId ?? null,
-        data,
-        revision: 1,
-        status: ResumeDocumentStatus.DRAFT,
-        creationChargedAt: null,
-        creationChargeSource: null,
-        lastAutosavedAt: new Date(),
-      }),
-    );
+    const document = this.documentRepository.create({
+      userId,
+      title: dto.title.trim(),
+      templateId: dto.templateId ?? null,
+      data,
+      revision: 1,
+      status: ResumeDocumentStatus.DRAFT,
+      creationChargedAt: null,
+      creationChargeSource: null,
+      lastAutosavedAt: new Date(),
+    });
+
+    try {
+      return await this.documentRepository.save(document);
+    } catch (error) {
+      /*
+       * The partial unique index is the final authority. If two devices open
+       * the same template at the same time, one insert wins and the other
+       * simply resumes that workspace instead of surfacing a database error.
+       */
+      if (dto.templateId && this.isUniqueViolation(error)) {
+        const existing = await this.findWorkspaceForTemplate(
+          userId,
+          dto.templateId,
+        );
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   async autosave(
@@ -88,7 +120,25 @@ export class ResumeDocumentService {
 
     if (dto.templateId !== undefined) {
       await this.templateService.getPublishedTemplate(dto.templateId);
-      document.templateId = dto.templateId;
+
+      if (document.templateId && document.templateId !== dto.templateId) {
+        throw new BadRequestException(
+          'A CV workspace cannot be moved to another template. Open that template instead.',
+        );
+      }
+
+      if (!document.templateId) {
+        const existing = await this.findWorkspaceForTemplate(
+          userId,
+          dto.templateId,
+        );
+        if (existing && existing.id !== document.id) {
+          throw new ConflictException(
+            'A CV workspace already exists for this template',
+          );
+        }
+        document.templateId = dto.templateId;
+      }
     }
 
     if (dto.title !== undefined) {
@@ -122,6 +172,130 @@ export class ResumeDocumentService {
       total,
       page: query.page,
       limit: query.limit,
+    };
+  }
+
+
+  /**
+   * Dedicated My CVs page payload. One row represents one template workspace.
+   * Full CV JSON and signed PDF URLs are intentionally omitted so the page
+   * stays light; those are fetched only after the user taps Edit or View.
+   */
+  async listLibrary(userId: string, query: ResumeLibraryQueryDto) {
+    const baseQuery = this.documentRepository
+      .createQueryBuilder('document')
+      .where('document.userId = :userId', { userId })
+      .andWhere('document.templateId IS NOT NULL')
+      .andWhere('document.status != :archived', {
+        archived: ResumeDocumentStatus.ARCHIVED,
+      });
+
+    const total = await baseQuery.clone().getCount();
+    const documents = await baseQuery
+      .clone()
+      .orderBy('document.updatedAt', 'DESC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit)
+      .getMany();
+
+    if (documents.length === 0) {
+      return {
+        items: [],
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit),
+      };
+    }
+
+    const documentIds = documents.map((document) => document.id);
+    const templateIds = Array.from(
+      new Set(
+        documents
+          .map((document) => document.templateId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    const [generations, templates] = await Promise.all([
+      this.generationRepository.find({
+        where: {
+          userId,
+          documentId: In(documentIds),
+          status: ResumeGenerationStatus.COMPLETED,
+        },
+        order: { createdAt: 'DESC' },
+      }),
+      templateIds.length > 0
+        ? this.templateRepository.find({
+            where: { id: In(templateIds) },
+          })
+        : Promise.resolve([] as ResumeTemplate[]),
+    ]);
+
+    const generationByDocumentId = new Map<string, ResumeGeneration>();
+    for (const generation of generations) {
+      if (!generationByDocumentId.has(generation.documentId)) {
+        generationByDocumentId.set(generation.documentId, generation);
+      }
+    }
+
+    const templateById = new Map(
+      templates.map((template) => [template.id, template] as const),
+    );
+
+    const items = await Promise.all(
+      documents.map(async (document) => {
+        const generation = generationByDocumentId.get(document.id) ?? null;
+        const template = document.templateId
+          ? templateById.get(document.templateId)
+          : undefined;
+
+        return {
+          documentId: document.id,
+          title: document.title,
+          templateId: document.templateId,
+          templateName: template?.name ?? 'CV template',
+          templateCategory: template?.category ?? null,
+          templateAvailable: Boolean(
+            template &&
+              template.status === ResumeTemplateStatus.PUBLISHED &&
+              template.publishedVersionId,
+          ),
+          previewImageUrl: template?.previewImageStorageKey
+            ? await this.storageService.signedImage(
+                template.previewImageStorageKey,
+              )
+            : null,
+          revision: document.revision,
+          status: document.status,
+          updatedAt: document.updatedAt,
+          creationChargedAt: document.creationChargedAt,
+          editingIsFree: Boolean(document.creationChargedAt),
+          hasDraftChanges:
+            generation == null ||
+            generation.documentRevision == null ||
+            generation.documentRevision < document.revision,
+          latestGeneration: generation
+            ? {
+                id: generation.id,
+                documentRevision: generation.documentRevision,
+                pageCount: generation.pageCount,
+                warnings: generation.warnings,
+                createdAt: generation.createdAt,
+                hasPdf: true,
+              }
+            : null,
+        };
+      }),
+    );
+
+    return {
+      items,
+      total,
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.ceil(total / query.limit),
     };
   }
 
@@ -214,7 +388,18 @@ export class ResumeDocumentService {
     overrideTemplateId?: string,
   ) {
     const document = await this.requireOwnedDocument(userId, documentId);
-    const templateId = overrideTemplateId ?? document.templateId;
+
+    if (
+      overrideTemplateId &&
+      document.templateId &&
+      overrideTemplateId !== document.templateId
+    ) {
+      throw new BadRequestException(
+        'A CV workspace cannot be rendered with another template. Open that template instead.',
+      );
+    }
+
+    const templateId = document.templateId ?? overrideTemplateId;
 
     if (!templateId) {
       throw new BadRequestException('Select a CV template before rendering');
@@ -260,6 +445,11 @@ export class ResumeDocumentService {
       });
 
       if (cached && (await this.storageService.exists(cached.pdfStorageKey))) {
+        if (cached.documentRevision !== document.revision) {
+          cached.documentRevision = document.revision;
+          await this.generationRepository.save(cached);
+        }
+
         return {
           ...(await this.toGenerationResponse(cached, document.title, true)),
           creation: {
@@ -306,6 +496,12 @@ export class ResumeDocumentService {
           throw new NotFoundException('CV draft was not found');
         }
 
+        if (lockedDocument.revision !== document.revision) {
+          throw new ConflictException(
+            'CV changed while the PDF was being created. Please create the PDF again.',
+          );
+        }
+
         const charge = await this.creditService.chargeFirstSuccessfulCreation(
           userId,
           lockedDocument,
@@ -343,6 +539,7 @@ export class ResumeDocumentService {
             templateId: template.id,
             templateVersionId: version.id,
             templateVersionNumber: version.versionNumber,
+            documentRevision: lockedDocument.revision,
             contentHash,
             pdfStorageKey,
             pageCount: rendered.pageCount,
@@ -413,6 +610,7 @@ export class ResumeDocumentService {
       id: generation.id,
       documentId: generation.documentId,
       templateId: generation.templateId,
+      documentRevision: generation.documentRevision,
       pageCount: generation.pageCount,
       warnings: generation.warnings,
       cached,
@@ -422,6 +620,27 @@ export class ResumeDocumentService {
         `${this.safeTitle(title)}.pdf`,
       ),
     };
+  }
+
+  private async findWorkspaceForTemplate(
+    userId: string,
+    templateId: string,
+  ): Promise<ResumeDocument | null> {
+    return this.documentRepository
+      .createQueryBuilder('document')
+      .where('document.userId = :userId', { userId })
+      .andWhere('document.templateId = :templateId', { templateId })
+      .andWhere('document.status != :archived', {
+        archived: ResumeDocumentStatus.ARCHIVED,
+      })
+      .orderBy('document.updatedAt', 'DESC')
+      .getOne();
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) return false;
+    const driverError = error.driverError as { code?: string } | undefined;
+    return driverError?.code === '23505';
   }
 
   private safeTitle(title: string): string {

@@ -28,6 +28,10 @@ export enum ResumeCreationChargeSource {
 @Entity('resume_studio_documents')
 @Index(['userId', 'updatedAt'])
 @Index(['userId', 'creationChargeSource'])
+@Index('UQ_resume_studio_active_document_per_template', ['userId', 'templateId'], {
+  unique: true,
+  where: `"templateId" IS NOT NULL AND "status" <> 'archived'`,
+})
 export class ResumeDocument {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -39,6 +43,11 @@ export class ResumeDocument {
   @Column({ type: 'varchar', length: 160 })
   title: string;
 
+  /**
+   * A non-archived document belongs to one template for its whole lifetime.
+   * This lets Resume Studio keep exactly one editable workspace per
+   * user/template pair and prevents duplicate drafts.
+   */
   @Column({ type: 'uuid', nullable: true })
   templateId: string | null;
 

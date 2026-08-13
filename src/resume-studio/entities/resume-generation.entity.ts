@@ -33,6 +33,13 @@ export class ResumeGeneration {
   @Column({ type: 'integer' })
   templateVersionNumber: number;
 
+  /**
+   * Revision of the editable draft used to create this PDF. Null is reserved
+   * for legacy generations created before revision tracking was introduced.
+   */
+  @Column({ type: 'integer', nullable: true })
+  documentRevision: number | null;
+
   @Column({ type: 'varchar', length: 64 })
   contentHash: string;
 

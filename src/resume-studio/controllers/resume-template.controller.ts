@@ -11,7 +11,6 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResumeTemplateQueryDto } from '../dto/resume-document.dto';
 import { ResumeCreditService } from '../services/resume-credit.service';
-import { ResumeDocumentService } from '../services/resume-document.service';
 import { ResumeTemplateService } from '../services/resume-template.service';
 
 @Controller('resume-studio/templates')
@@ -19,7 +18,6 @@ import { ResumeTemplateService } from '../services/resume-template.service';
 export class ResumeTemplateController {
   constructor(
     private readonly templateService: ResumeTemplateService,
-    private readonly documentService: ResumeDocumentService,
     private readonly creditService: ResumeCreditService,
   ) {}
 
@@ -39,8 +37,8 @@ export class ResumeTemplateController {
   }
 
   /**
-   * One mobile bootstrap request returns gallery + recent CVs + CV access.
-   * This keeps the first CV screen fast and avoids separate wallet/history calls.
+   * CV Home stays focused on discovery: gallery + categories + builder contract
+   * + credit access. Drafts/PDFs live on the dedicated My CVs endpoint.
    */
   @Get('bootstrap')
   async bootstrap(
@@ -49,15 +47,13 @@ export class ResumeTemplateController {
   ) {
     const userId = this.requireUserId(request);
 
-    const [bootstrap, recentDocuments, cvAccess] = await Promise.all([
+    const [bootstrap, cvAccess] = await Promise.all([
       this.templateService.getMobileBootstrap(query),
-      this.documentService.listRecent(userId, 4),
       this.creditService.getAccess(userId),
     ]);
 
     return {
       ...bootstrap,
-      recentDocuments,
       cvAccess,
     };
   }
