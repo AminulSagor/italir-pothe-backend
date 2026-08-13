@@ -15,6 +15,7 @@ export interface ResumeExperienceItem {
   id?: string;
   company?: string;
   position?: string;
+  employmentType?: string;
   location?: string;
   startDate?: string;
   endDate?: string;
@@ -28,9 +29,12 @@ export interface ResumeEducationItem {
   institution?: string;
   degree?: string;
   fieldOfStudy?: string;
+  cgpa?: string;
   location?: string;
   startDate?: string;
   endDate?: string;
+  isCurrent?: boolean;
+  achievements?: string[];
   description?: string;
 }
 
@@ -41,6 +45,7 @@ export interface ResumeProjectItem {
   url?: string;
   startDate?: string;
   endDate?: string;
+  isCurrent?: boolean;
   description?: string;
   bullets?: string[];
   technologies?: string[];
@@ -52,6 +57,7 @@ export interface ResumeCertificationItem {
   issuer?: string;
   issueDate?: string;
   expiryDate?: string;
+  doesNotExpire?: boolean;
   credentialId?: string;
   credentialUrl?: string;
 }

@@ -236,7 +236,11 @@ export class ResumeSchemaService {
           name: this.cleanText(item.name, RESUME_LIMITS.shortText),
           issuer: this.cleanText(item.issuer, RESUME_LIMITS.shortText),
           issueDate: this.normalizeDate(item.issueDate),
-          expiryDate: this.normalizeDate(item.expiryDate),
+          expiryDate:
+            item.doesNotExpire === true
+              ? undefined
+              : this.normalizeDate(item.expiryDate),
+          doesNotExpire: item.doesNotExpire === true,
           credentialId: this.cleanText(item.credentialId, 160),
           credentialUrl: this.cleanUrl(item.credentialUrl),
         }),
@@ -293,6 +297,7 @@ export class ResumeSchemaService {
         id: this.cleanText(item.id, 80),
         company: this.cleanText(item.company, RESUME_LIMITS.shortText),
         position: this.cleanText(item.position, RESUME_LIMITS.shortText),
+        employmentType: this.cleanText(item.employmentType, 80),
         location: this.cleanText(item.location, RESUME_LIMITS.location),
         startDate: this.normalizeDate(item.startDate),
         // Keep the stored value schema-safe. `Present` is a presentation concern:
@@ -330,9 +335,19 @@ export class ResumeSchemaService {
           item.fieldOfStudy,
           RESUME_LIMITS.shortText,
         ),
+        cgpa: this.cleanText(item.cgpa, 40),
         location: this.cleanText(item.location, RESUME_LIMITS.location),
         startDate: this.normalizeDate(item.startDate),
-        endDate: this.normalizeDate(item.endDate),
+        endDate:
+          item.isCurrent === true
+            ? undefined
+            : this.normalizeDate(item.endDate),
+        isCurrent: item.isCurrent === true,
+        achievements: this.normalizeStringArray(
+          item.achievements,
+          RESUME_LIMITS.bulletsPerItem,
+          RESUME_LIMITS.bullet,
+        ),
         description: this.cleanMultiline(
           item.description,
           RESUME_LIMITS.description,
@@ -351,7 +366,11 @@ export class ResumeSchemaService {
         role: this.cleanText(item.role, RESUME_LIMITS.shortText),
         url: this.cleanUrl(item.url),
         startDate: this.normalizeDate(item.startDate),
-        endDate: this.normalizeDate(item.endDate),
+        endDate:
+          item.isCurrent === true
+            ? undefined
+            : this.normalizeDate(item.endDate),
+        isCurrent: item.isCurrent === true,
         description: this.cleanMultiline(
           item.description,
           RESUME_LIMITS.description,
