@@ -5,64 +5,45 @@ interface ResumePaginationPageLike {
 }
 
 export interface ResumePaginationResult {
-  movedSections: number;
-  movedEntries: number;
+  inspectedEntries: number;
   splitEntries: number;
-  orphanHeadingsFixed: number;
-  passes: number;
 }
 
+/**
+ * Chromium is the source of truth for paged-media fragmentation.
+ *
+ * This service deliberately does NOT calculate page indexes and does NOT
+ * inject `break-before: page`. Manual page-position guesses are brittle once
+ * print fragmentation, cloned page padding, fonts, images, grids, and dynamic
+ * content are involved.
+ *
+ * Its only job is to relax `break-inside: avoid` for an individual repeatable
+ * entry that is physically too tall to fit inside one printable page fragment.
+ * Everything else is left to Chromium's native print layout engine.
+ */
 @Injectable()
 export class ResumePaginationService {
   async apply(page: ResumePaginationPageLike): Promise<ResumePaginationResult> {
     return page.evaluate(() => {
-      /*
-       * Chromium's CSS pixel size can vary with environment/device scale,
-       * so measure 297mm in the actual rendering context instead of relying
-       * only on a hard-coded A4 pixel height.
-       */
-      const probe = document.createElement('div');
-      probe.style.position = 'absolute';
-      probe.style.visibility = 'hidden';
-      probe.style.pointerEvents = 'none';
-      probe.style.width = '1px';
-      probe.style.height = '297mm';
-      document.body.appendChild(probe);
+      const FALLBACK_A4_HEIGHT_PX = 1122.52;
+      const OVERSIZE_TOLERANCE_PX = 2;
 
-      const measuredPageHeight = probe.getBoundingClientRect().height;
-      probe.remove();
+      const measureA4Height = (): number => {
+        const probe = document.createElement('div');
 
-      const pageHeight = measuredPageHeight > 0 ? measuredPageHeight : 1122.52;
+        probe.style.position = 'absolute';
+        probe.style.visibility = 'hidden';
+        probe.style.pointerEvents = 'none';
+        probe.style.width = '1px';
+        probe.style.height = '297mm';
 
-      const EPSILON = 2;
-      const PAGE_START_TOLERANCE = 5;
-      const OVERSIZED_ENTRY_TOLERANCE = 8;
-      const SMALL_SECTION_MAX_RATIO = 0.48;
-      const HEADING_WITH_FIRST_ENTRY_MAX_RATIO = 0.5;
-      const MAX_PASSES = 4;
+        document.body.appendChild(probe);
 
-      let movedSections = 0;
-      let movedEntries = 0;
-      let splitEntries = 0;
-      let orphanHeadingsFixed = 0;
-      let passes = 0;
+        const height = probe.getBoundingClientRect().height;
 
-      type Rect = {
-        top: number;
-        bottom: number;
-        height: number;
-      };
+        probe.remove();
 
-      const getRect = (element: Element): Rect => {
-        const rect = element.getBoundingClientRect();
-        const top = rect.top + window.scrollY;
-        const bottom = rect.bottom + window.scrollY;
-
-        return {
-          top,
-          bottom,
-          height: rect.height,
-        };
+        return height > 0 ? height : FALLBACK_A4_HEIGHT_PX;
       };
 
       const isVisible = (element: Element): boolean => {
@@ -77,68 +58,58 @@ export class ResumePaginationService {
         );
       };
 
-      const pageIndex = (position: number): number =>
-        Math.floor(Math.max(0, position - EPSILON) / pageHeight);
+      const parseCssPixels = (value: string): number => {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
 
-      const crossesPage = (rect: Rect): boolean => {
-        if (rect.height <= 0) {
-          return false;
+      /**
+       * Most CV templates use one top-level A4 wrapper whose padding acts as
+       * the printable-page inset. Measuring that wrapper keeps the oversized
+       * threshold aligned with the template without creating a second margin
+       * configuration in TypeScript.
+       */
+      const getTopLevelLayoutRoot = (element: Element): HTMLElement | null => {
+        let current = element.parentElement;
+        let root: HTMLElement | null = null;
+
+        while (current && current !== document.body) {
+          root = current;
+          current = current.parentElement;
         }
 
-        return (
-          pageIndex(rect.top) !==
-          pageIndex(Math.max(rect.top, rect.bottom - EPSILON))
-        );
+        return root;
       };
 
-      const isAtPageStart = (top: number): boolean => {
-        const offset = ((top % pageHeight) + pageHeight) % pageHeight;
-        return offset <= PAGE_START_TOLERANCE;
-      };
-
-      const forceLayout = (): void => {
-        void document.documentElement.offsetHeight;
-      };
-
-      const forceBreakBefore = (
+      const getPrintableFragmentHeight = (
         element: Element,
-        type: 'section' | 'entry',
-        options?: { lockChildren?: boolean },
-      ): boolean => {
-        if (element.classList.contains('resume-page-break-before')) {
-          return false;
+        a4Height: number,
+      ): number => {
+        const root = getTopLevelLayoutRoot(element);
+
+        if (!root) {
+          return a4Height;
         }
 
-        const htmlElement = element as HTMLElement;
+        const style = window.getComputedStyle(root);
 
-        element.classList.add('resume-page-break-before');
-        element.setAttribute('data-resume-pagination-moved', type);
-
-        htmlElement.style.setProperty('break-before', 'page', 'important');
-        htmlElement.style.setProperty(
-          'page-break-before',
-          'always',
-          'important',
-        );
+        const verticalInsets =
+          parseCssPixels(style.paddingTop) +
+          parseCssPixels(style.paddingBottom) +
+          parseCssPixels(style.borderTopWidth) +
+          parseCssPixels(style.borderBottomWidth);
 
         /*
-         * When a whole small section is moved, it becomes the pagination
-         * unit. Its child entries must not receive additional page breaks.
-         * This prevents grid/list children (for example Languages) from
-         * creating extra blank pages.
+         * A malformed template can theoretically consume the entire page with
+         * padding. In that case fall back to the physical A4 height so this
+         * safety pass never creates an invalid negative/zero threshold.
          */
-        if (options?.lockChildren) {
-          element.setAttribute('data-resume-pagination-lock-children', 'true');
-        }
+        const available = a4Height - verticalInsets;
 
-        return true;
+        return available > 0 ? available : a4Height;
       };
 
-      const allowSplit = (element: Element): boolean => {
-        if (element.classList.contains('resume-allow-split')) {
-          return false;
-        }
-
+      const allowSplit = (element: Element): void => {
         const htmlElement = element as HTMLElement;
 
         element.classList.add('resume-allow-split');
@@ -146,53 +117,17 @@ export class ResumePaginationService {
 
         htmlElement.style.setProperty('break-inside', 'auto', 'important');
         htmlElement.style.setProperty('page-break-inside', 'auto', 'important');
-
-        return true;
-      };
-
-      const isInsideLockedSection = (element: Element): boolean => {
-        const section = element.closest(
-          '[data-resume-section][data-resume-pagination-lock-children="true"]',
-        );
-
-        return section !== null && section !== element;
       };
 
       /*
-       * Page-break-before on children of CSS grid/multi-column layouts is not
-       * reliable across Chromium versions. In those layouts the parent should
-       * be treated as the pagination unit when possible.
-       */
-      const isInsideComplexFragmentationLayout = (
-        element: Element,
-      ): boolean => {
-        const section = element.closest('[data-resume-section]');
-        let current = element.parentElement;
-
-        while (current && current !== section) {
-          const style = window.getComputedStyle(current);
-
-          if (style.display === 'grid' || style.display === 'inline-grid') {
-            return true;
-          }
-
-          const columnCount = Number.parseInt(style.columnCount, 10);
-          if (Number.isFinite(columnCount) && columnCount > 1) {
-            return true;
-          }
-
-          current = current.parentElement;
-        }
-
-        return false;
-      };
-
-      /*
-       * Reset changes first so apply() is idempotent if it is ever called more
-       * than once against the same Chromium page.
+       * apply() is idempotent. Also remove attributes/classes written by the
+       * previous paginator implementation so a reused Chromium page can never
+       * retain a stale forced page break.
        */
       document
-        .querySelectorAll('[data-resume-pagination-moved]')
+        .querySelectorAll(
+          '[data-resume-pagination-moved], .resume-page-break-before',
+        )
         .forEach((element) => {
           const htmlElement = element as HTMLElement;
 
@@ -216,183 +151,32 @@ export class ResumePaginationService {
           htmlElement.style.removeProperty('page-break-inside');
         });
 
-      forceLayout();
+      void document.documentElement.offsetHeight;
 
-      for (let pass = 0; pass < MAX_PASSES; pass += 1) {
-        passes = pass + 1;
-        let changed = false;
+      const a4Height = measureA4Height();
+      const entries = Array.from(
+        document.querySelectorAll('[data-resume-entry]'),
+      ).filter(isVisible);
 
-        /*
-         * 1. Oversized entries
-         *
-         * A block taller than a full A4 page cannot be kept together. Allow
-         * Chromium to fragment only that block instead of forcing impossible
-         * page-break rules.
-         */
-        const entries = Array.from(
-          document.querySelectorAll('[data-resume-entry]'),
-        );
+      let splitEntries = 0;
 
-        for (const entry of entries) {
-          if (!isVisible(entry) || isInsideLockedSection(entry)) {
-            continue;
-          }
+      for (const entry of entries) {
+        const rect = entry.getBoundingClientRect();
+        const printableHeight = getPrintableFragmentHeight(entry, a4Height);
 
-          const rect = getRect(entry);
-
-          if (rect.height >= pageHeight - OVERSIZED_ENTRY_TOLERANCE) {
-            if (allowSplit(entry)) {
-              splitEntries += 1;
-              changed = true;
-            }
-          }
-        }
-
-        if (changed) {
-          forceLayout();
-        }
-
-        /*
-         * 2. Small-section protection
-         *
-         * If an entire small section fits on one page but currently crosses a
-         * page boundary, move the whole section. Once moved, lock its children
-         * from receiving their own page breaks.
-         */
-        const sections = Array.from(
-          document.querySelectorAll('[data-resume-section]'),
-        );
-
-        for (const section of sections) {
-          if (!isVisible(section)) {
-            continue;
-          }
-
-          if (section.classList.contains('resume-page-break-before')) {
-            continue;
-          }
-
-          const rect = getRect(section);
-          const smallEnough =
-            rect.height > 0 &&
-            rect.height <= pageHeight * SMALL_SECTION_MAX_RATIO;
-
-          if (smallEnough && crossesPage(rect) && !isAtPageStart(rect.top)) {
-            if (
-              forceBreakBefore(section, 'section', {
-                lockChildren: true,
-              })
-            ) {
-              movedSections += 1;
-              changed = true;
-              forceLayout();
-            }
-
-            continue;
-          }
-
-          /*
-           * 3. Orphan-heading protection
-           *
-           * Keep a section title with at least its first entry when that pair
-           * is reasonably small enough to fit together on one page.
-           *
-           * We intentionally do NOT lock all children here because a long
-           * section may still need entry-level pagination later.
-           */
-          const heading = section.querySelector('[data-resume-section-title]');
-          const firstEntry = section.querySelector('[data-resume-entry]');
-
-          if (
-            !heading ||
-            !firstEntry ||
-            !isVisible(heading) ||
-            !isVisible(firstEntry)
-          ) {
-            continue;
-          }
-
-          const headingRect = getRect(heading);
-          const firstEntryRect = getRect(firstEntry);
-
-          const headingAndFirstEntry: Rect = {
-            top: headingRect.top,
-            bottom: firstEntryRect.bottom,
-            height: firstEntryRect.bottom - headingRect.top,
-          };
-
-          if (
-            headingAndFirstEntry.height > 0 &&
-            headingAndFirstEntry.height <
-              pageHeight * HEADING_WITH_FIRST_ENTRY_MAX_RATIO &&
-            crossesPage(headingAndFirstEntry) &&
-            !isAtPageStart(headingAndFirstEntry.top)
-          ) {
-            if (forceBreakBefore(section, 'section')) {
-              movedSections += 1;
-              orphanHeadingsFixed += 1;
-              changed = true;
-              forceLayout();
-            }
-          }
-        }
-
-        /*
-         * 4. Entry protection
-         *
-         * Move normal entries that would split across a boundary, except when:
-         * - the entry is allowed to split because it is taller than a page;
-         * - an ancestor section was already moved as one protected unit;
-         * - the entry lives in a CSS grid/multi-column layout where individual
-         *   break-before rules are unreliable and can create blank pages.
-         */
-        const currentEntries = Array.from(
-          document.querySelectorAll('[data-resume-entry]'),
-        );
-
-        for (const entry of currentEntries) {
-          if (!isVisible(entry)) {
-            continue;
-          }
-
-          if (entry.classList.contains('resume-allow-split')) {
-            continue;
-          }
-
-          if (entry.classList.contains('resume-page-break-before')) {
-            continue;
-          }
-
-          if (isInsideLockedSection(entry)) {
-            continue;
-          }
-
-          if (isInsideComplexFragmentationLayout(entry)) {
-            continue;
-          }
-
-          const rect = getRect(entry);
-
-          if (crossesPage(rect) && !isAtPageStart(rect.top)) {
-            if (forceBreakBefore(entry, 'entry')) {
-              movedEntries += 1;
-              changed = true;
-              forceLayout();
-            }
-          }
-        }
-
-        if (!changed) {
-          break;
+        if (rect.height > printableHeight + OVERSIZE_TOLERANCE_PX) {
+          allowSplit(entry);
+          splitEntries += 1;
         }
       }
 
+      if (splitEntries > 0) {
+        void document.documentElement.offsetHeight;
+      }
+
       return {
-        movedSections,
-        movedEntries,
+        inspectedEntries: entries.length,
         splitEntries,
-        orphanHeadingsFixed,
-        passes,
       };
     });
   }

@@ -178,6 +178,28 @@ export class ResumeRendererService {
       await page.emulateMediaType('print');
 
       /*
+       * Print media can change font metrics, widths, and visibility. Wait for
+       * the print layout to settle before any size-based safety checks.
+       */
+      await page.evaluate(async () => {
+        if ('fonts' in document) {
+          await (
+            document as Document & {
+              fonts?: {
+                ready: Promise<unknown>;
+              };
+            }
+          ).fonts?.ready;
+        }
+
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+          });
+        });
+      });
+
+      /*
        * -----------------------------------------
        * 7. REMOVE BROKEN IMAGES
        * -----------------------------------------
@@ -209,16 +231,15 @@ export class ResumeRendererService {
 
       /*
        * -----------------------------------------
-       * 8. SMART PAGINATION
+       * 8. FRAGMENTATION SAFETY
        * -----------------------------------------
        *
-       * This is the important new stage.
-       *
-       * It:
-       * - keeps small sections together
-       * - prevents orphan headings
-       * - moves entries that would split badly
-       * - allows oversized entries to split
+       * Chromium remains the source of truth for
+       * page boundaries. The pagination service
+       * never guesses page indexes or injects
+       * forced page breaks; it only relaxes
+       * break-inside for entries that are taller
+       * than one printable page fragment.
        */
 
       const pagination = await this.paginationService.apply(page);
@@ -323,27 +344,7 @@ export class ResumeRendererService {
 
       if (pagination.splitEntries > 0) {
         warnings.push(
-          `${pagination.splitEntries} content block(s) are taller than one A4 page and were allowed to split safely.`,
-        );
-      }
-
-      /*
-       * Automatic pagination adjustments.
-       */
-
-      if (pagination.movedSections > 0 || pagination.movedEntries > 0) {
-        warnings.push(
-          `Pagination automatically repositioned ${pagination.movedSections} section(s) and ${pagination.movedEntries} entry block(s) to avoid awkward page breaks.`,
-        );
-      }
-
-      /*
-       * Orphan heading correction.
-       */
-
-      if (pagination.orphanHeadingsFixed > 0) {
-        warnings.push(
-          `${pagination.orphanHeadingsFixed} section heading(s) were moved with their first content block to avoid orphan headings.`,
+          `${pagination.splitEntries} content block(s) exceed one printable page fragment and were allowed to split safely.`,
         );
       }
 
@@ -491,7 +492,30 @@ body {
 }
 
 /*
- * Keep standard CV entries together.
+ * CV templates normally render one top-level A4 wrapper and use its padding
+ * as the page inset. Clone its box decoration across page fragments so that
+ * top/bottom padding remains consistent on continuation pages.
+ */
+
+body > :first-child {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/*
+ * Let sections flow naturally across pages. A whole dynamic section should
+ * never be kept together because that can leave a large blank area behind.
+ */
+
+[data-resume-section] {
+  break-inside: auto !important;
+  page-break-inside: auto !important;
+}
+
+/*
+ * Keep normal repeatable CV entries together when practical. avoid is a
+ * fragmentation preference, not a forced page break, so Chromium can still
+ * split when no valid alternative exists.
  */
 
 [data-resume-entry] {
@@ -500,13 +524,57 @@ body {
 }
 
 /*
- * Never leave section heading alone
- * at the bottom of a page.
+ * Never leave a marked section title by itself at the bottom of a page.
  */
 
 [data-resume-section-title] {
+  break-inside: avoid;
+  page-break-inside: avoid;
   break-after: avoid;
   page-break-after: avoid;
+}
+
+/*
+ * When a section stores repeatable entries inside a wrapper, also discourage
+ * a break immediately before the first entry. This keeps the title and first
+ * meaningful block together without forcing the entire section onto a page.
+ */
+
+[data-resume-section-title] + [data-resume-entry],
+[data-resume-section-title] + * > [data-resume-entry]:first-child {
+  break-before: avoid;
+  page-break-before: avoid;
+}
+
+/*
+ * If an oversized entry must fragment, keep headings attached to the content
+ * that follows them whenever Chromium has a valid break alternative.
+ */
+
+[data-resume-entry] h1,
+[data-resume-entry] h2,
+[data-resume-entry] h3,
+[data-resume-entry] h4,
+[data-resume-entry] h5,
+[data-resume-entry] h6 {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+/*
+ * Avoid ugly single-line paragraph/list fragments while still allowing the
+ * browser to choose the actual page boundary.
+ */
+
+p,
+li {
+  orphans: 2;
+  widows: 2;
+}
+
+li {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 /*
@@ -519,20 +587,8 @@ body {
 }
 
 /*
- * Added dynamically by
- * ResumePaginationService.
- *
- * Moves a block cleanly to the next page.
- */
-
-.resume-page-break-before {
-  break-before: page !important;
-  page-break-before: always !important;
-}
-
-/*
- * Added dynamically when one individual
- * block is taller than an A4 page.
+ * Added only when one repeatable entry is physically taller than the
+ * printable page fragment. No class in the renderer forces a page break.
  */
 
 .resume-allow-split {
