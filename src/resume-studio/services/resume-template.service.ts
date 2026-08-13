@@ -55,7 +55,9 @@ export class ResumeTemplateService {
   ) {}
 
   async create(adminId: string, dto: CreateResumeTemplateDto) {
-    const existing = await this.templateRepository.findOne({ where: { slug: dto.slug } });
+    const existing = await this.templateRepository.findOne({
+      where: { slug: dto.slug },
+    });
     if (existing) throw new BadRequestException('Template slug already exists');
 
     const source = this.validateSource(dto);
@@ -86,18 +88,28 @@ export class ResumeTemplateService {
     return { template, draftVersion: version };
   }
 
-  async updateMetadata(adminId: string, templateId: string, dto: UpdateResumeTemplateMetadataDto) {
+  async updateMetadata(
+    adminId: string,
+    templateId: string,
+    dto: UpdateResumeTemplateMetadataDto,
+  ) {
     const template = await this.requireTemplate(templateId);
     if (dto.name !== undefined) template.name = dto.name.trim();
-    if (dto.description !== undefined) template.description = dto.description.trim() || null;
-    if (dto.category !== undefined) template.category = dto.category.trim().toLowerCase();
+    if (dto.description !== undefined)
+      template.description = dto.description.trim() || null;
+    if (dto.category !== undefined)
+      template.category = dto.category.trim().toLowerCase();
     if (dto.isPremium !== undefined) template.isPremium = dto.isPremium;
     if (dto.sortOrder !== undefined) template.sortOrder = dto.sortOrder;
     template.updatedByAdminId = adminId;
     return this.templateRepository.save(template);
   }
 
-  async saveDraft(adminId: string, templateId: string, dto: SaveResumeTemplateDraftDto) {
+  async saveDraft(
+    adminId: string,
+    templateId: string,
+    dto: SaveResumeTemplateDraftDto,
+  ) {
     const template = await this.requireTemplate(templateId);
     const source = this.validateSource(dto);
     const latest = await this.versionRepository.findOne({
@@ -154,7 +166,8 @@ export class ResumeTemplateService {
       where: { templateId, status: ResumeTemplateVersionStatus.DRAFT },
       order: { versionNumber: 'DESC' },
     });
-    if (!draft) throw new BadRequestException('No draft version is available to publish');
+    if (!draft)
+      throw new BadRequestException('No draft version is available to publish');
 
     const previewData = this.buildPreviewData(
       draft.sampleData,
@@ -206,13 +219,25 @@ export class ResumeTemplateService {
   async listAdmin(query: ResumeTemplateAdminQueryDto) {
     const qb = this.templateRepository.createQueryBuilder('template');
     if (query.search?.trim()) {
-      qb.andWhere('(template.name ILIKE :search OR template.slug ILIKE :search OR template.description ILIKE :search)', {
-        search: `%${query.search.trim()}%`,
-      });
+      qb.andWhere(
+        '(template.name ILIKE :search OR template.slug ILIKE :search OR template.description ILIKE :search)',
+        {
+          search: `%${query.search.trim()}%`,
+        },
+      );
     }
-    if (query.category?.trim()) qb.andWhere('template.category = :category', { category: query.category.trim().toLowerCase() });
-    if (query.status?.trim()) qb.andWhere('template.status = :status', { status: query.status.trim().toLowerCase() });
-    qb.orderBy('template.sortOrder', 'ASC').addOrderBy('template.createdAt', 'DESC');
+    if (query.category?.trim())
+      qb.andWhere('template.category = :category', {
+        category: query.category.trim().toLowerCase(),
+      });
+    if (query.status?.trim())
+      qb.andWhere('template.status = :status', {
+        status: query.status.trim().toLowerCase(),
+      });
+    qb.orderBy('template.sortOrder', 'ASC').addOrderBy(
+      'template.createdAt',
+      'DESC',
+    );
     qb.skip((query.page - 1) * query.limit).take(query.limit);
     const [templates, total] = await qb.getManyAndCount();
     const items = await Promise.all(
@@ -225,7 +250,9 @@ export class ResumeTemplateService {
             )
           : null,
         previewImageUrl: template.previewImageStorageKey
-          ? await this.storageService.signedImage(template.previewImageStorageKey)
+          ? await this.storageService.signedImage(
+              template.previewImageStorageKey,
+            )
           : null,
       })),
     );
@@ -256,14 +283,22 @@ export class ResumeTemplateService {
   async listPublished(query: ResumeTemplateQueryDto) {
     const qb = this.templateRepository
       .createQueryBuilder('template')
-      .where('template.status = :status', { status: ResumeTemplateStatus.PUBLISHED })
+      .where('template.status = :status', {
+        status: ResumeTemplateStatus.PUBLISHED,
+      })
       .andWhere('template.publishedVersionId IS NOT NULL');
     if (query.search?.trim()) {
-      qb.andWhere('(template.name ILIKE :search OR template.description ILIKE :search)', {
-        search: `%${query.search.trim()}%`,
-      });
+      qb.andWhere(
+        '(template.name ILIKE :search OR template.description ILIKE :search)',
+        {
+          search: `%${query.search.trim()}%`,
+        },
+      );
     }
-    if (query.category?.trim()) qb.andWhere('template.category = :category', { category: query.category.trim().toLowerCase() });
+    if (query.category?.trim())
+      qb.andWhere('template.category = :category', {
+        category: query.category.trim().toLowerCase(),
+      });
     qb.orderBy('template.sortOrder', 'ASC').addOrderBy('template.name', 'ASC');
     qb.skip((query.page - 1) * query.limit).take(query.limit);
     const [templates, total] = await qb.getManyAndCount();
@@ -294,7 +329,9 @@ export class ResumeTemplateService {
           : undefined;
 
         if (!version) {
-          throw new NotFoundException('Published template version was not found');
+          throw new NotFoundException(
+            'Published template version was not found',
+          );
         }
 
         return {
@@ -307,7 +344,9 @@ export class ResumeTemplateService {
           publishedAt: version.publishedAt,
           fieldSchema: version.fieldSchema,
           previewImageUrl: template.previewImageStorageKey
-            ? await this.storageService.signedImage(template.previewImageStorageKey)
+            ? await this.storageService.signedImage(
+                template.previewImageStorageKey,
+              )
             : null,
         };
       }),
@@ -370,16 +409,24 @@ export class ResumeTemplateService {
       .createQueryBuilder('template')
       .select('template.category', 'category')
       .addSelect('COUNT(*)', 'count')
-      .where('template.status = :status', { status: ResumeTemplateStatus.PUBLISHED })
+      .where('template.status = :status', {
+        status: ResumeTemplateStatus.PUBLISHED,
+      })
       .groupBy('template.category')
       .orderBy('template.category', 'ASC')
       .getRawMany<{ category: string; count: string }>();
-    return rows.map((row) => ({ category: row.category, count: Number(row.count) }));
+    return rows.map((row) => ({
+      category: row.category,
+      count: Number(row.count),
+    }));
   }
 
   async getPublishedTemplate(templateId: string) {
     const template = await this.requireTemplate(templateId);
-    if (template.status !== ResumeTemplateStatus.PUBLISHED || !template.publishedVersionId) {
+    if (
+      template.status !== ResumeTemplateStatus.PUBLISHED ||
+      !template.publishedVersionId
+    ) {
       throw new NotFoundException('Published template was not found');
     }
     const version = await this.requirePublishedVersion(template);
@@ -417,19 +464,23 @@ export class ResumeTemplateService {
         index: '{{@index}}',
       },
       markupConventions: {
-        hideEmptySection: '<section data-resume-section="summary">...</section>',
+        hideEmptySection:
+          '<section data-resume-section="summary">...</section>',
         avoidEntrySplit: '<article data-resume-entry>...</article>',
         avoidOrphanHeading: '<h2 data-resume-section-title>Experience</h2>',
         cropPhoto: '<img data-resume-photo src="{{personal.photoUrl}}" />',
       },
-      security: 'HTML/CSS only. JavaScript, event handlers, external imports, and hard-coded remote URLs are rejected.',
+      security:
+        'HTML/CSS only. JavaScript, event handlers, external imports, and hard-coded remote URLs are rejected.',
       aiAssist: { summary: 'POST /resume-studio/ai/summary-suggestions' },
       fieldInference: {
         endpoint: 'POST /admin/resume-studio/templates/infer-field-schema',
-        behavior: 'Scans HTML placeholders and returns a Flutter-ready field schema while preserving editable labels, limits, order, and zones.',
+        behavior:
+          'Scans HTML placeholders and returns a Flutter-ready field schema while preserving editable labels, limits, order, and zones.',
       },
       sampleData: {
-        behavior: 'Optional template-specific JSON used only for admin/published previews. It is versioned with the template and never becomes a user CV.',
+        behavior:
+          'Optional template-specific JSON used only for admin/published previews. It is versioned with the template and never becomes a user CV.',
         supportedTopLevelKeys: [
           'personal',
           'summary',
@@ -444,7 +495,8 @@ export class ResumeTemplateService {
       },
       aiCodeGenerationInstructions: this.buildAiCodeGenerationInstructions(),
       publishedPreview: 'GET /resume-studio/templates/:id/preview',
-      rendering: 'A4 PDF generated by backend Chromium. Admin preview and final user PDF use the same renderer.',
+      rendering:
+        'A4 PDF generated by backend Chromium. Admin preview and final user PDF use the same renderer.',
     };
   }
 
@@ -452,7 +504,8 @@ export class ResumeTemplateService {
     sampleData: Record<string, unknown> | null,
     fieldSchema: ResumeTemplateFieldSchema,
   ): ResumeData {
-    const source = sampleData ??
+    const source =
+      sampleData ??
       (RESUME_PREVIEW_SAMPLE as unknown as Record<string, unknown>);
     const normalized = this.schemaService.normalizeResumeData(source);
     const withPhoto = this.withDefaultPreviewPhoto(normalized, fieldSchema);
@@ -502,16 +555,39 @@ export class ResumeTemplateService {
             !field.hidden,
         ),
     );
-    if (!photoEnabled) return data;
+
+    if (!photoEnabled) {
+      return data;
+    }
+
+    // IMPORTANT: preserve the supplied preview photo.
+    if (data.personal?.photoUrl?.trim()) {
+      return data;
+    }
 
     const fullName = data.personal?.fullName?.trim() || 'CV Preview';
-    const initials = fullName
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part.charAt(0).toUpperCase())
-      .join('') || 'CV';
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="54%" text-anchor="middle" font-size="120" font-family="Arial" fill="#6b7280">${initials}</text></svg>`;
+
+    const initials =
+      fullName
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join('') || 'CV';
+
+    const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">
+      <rect width="100%" height="100%" fill="#e5e7eb"/>
+      <text
+        x="50%"
+        y="54%"
+        text-anchor="middle"
+        font-size="120"
+        font-family="Arial"
+        fill="#6b7280"
+      >${initials}</text>
+    </svg>
+  `;
 
     return {
       ...data,
@@ -537,8 +613,12 @@ export class ResumeTemplateService {
     checksum: string;
   } {
     this.securityService.validate(input.html, input.css);
-    const fieldSchema = this.schemaService.validateTemplateSchema(input.fieldSchema);
-    const rendererConfig = this.schemaService.validateRendererConfig(input.rendererConfig);
+    const fieldSchema = this.schemaService.validateTemplateSchema(
+      input.fieldSchema,
+    );
+    const rendererConfig = this.schemaService.validateRendererConfig(
+      input.rendererConfig,
+    );
     const sampleData = this.normalizeStoredSampleData(input.sampleData);
     const checksum = createHash('sha256')
       .update(
@@ -569,9 +649,7 @@ export class ResumeTemplateService {
 
     const serialized = JSON.stringify(sampleData);
     if (Buffer.byteLength(serialized, 'utf8') > 150_000) {
-      throw new BadRequestException(
-        'Preview sample data cannot exceed 150 KB',
-      );
+      throw new BadRequestException('Preview sample data cannot exceed 150 KB');
     }
 
     return this.schemaService.normalizeResumeData(
@@ -585,9 +663,13 @@ export class ResumeTemplateService {
     return template;
   }
 
-  private async requirePublishedVersion(template: ResumeTemplate): Promise<ResumeTemplateVersion> {
+  private async requirePublishedVersion(
+    template: ResumeTemplate,
+  ): Promise<ResumeTemplateVersion> {
     const version = template.publishedVersionId
-      ? await this.versionRepository.findOne({ where: { id: template.publishedVersionId } })
+      ? await this.versionRepository.findOne({
+          where: { id: template.publishedVersionId },
+        })
       : null;
     if (!version || version.status !== ResumeTemplateVersionStatus.PUBLISHED) {
       throw new NotFoundException('Published template version was not found');

@@ -517,10 +517,7 @@ body > :first-child {
  * rows, etc.) should stay together when practical.
  */
 
-[data-resume-entry] {
-  break-inside: avoid;
-  page-break-inside: avoid;
-}
+
 
 /*
  * Long-form experience and project entries are different: keeping the entire
