@@ -4,7 +4,7 @@ import { RESUME_LIMITS } from './resume-limits';
 export const RESUME_ALLOWED_FIELD_KEYS = new Set([
   'personal.fullName', 'personal.jobTitle', 'personal.email', 'personal.phone',
   'personal.location', 'personal.website', 'personal.linkedin', 'personal.github',
-  'personal.photoFileId', 'summary',
+  'personal.photoFileId', 'personal.drivingLicense', 'summary',
   'experience.company', 'experience.position', 'experience.employmentType',
   'experience.location', 'experience.startDate', 'experience.endDate',
   'experience.isCurrent',
@@ -45,6 +45,7 @@ export const DEFAULT_RESUME_FIELD_SCHEMA: ResumeTemplateFieldSchema = {
         { key: 'personal.linkedin', label: 'LinkedIn', type: 'url', enabled: true, maxLength: RESUME_LIMITS.url },
         { key: 'personal.github', label: 'GitHub', type: 'url', enabled: true, maxLength: RESUME_LIMITS.url },
         { key: 'personal.photoFileId', label: 'Profile photo', type: 'image', enabled: true },
+        { key: 'personal.drivingLicense', label: 'Driving license', type: 'tags', enabled: true, maxItems: RESUME_LIMITS.drivingLicenseItems, maxLength: 40 },
       ],
     },
     {
@@ -72,8 +73,8 @@ export const DEFAULT_RESUME_FIELD_SCHEMA: ResumeTemplateFieldSchema = {
         { key: 'experience.startDate', label: 'Start date', type: 'date', enabled: true },
         { key: 'experience.endDate', label: 'End date', type: 'date', enabled: true },
         { key: 'experience.isCurrent', label: 'Currently working here', type: 'boolean', enabled: true },
-        { key: 'experience.description', label: 'Description', type: 'textarea', enabled: true, maxLength: RESUME_LIMITS.description },
-        { key: 'experience.bullets', label: 'Highlights', type: 'repeatable', enabled: true, maxItems: RESUME_LIMITS.bulletsPerItem, maxLength: RESUME_LIMITS.bullet },
+        { key: 'experience.description', label: 'Description', type: 'textarea', enabled: true, maxLength: RESUME_LIMITS.description, aiAssist: 'description-suggestions' },
+        { key: 'experience.bullets', label: 'Highlights', type: 'repeatable', enabled: true, maxItems: RESUME_LIMITS.bulletsPerItem, maxLength: RESUME_LIMITS.bullet, aiAssist: 'highlight-suggestions' },
       ],
     },
     {
@@ -103,7 +104,7 @@ export const DEFAULT_RESUME_FIELD_SCHEMA: ResumeTemplateFieldSchema = {
       order: 40,
       zone: 'sidebar',
       maxItems: RESUME_LIMITS.skillItems,
-      fields: [{ key: 'skills', label: 'Skills', type: 'tags', enabled: true, maxItems: RESUME_LIMITS.skillItems, maxLength: RESUME_LIMITS.shortText }],
+      fields: [{ key: 'skills', label: 'Skills', type: 'tags', enabled: true, maxItems: RESUME_LIMITS.skillItems, maxLength: RESUME_LIMITS.shortText, aiAssist: 'technical-skill-suggestions' }],
     },
     {
       key: 'projects',
@@ -119,8 +120,8 @@ export const DEFAULT_RESUME_FIELD_SCHEMA: ResumeTemplateFieldSchema = {
         { key: 'projects.startDate', label: 'Start date', type: 'date', enabled: true },
         { key: 'projects.endDate', label: 'End date', type: 'date', enabled: true },
         { key: 'projects.isCurrent', label: 'Ongoing project', type: 'boolean', enabled: true },
-        { key: 'projects.description', label: 'Description', type: 'textarea', enabled: true, maxLength: RESUME_LIMITS.description },
-        { key: 'projects.bullets', label: 'Highlights', type: 'repeatable', enabled: true, maxItems: RESUME_LIMITS.bulletsPerItem, maxLength: RESUME_LIMITS.bullet },
+        { key: 'projects.description', label: 'Description', type: 'textarea', enabled: true, maxLength: RESUME_LIMITS.description, aiAssist: 'description-suggestions' },
+        { key: 'projects.bullets', label: 'Highlights', type: 'repeatable', enabled: true, maxItems: RESUME_LIMITS.bulletsPerItem, maxLength: RESUME_LIMITS.bullet, aiAssist: 'highlight-suggestions' },
         { key: 'projects.technologies', label: 'Technologies', type: 'tags', enabled: true, maxItems: 30, maxLength: RESUME_LIMITS.shortText },
       ],
     },

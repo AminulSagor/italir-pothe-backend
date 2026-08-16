@@ -472,7 +472,16 @@ export class ResumeTemplateService {
       },
       security:
         'HTML/CSS only. JavaScript, event handlers, external imports, and hard-coded remote URLs are rejected.',
-      aiAssist: { summary: 'POST /resume-studio/ai/summary-suggestions' },
+      aiAssist: {
+        summary: 'POST /resume-studio/ai/summary-suggestions',
+        fieldSuggestions: 'POST /resume-studio/ai/field-suggestions',
+        supported: [
+          'summary-suggestions',
+          'description-suggestions',
+          'highlight-suggestions',
+          'technical-skill-suggestions',
+        ],
+      },
       fieldInference: {
         endpoint: 'POST /admin/resume-studio/templates/infer-field-schema',
         behavior:
@@ -519,14 +528,16 @@ export class ResumeTemplateService {
       'Return exactly two code blocks: HTML first, CSS second. Do not include JavaScript.',
       'Use Handlebars-style placeholders such as {{personal.fullName}}, {{#if summary}}...{{/if}}, and {{#each experience}}...{{company}}...{{/each}}.',
       'Use only these top-level CV sections when needed: personal, summary, experience, education, skills, projects, languages, certifications, references.',
-      'Exact personal placeholders: personal.fullName, personal.jobTitle, personal.email, personal.phone, personal.location, personal.website, personal.linkedin, personal.github, personal.photoUrl.',
+      'Exact personal placeholders: personal.fullName, personal.jobTitle, personal.email, personal.phone, personal.location, personal.website, personal.linkedin, personal.github, personal.photoUrl, personal.drivingLicense.',
       'Inside {{#each experience}} use: company, position, employmentType, location, startDate, endDate, isCurrent, description, bullets. Use position, never role, for experience.',
       'Inside {{#each education}} use: institution, degree, fieldOfStudy, cgpa, location, startDate, endDate, isCurrent, achievements, description.',
       'Inside {{#each projects}} use: name, role, url, startDate, endDate, isCurrent, description, bullets, technologies.',
       'Inside {{#each languages}} use: name, proficiency.',
       'Inside {{#each certifications}} use: name, issuer, issueDate, expiryDate, doesNotExpire, credentialId, credentialUrl.',
       'Inside {{#each references}} use: name, title, company, email, phone.',
-      'skills is an array of strings and summary is a string.',
+      'skills and personal.drivingLicense are arrays of strings; summary is a string.',
+      'When the design has room, include driving-license categories because they are especially useful for logistics, industrial, transport, and hospitality applicants in Italy.',
+      'Templates must remain usable for any profession; do not hard-code restaurant, industrial, or logistics wording into visible CV content.',
       'Wrap hideable sections with data-resume-section="sectionKey".',
       'Mark repeatable entries with data-resume-entry, section headings with data-resume-section-title, and profile images with data-resume-photo.',
       'Use data-resume-entry exactly; do not invent data-resume-entity or other pagination attributes.',

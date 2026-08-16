@@ -9,6 +9,7 @@ export interface ResumePersonalInfo {
   github?: string;
   photoFileId?: string;
   photoUrl?: string;
+  drivingLicense?: string[];
 }
 
 export interface ResumeExperienceItem {

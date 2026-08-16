@@ -17,6 +17,7 @@ export const RESUME_LIMITS = {
   experienceItems: 15,
   educationItems: 10,
   skillItems: 40,
+  drivingLicenseItems: 12,
   projectItems: 15,
   languageItems: 10,
   certificationItems: 15,

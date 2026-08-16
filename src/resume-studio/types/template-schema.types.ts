@@ -54,7 +54,11 @@ export interface ResumeFieldDefinition {
   maxLength?: number;
   maxItems?: number;
   options?: string[];
-  aiAssist?: 'summary-suggestions';
+  aiAssist?:
+    | 'summary-suggestions'
+    | 'description-suggestions'
+    | 'highlight-suggestions'
+    | 'technical-skill-suggestions';
 }
 
 export interface ResumeSectionDefinition {

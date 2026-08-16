@@ -99,10 +99,7 @@ export class ResumeSchemaService {
                     )
                     .slice(0, 50)
                 : undefined,
-              aiAssist:
-                fieldKey === 'summary'
-                  ? ('summary-suggestions' as const)
-                  : undefined,
+              aiAssist: this.aiAssistForField(fieldKey),
             };
           })
         : undefined;
@@ -205,6 +202,11 @@ export class ResumeSchemaService {
           linkedin: this.cleanUrl(personalRaw.linkedin),
           github: this.cleanUrl(personalRaw.github),
           photoFileId: this.cleanUuidLike(personalRaw.photoFileId),
+          drivingLicense: this.normalizeStringArray(
+            personalRaw.drivingLicense,
+            RESUME_LIMITS.drivingLicenseItems,
+            40,
+          ),
         }
       : undefined;
 
@@ -285,6 +287,24 @@ export class ResumeSchemaService {
       }
     }
     return this.removeEmptyValues(output) as ResumeData;
+  }
+
+  private aiAssistForField(fieldKey: string) {
+    if (fieldKey === 'summary') return 'summary-suggestions' as const;
+    if (fieldKey === 'skills') return 'technical-skill-suggestions' as const;
+    if (
+      fieldKey === 'experience.description' ||
+      fieldKey === 'projects.description'
+    ) {
+      return 'description-suggestions' as const;
+    }
+    if (
+      fieldKey === 'experience.bullets' ||
+      fieldKey === 'projects.bullets'
+    ) {
+      return 'highlight-suggestions' as const;
+    }
+    return undefined;
   }
 
   private normalizeExperiences(
