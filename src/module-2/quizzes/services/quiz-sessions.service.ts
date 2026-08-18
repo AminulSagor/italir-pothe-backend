@@ -141,6 +141,27 @@ export class QuizSessionsService {
       throw new BadRequestException('This quiz has no active questions');
     }
 
+    const existingSession = await this.sessionRepository.findOne({
+      where: {
+        userId: user.id,
+        quizId: quiz.id,
+        lessonId,
+        status: QuizSessionStatus.IN_PROGRESS,
+      },
+      order: {
+        updatedAt: 'DESC',
+      },
+    });
+
+    if (existingSession) {
+      if (existingSession.totalQuestions !== questions.length) {
+        existingSession.totalQuestions = questions.length;
+        await this.sessionRepository.save(existingSession);
+      }
+
+      return this.findSessionById(existingSession.id, user);
+    }
+
     const session = this.sessionRepository.create({
       userId: user.id,
       quizId: quiz.id,
@@ -298,7 +319,12 @@ export class QuizSessionsService {
 
     const questions = await this.findActiveQuestions(session.quizId);
 
-    if (session.answers.length < questions.length) {
+    const activeQuestionIds = new Set(questions.map((question) => question.id));
+    const activeAnswers = session.answers.filter((answer) =>
+      activeQuestionIds.has(answer.questionId),
+    );
+
+    if (activeAnswers.length < questions.length) {
       throw new BadRequestException(
         'Please answer all questions before completing the quiz',
       );
@@ -1016,9 +1042,12 @@ export class QuizSessionsService {
     questions: QuizQuestion[],
   ): QuizSessionResponse {
     const answerMap = new Map<string, QuizAttemptAnswer>();
+    const activeQuestionIds = new Set(questions.map((question) => question.id));
 
     for (const answer of session.answers ?? []) {
-      answerMap.set(answer.questionId, answer);
+      if (activeQuestionIds.has(answer.questionId)) {
+        answerMap.set(answer.questionId, answer);
+      }
     }
 
     return {

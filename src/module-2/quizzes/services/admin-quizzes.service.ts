@@ -236,6 +236,21 @@ export class AdminQuizzesService {
 
     const savedQuestion = await this.dataSource.transaction(async (manager) => {
       const questionRepository = manager.getRepository(QuizQuestion);
+      const lockedQuiz = await manager.getRepository(Quiz).findOne({
+        where: { id: quiz.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!lockedQuiz) {
+        throw new NotFoundException('Quiz not found');
+      }
+
+      const maxSortOrderResult = await questionRepository
+        .createQueryBuilder('question')
+        .select('COALESCE(MAX(question.sortOrder), 0)', 'max_sort_order')
+        .where('question.quizId = :quizId', { quizId: quiz.id })
+        .getRawOne<{ max_sort_order: string }>();
+      const nextSortOrder = Number(maxSortOrderResult?.max_sort_order ?? 0) + 1;
 
       const question = questionRepository.create({
         quizId: quiz.id,
@@ -247,7 +262,7 @@ export class AdminQuizzesService {
         mediaFileId: payload.mediaFileId ?? null,
         generatedAudioText: payload.generatedAudioText ?? null,
         points: payload.points ?? 1,
-        sortOrder: payload.sortOrder ?? 0,
+        sortOrder: nextSortOrder,
         status: payload.status ?? QuizQuestionStatus.DRAFT,
       });
 
@@ -344,7 +359,29 @@ export class AdminQuizzesService {
     this.validateQuestionPayload(payload);
 
     await this.dataSource.transaction(async (manager) => {
-      await manager.getRepository(QuizQuestion).save({
+      await manager.getRepository(Quiz).findOne({
+        where: { id: question.quizId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      const questionRepository = manager.getRepository(QuizQuestion);
+      const nextSortOrder = payload.sortOrder ?? question.sortOrder;
+      const conflictingQuestion = await questionRepository.findOne({
+        where: {
+          quizId: question.quizId,
+          sortOrder: nextSortOrder,
+          id: Not(question.id),
+        },
+        select: { id: true },
+      });
+
+      if (conflictingQuestion) {
+        throw new ConflictException(
+          `Another question already uses sort order ${nextSortOrder}`,
+        );
+      }
+
+      await questionRepository.save({
         id: question.id,
         questionType: payload.questionType,
         title: payload.title ?? null,
@@ -354,7 +391,7 @@ export class AdminQuizzesService {
         mediaFileId: payload.mediaFileId ?? null,
         generatedAudioText: payload.generatedAudioText ?? null,
         points: payload.points ?? 1,
-        sortOrder: payload.sortOrder ?? 0,
+        sortOrder: nextSortOrder,
         status: payload.status ?? QuizQuestionStatus.DRAFT,
       });
 

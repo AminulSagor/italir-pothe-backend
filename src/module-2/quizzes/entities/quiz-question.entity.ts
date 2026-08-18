@@ -23,6 +23,9 @@ export enum QuizQuestionStatus {
   ARCHIVED = 'archived',
 }
 
+@Index('UQ_quiz_questions_quiz_sort_order', ['quizId', 'sortOrder'], {
+  unique: true,
+})
 @Entity('quiz_questions')
 export class QuizQuestion {
   @PrimaryGeneratedColumn('uuid')

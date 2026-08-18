@@ -187,7 +187,7 @@ export class CreateQuizQuestionDto {
 
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(1)
   sortOrder?: number;
 
   @IsOptional()
@@ -260,7 +260,7 @@ export class UpdateQuizQuestionDto {
 
   @IsOptional()
   @IsInt()
-  @Min(0)
+  @Min(1)
   sortOrder?: number;
 
   @IsOptional()
