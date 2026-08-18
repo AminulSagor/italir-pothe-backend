@@ -16,6 +16,7 @@ import { UserRole } from 'src/users/entities/user.entity';
 import {
   CreateQuizDto,
   CreateQuizQuestionDto,
+  ReorderQuizQuestionsDto,
   UpdateQuizDto,
   UpdateQuizQuestionDto,
 } from '../dto/admin-quiz.dto';
@@ -79,6 +80,14 @@ export class AdminQuizzesController {
   @Get('quizzes/:quizId/questions')
   async findQuestionsByQuiz(@Param('quizId') quizId: string) {
     return this.adminQuizzesService.findQuestionsByQuiz(quizId);
+  }
+
+  @Patch('quizzes/:quizId/questions/reorder')
+  async reorderQuestions(
+    @Param('quizId') quizId: string,
+    @Body() dto: ReorderQuizQuestionsDto,
+  ) {
+    return this.adminQuizzesService.reorderQuestions(quizId, dto);
   }
 
   @Get('quiz-questions/:questionId')

@@ -14,6 +14,7 @@ import {
   QuizAcceptedAnswerDto,
   QuizMatchingPairDto,
   QuizQuestionOptionDto,
+  ReorderQuizQuestionsDto,
   QuizSequenceItemDto,
   UpdateQuizDto,
   UpdateQuizQuestionDto,
@@ -319,6 +320,63 @@ export class AdminQuizzesService {
     this.sortQuestionChildren(question);
 
     return question;
+  }
+
+  async reorderQuestions(quizId: string, dto: ReorderQuizQuestionsDto) {
+    await this.getQuizById(quizId);
+
+    await this.dataSource.transaction(async (manager) => {
+      const lockedQuiz = await manager.getRepository(Quiz).findOne({
+        where: { id: quizId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!lockedQuiz) {
+        throw new NotFoundException('Quiz not found');
+      }
+
+      const questionRepository = manager.getRepository(QuizQuestion);
+      const questions = await questionRepository.find({
+        where: { quizId },
+        select: { id: true, sortOrder: true },
+      });
+      const existingQuestionIds = new Set(
+        questions.map((question) => question.id),
+      );
+
+      if (
+        dto.questionIds.length !== questions.length ||
+        dto.questionIds.some(
+          (questionId) => !existingQuestionIds.has(questionId),
+        )
+      ) {
+        throw new BadRequestException(
+          'Question order must include every question in this quiz exactly once',
+        );
+      }
+
+      const highestSortOrder = questions.reduce(
+        (highestOrder, question) => Math.max(highestOrder, question.sortOrder),
+        0,
+      );
+      const temporaryOrderStart = highestSortOrder + questions.length + 1;
+
+      for (const [index, questionId] of dto.questionIds.entries()) {
+        await questionRepository.update(
+          { id: questionId, quizId },
+          { sortOrder: temporaryOrderStart + index },
+        );
+      }
+
+      for (const [index, questionId] of dto.questionIds.entries()) {
+        await questionRepository.update(
+          { id: questionId, quizId },
+          { sortOrder: index + 1 },
+        );
+      }
+    });
+
+    return this.findQuestionsByQuiz(quizId);
   }
 
   async updateQuestion(questionId: string, dto: UpdateQuizQuestionDto) {

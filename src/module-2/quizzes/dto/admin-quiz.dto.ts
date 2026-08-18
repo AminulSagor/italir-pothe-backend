@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -290,4 +292,12 @@ export class UpdateQuizQuestionDto {
   @ValidateNested({ each: true })
   @Type(() => QuizAcceptedAnswerDto)
   acceptedAnswers?: QuizAcceptedAnswerDto[];
+}
+
+export class ReorderQuizQuestionsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID(undefined, { each: true })
+  questionIds: string[];
 }
