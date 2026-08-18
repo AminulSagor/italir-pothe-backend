@@ -56,11 +56,17 @@ export class ResumeAiSuggestionService {
       'Return only valid JSON in this shape: {"suggestions":["..."]}.',
       dto.targetRole ? `Target role: ${dto.targetRole.trim()}` : '',
       dto.itemTitle ? `Current role/project: ${dto.itemTitle.trim()}` : '',
-      dto.organization ? `Company/project name: ${dto.organization.trim()}` : '',
+      dto.organization
+        ? `Company/project name: ${dto.organization.trim()}`
+        : '',
       skills.length ? `Existing skills: ${skills.join(', ')}` : '',
-      highlights.length ? `Existing experience context: ${highlights.join(' | ')}` : '',
+      highlights.length
+        ? `Existing experience context: ${highlights.join(' | ')}`
+        : '',
       dto.currentText?.trim() ? `Current text: ${dto.currentText.trim()}` : '',
-      existingItems.length ? `Already included items: ${existingItems.join(' | ')}` : '',
+      existingItems.length
+        ? `Already included items: ${existingItems.join(' | ')}`
+        : '',
     ].filter(Boolean);
 
     const task = (() => {
@@ -94,47 +100,17 @@ export class ResumeAiSuggestionService {
   }
 
   private cleanInputList(value?: string[]): string[] {
-    return (value ?? [])
-      .map((item) => item.trim())
-      .filter(Boolean);
+    return (value ?? []).map((item) => item.trim()).filter(Boolean);
   }
 
   private extractSuggestions(response: unknown, maxItems: number): string[] {
-    const root = this.asRecord(response);
-    if (Array.isArray(root?.suggestions)) {
-      return this.cleanSuggestions(root.suggestions, maxItems);
-    }
+    const structured = this.findStructuredSuggestions(response, maxItems);
+    if (structured.length) return structured;
 
-    const message = this.asRecord(root?.message);
-    const candidate = [
-      root?.reply,
-      root?.text,
-      root?.response,
-      root?.assistantMessage,
-      typeof root?.message === 'string' ? root.message : undefined,
-      message?.primary,
-      message?.text,
-      message?.content,
-    ].find(
-      (value): value is string =>
-        typeof value === 'string' && value.trim().length > 0,
+    const candidate = this.collectTextCandidates(response).find(
+      (value) => !this.looksLikeStructuredPayload(value),
     );
-
     if (!candidate) return [];
-
-    const jsonText = candidate
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/```\s*$/i, '')
-      .trim();
-
-    try {
-      const parsed = this.asRecord(JSON.parse(jsonText) as unknown);
-      if (Array.isArray(parsed?.suggestions)) {
-        return this.cleanSuggestions(parsed.suggestions, maxItems);
-      }
-    } catch {
-      // Some model gateways wrap or flatten JSON. Fall back to plain lines.
-    }
 
     return this.cleanSuggestions(
       candidate
@@ -142,6 +118,134 @@ export class ResumeAiSuggestionService {
         .map((line) => line.replace(/^\s*(?:\d+[.)]|[-*])\s*/, '').trim())
         .filter(Boolean),
       maxItems,
+    );
+  }
+
+  private findStructuredSuggestions(
+    value: unknown,
+    maxItems: number,
+    depth = 0,
+  ): string[] {
+    if (depth > 6 || value == null) return [];
+
+    if (Array.isArray(value)) {
+      if (value.every((item) => typeof item === 'string')) {
+        const direct = this.cleanSuggestions(value, maxItems);
+        if (direct.length) return direct;
+      }
+      for (const item of value) {
+        const nested = this.findStructuredSuggestions(
+          item,
+          maxItems,
+          depth + 1,
+        );
+        if (nested.length) return nested;
+      }
+      return [];
+    }
+
+    if (typeof value === 'string') {
+      const parsed = this.parseStructuredText(value);
+      return parsed === undefined
+        ? []
+        : this.findStructuredSuggestions(parsed, maxItems, depth + 1);
+    }
+
+    const record = this.asRecord(value);
+    if (!record) return [];
+    if (Array.isArray(record.suggestions)) {
+      const direct = this.cleanSuggestions(record.suggestions, maxItems);
+      if (direct.length) return direct;
+      for (const item of record.suggestions) {
+        const nested = this.findStructuredSuggestions(
+          item,
+          maxItems,
+          depth + 1,
+        );
+        if (nested.length) return nested;
+      }
+    }
+
+    for (const key of [
+      'message',
+      'primary',
+      'text',
+      'content',
+      'reply',
+      'response',
+      'assistantMessage',
+      'data',
+    ]) {
+      const nested = this.findStructuredSuggestions(
+        record[key],
+        maxItems,
+        depth + 1,
+      );
+      if (nested.length) return nested;
+    }
+    return [];
+  }
+
+  private parseStructuredText(value: string): unknown | undefined {
+    const normalized = value
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
+    if (!normalized) return undefined;
+
+    const candidates = [normalized];
+    const objectStart = normalized.indexOf('{');
+    const objectEnd = normalized.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      const embedded = normalized.slice(objectStart, objectEnd + 1);
+      if (embedded !== normalized) candidates.push(embedded);
+    }
+
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate) as unknown;
+      } catch {
+        // Try the next possible JSON segment.
+      }
+    }
+    return undefined;
+  }
+
+  private collectTextCandidates(value: unknown, depth = 0): string[] {
+    if (depth > 5 || value == null) return [];
+    if (typeof value === 'string') {
+      const normalized = value.trim();
+      return normalized ? [normalized] : [];
+    }
+
+    const record = this.asRecord(value);
+    if (!record) return [];
+
+    const result: string[] = [];
+    for (const key of [
+      'message',
+      'primary',
+      'text',
+      'content',
+      'reply',
+      'response',
+      'assistantMessage',
+      'data',
+    ]) {
+      result.push(...this.collectTextCandidates(record[key], depth + 1));
+    }
+    return result;
+  }
+
+  private looksLikeStructuredPayload(value: string): boolean {
+    const normalized = value.trim();
+    return (
+      normalized.startsWith('{') ||
+      normalized.startsWith('[') ||
+      normalized.startsWith('```') ||
+      normalized.includes('"suggestions"') ||
+      normalized.includes('"primary"')
     );
   }
 
@@ -153,6 +257,7 @@ export class ResumeAiSuggestionService {
       if (typeof item !== 'string') continue;
       const cleaned = item.replace(/\s+/g, ' ').trim();
       if (cleaned.length < 2 || cleaned.length > 1200) continue;
+      if (this.looksLikeStructuredPayload(cleaned)) continue;
       const key = cleaned.toLocaleLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);

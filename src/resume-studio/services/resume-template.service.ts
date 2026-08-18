@@ -343,6 +343,7 @@ export class ResumeTemplateService {
           isPremium: template.isPremium,
           publishedAt: version.publishedAt,
           fieldSchema: version.fieldSchema,
+          locale: version.rendererConfig.locale ?? 'en',
           previewImageUrl: template.previewImageStorageKey
             ? await this.storageService.signedImage(
                 template.previewImageStorageKey,
@@ -380,6 +381,7 @@ export class ResumeTemplateService {
       isPremium: template.isPremium,
       publishedAt: version.publishedAt,
       fieldSchema: version.fieldSchema,
+      locale: version.rendererConfig.locale ?? 'en',
       previewImageUrl: template.previewImageStorageKey
         ? await this.storageService.signedImage(template.previewImageStorageKey)
         : null,
