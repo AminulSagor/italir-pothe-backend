@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThan, Repository } from 'typeorm';
 
 import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
@@ -190,24 +190,29 @@ export class ProgressService {
       });
     }
 
-    await this.refreshCourseProgress(params.user.id, params.courseId);
-
-    return this.getCourseProgress(params.user.id, params.courseId);
+    return this.refreshCourseProgress(params.user.id, params.courseId);
   }
 
   async getCurrentChapter(userId: string) {
     const activeProgress = await this.lessonProgressRepository.findOne({
-      where: {
-        userId,
-        isCompleted: false,
-      },
+      where: [
+        {
+          userId,
+          isCompleted: false,
+          videoWatchPercent: MoreThan(0),
+        },
+        {
+          userId,
+          isCompleted: false,
+          isTheoryRead: true,
+        },
+      ],
       order: {
         updatedAt: 'DESC',
       },
     });
 
     let lesson: Lesson | null = null;
-    let progress: UserLessonProgress | null = activeProgress;
 
     if (activeProgress) {
       lesson = await this.findPublishedLesson(activeProgress.lessonId);
@@ -217,6 +222,7 @@ export class ProgressService {
       const latestCourse = await this.courseProgressRepository.findOne({
         where: {
           userId,
+          completedLessons: MoreThan(0),
         },
         order: {
           lastActivityAt: 'DESC',
@@ -229,15 +235,6 @@ export class ProgressService {
           userId,
           latestCourse.courseId,
         );
-      }
-
-      if (lesson) {
-        progress = await this.lessonProgressRepository.findOne({
-          where: {
-            userId,
-            lessonId: lesson.id,
-          },
-        });
       }
     }
 
@@ -333,7 +330,13 @@ export class ProgressService {
   }
 
   async getCourseProgress(userId: string, courseId: string) {
-    return this.refreshCourseProgress(userId, courseId);
+    const summary = await this.calculateCourseProgress(userId, courseId);
+
+    return {
+      userId,
+      courseId,
+      ...summary,
+    };
   }
 
   async getCourseCompletionPercent(userId: string, courseId: string) {
@@ -413,6 +416,31 @@ export class ProgressService {
   }
 
   private async refreshCourseProgress(userId: string, courseId: string) {
+    const summary = await this.calculateCourseProgress(userId, courseId);
+
+    let courseProgress = await this.courseProgressRepository.findOne({
+      where: {
+        userId,
+        courseId,
+      },
+    });
+
+    if (!courseProgress) {
+      courseProgress = this.courseProgressRepository.create({
+        userId,
+        courseId,
+      });
+    }
+
+    courseProgress.totalLessons = summary.totalLessons;
+    courseProgress.completedLessons = summary.completedLessons;
+    courseProgress.completionPercent = summary.completionPercent;
+    courseProgress.lastActivityAt = new Date();
+
+    return this.courseProgressRepository.save(courseProgress);
+  }
+
+  private async calculateCourseProgress(userId: string, courseId: string) {
     const totalLessons = await this.lessonRepository.count({
       where: {
         courseId,
@@ -436,25 +464,10 @@ export class ProgressService {
         ? 0
         : Math.round((completedLessons / totalLessons) * 100);
 
-    let courseProgress = await this.courseProgressRepository.findOne({
-      where: {
-        userId,
-        courseId,
-      },
-    });
-
-    if (!courseProgress) {
-      courseProgress = this.courseProgressRepository.create({
-        userId,
-        courseId,
-      });
-    }
-
-    courseProgress.totalLessons = totalLessons;
-    courseProgress.completedLessons = completedLessons;
-    courseProgress.completionPercent = completionPercent;
-    courseProgress.lastActivityAt = new Date();
-
-    return this.courseProgressRepository.save(courseProgress);
+    return {
+      totalLessons,
+      completedLessons,
+      completionPercent,
+    };
   }
 }
