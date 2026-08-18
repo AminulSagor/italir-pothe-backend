@@ -562,11 +562,15 @@ export class FilesService {
       failUploadOnError: false,
     });
 
-    const shouldUseCloudFrontForPdf =
-      file.mimeType.trim().toLowerCase() === 'application/pdf' &&
-      String(file.filePurpose).endsWith('_pdf');
+    const normalizedMimeType = file.mimeType.trim().toLowerCase();
+    const normalizedFilePurpose = String(file.filePurpose).toLowerCase();
+    const shouldUseCloudFront =
+      (normalizedMimeType === 'application/pdf' &&
+        normalizedFilePurpose.endsWith('_pdf')) ||
+      (normalizedMimeType.startsWith('audio/') &&
+        normalizedFilePurpose.endsWith('_audio'));
 
-    const cloudFrontAccess = shouldUseCloudFrontForPdf
+    const cloudFrontAccess = shouldUseCloudFront
       ? this.cloudFrontSignerService.createSignedUrlForFile(file.storageKey)
       : null;
 
