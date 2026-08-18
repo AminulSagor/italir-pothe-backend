@@ -50,6 +50,9 @@ export class ExamTemplate {
   unlockRequirementEnabled: boolean;
 
   @Column({ type: 'boolean', default: true })
+  writingTaskEnabled: boolean;
+
+  @Column({ type: 'boolean', default: true })
   plagiarismMonitorEnabled: boolean;
 
   @Column({ type: 'boolean', default: true })

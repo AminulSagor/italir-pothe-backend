@@ -29,6 +29,7 @@ import {
   ExamQuestionStatus,
   ExamReviewMode,
   ExamSectionStatus,
+  ExamSectionType,
   ExamTemplateStatus,
 } from '../types/final-exam.type';
 import { QuizQuestionFormat } from 'src/module-2/quizzes/types/quiz-question-format.type';
@@ -191,6 +192,7 @@ export class ExamsService {
         totalDurationMinutes: exam.totalDurationMinutes,
         unlockCompletionPercent: exam.unlockCompletionPercent,
         unlockRequirementEnabled: exam.unlockRequirementEnabled,
+        writingTaskEnabled: exam.writingTaskEnabled,
         resultNotice: exam.resultNotice,
         resultNoticeBn: exam.resultNoticeBn,
       },
@@ -312,7 +314,12 @@ export class ExamsService {
         courseTitle: exam.course?.title ?? null,
         totalDurationMinutes: exam.totalDurationMinutes,
         sections: exam.sections
-          .filter((section) => section.status !== ExamSectionStatus.ARCHIVED)
+          .filter(
+            (section) =>
+              section.status === ExamSectionStatus.ACTIVE &&
+              (exam.writingTaskEnabled ||
+                section.sectionType !== ExamSectionType.WRITING_TASK),
+          )
           .map((section) => ({
             id: section.id,
             sectionType: section.sectionType,
@@ -487,6 +494,7 @@ export class ExamsService {
     const attempt = await this.examAttemptRepository.findOne({
       where: { id: attemptId, userId },
       relations: {
+        examTemplate: true,
         review: {
           metric: true,
         },
@@ -509,6 +517,7 @@ export class ExamsService {
     ) {
       return {
         courseId: attempt.courseId,
+        writingTaskEnabled: attempt.examTemplate.writingTaskEnabled,
         status: attempt.status,
         referenceCode: attempt.referenceCode,
         resultReady: false,
@@ -520,6 +529,7 @@ export class ExamsService {
 
     return {
       courseId: attempt.courseId,
+      writingTaskEnabled: attempt.examTemplate.writingTaskEnabled,
       status: attempt.status,
       referenceCode: attempt.referenceCode,
       resultReady: true,

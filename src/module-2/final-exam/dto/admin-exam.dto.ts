@@ -94,6 +94,10 @@ export class CreateExamTemplateDto {
 
   @IsOptional()
   @IsBoolean()
+  writingTaskEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   plagiarismMonitorEnabled?: boolean;
 
   @IsOptional()
@@ -151,6 +155,10 @@ export class UpdateExamTemplateDto {
   @IsOptional()
   @IsBoolean()
   unlockRequirementEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  writingTaskEnabled?: boolean;
 
   @IsOptional()
   @IsBoolean()

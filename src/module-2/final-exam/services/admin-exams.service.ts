@@ -111,6 +111,7 @@ export class AdminExamsService {
       totalDurationMinutes: dto.totalDurationMinutes ?? 60,
       unlockCompletionPercent: dto.unlockCompletionPercent ?? 80,
       unlockRequirementEnabled: dto.unlockRequirementEnabled ?? false,
+      writingTaskEnabled: dto.writingTaskEnabled ?? true,
       plagiarismMonitorEnabled: dto.plagiarismMonitorEnabled ?? true,
       copyPasteMonitorEnabled: dto.copyPasteMonitorEnabled ?? true,
       resultNotice:
@@ -289,6 +290,7 @@ export class AdminExamsService {
       totalDurationMinutes: exam.totalDurationMinutes,
       unlockCompletionPercent: exam.unlockCompletionPercent,
       unlockRequirementEnabled: exam.unlockRequirementEnabled,
+      writingTaskEnabled: exam.writingTaskEnabled,
       plagiarismMonitorEnabled: exam.plagiarismMonitorEnabled,
       copyPasteMonitorEnabled: exam.copyPasteMonitorEnabled,
       resultNotice: exam.resultNotice,
@@ -329,6 +331,10 @@ export class AdminExamsService {
 
     if (dto.unlockRequirementEnabled !== undefined) {
       exam.unlockRequirementEnabled = dto.unlockRequirementEnabled;
+    }
+
+    if (dto.writingTaskEnabled !== undefined) {
+      exam.writingTaskEnabled = dto.writingTaskEnabled;
     }
 
     if (dto.plagiarismMonitorEnabled !== undefined) {
@@ -652,13 +658,21 @@ export class AdminExamsService {
     });
 
     for (const section of exam.sections) {
-      section.status = ExamSectionStatus.ACTIVE;
+      const isDisabledWritingTask =
+        section.sectionType === ExamSectionType.WRITING_TASK &&
+        !exam.writingTaskEnabled;
+
+      section.status = isDisabledWritingTask
+        ? ExamSectionStatus.DRAFT
+        : ExamSectionStatus.ACTIVE;
       await this.examSectionRepository.save(section);
 
       const questions = await this.getNonArchivedQuestions(section.id);
 
       for (const question of questions) {
-        question.status = ExamQuestionStatus.ACTIVE;
+        question.status = isDisabledWritingTask
+          ? ExamQuestionStatus.DRAFT
+          : ExamQuestionStatus.ACTIVE;
       }
 
       await this.examQuestionRepository.save(questions);
@@ -1393,7 +1407,7 @@ export class AdminExamsService {
       throw new BadRequestException('Part 2 Listening Lab is not ready');
     }
 
-    if (!progress.checklist.writingTaskReady) {
+    if (exam.writingTaskEnabled && !progress.checklist.writingTaskReady) {
       throw new BadRequestException('Part 3 Writing Task is not ready');
     }
 
@@ -1421,7 +1435,9 @@ export class AdminExamsService {
       ),
       coreQuizReady: coreQuizCount === this.coreQuizTargetQuestions,
       listeningLabReady: listeningCount === this.listeningTargetQuestions,
-      writingTaskReady: writingCount >= 1 && Boolean(writingTask?.rule),
+      writingTaskReady:
+        !exam.writingTaskEnabled ||
+        (writingCount >= 1 && Boolean(writingTask?.rule)),
       speakingLabReady: speakingCount >= 1 && Boolean(speakingLab?.rule),
     };
 
@@ -1450,7 +1466,7 @@ export class AdminExamsService {
         writingTask: {
           sectionId: writingTask?.id ?? null,
           currentQuestions: writingCount,
-          requiredQuestions: 1,
+          requiredQuestions: exam.writingTaskEnabled ? 1 : 0,
           ready: checklist.writingTaskReady,
         },
         speakingLab: {
