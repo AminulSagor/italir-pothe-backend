@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { CloudFrontSignerService } from '../../files/services/cloudfront-signer.service';
 import { S3Service } from '../../files/services/s3.service';
 
 @Injectable()
 export class ResumeStorageService {
-  constructor(private readonly s3Service: S3Service) {}
+  constructor(
+    private readonly s3Service: S3Service,
+    private readonly cloudFrontSignerService: CloudFrontSignerService,
+  ) {}
 
   /**
    * Keep exactly one generated PDF object per Resume Studio document.
@@ -69,11 +73,36 @@ export class ResumeStorageService {
     });
   }
 
+  async signedTemplatePdf(storageKey: string, fileName: string) {
+    return this.signedTemplateAsset({
+      storageKey,
+      mimeType: 'application/pdf',
+      originalName: fileName,
+    });
+  }
+
   async signedImage(storageKey: string) {
-    return this.s3Service.createSignedReadUrl({
+    return this.signedTemplateAsset({
       storageKey,
       mimeType: 'image/png',
       originalName: 'resume-template-preview.png',
+    });
+  }
+
+  private async signedTemplateAsset(params: {
+    storageKey: string;
+    mimeType: string;
+    originalName: string;
+  }): Promise<string> {
+    const cloudFrontAccess =
+      this.cloudFrontSignerService.createSignedUrlForFile(params.storageKey);
+
+    if (cloudFrontAccess) {
+      return cloudFrontAccess.signedUrl;
+    }
+
+    return this.s3Service.createSignedReadUrl({
+      ...params,
       dispositionType: 'inline',
     });
   }

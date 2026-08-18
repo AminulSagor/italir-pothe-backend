@@ -244,7 +244,7 @@ export class ResumeTemplateService {
       templates.map(async (template) => ({
         ...template,
         previewPdfUrl: template.previewPdfStorageKey
-          ? await this.storageService.signedPdf(
+          ? await this.storageService.signedTemplatePdf(
               template.previewPdfStorageKey,
               `${template.slug}-preview.pdf`,
             )
@@ -269,7 +269,7 @@ export class ResumeTemplateService {
       template,
       versions,
       previewPdfUrl: template.previewPdfStorageKey
-        ? await this.storageService.signedPdf(
+        ? await this.storageService.signedTemplatePdf(
             template.previewPdfStorageKey,
             `${template.slug}-preview.pdf`,
           )
@@ -398,7 +398,7 @@ export class ResumeTemplateService {
         ? await this.storageService.signedImage(template.previewImageStorageKey)
         : null,
       previewPdfUrl: template.previewPdfStorageKey
-        ? await this.storageService.signedPdf(
+        ? await this.storageService.signedTemplatePdf(
             template.previewPdfStorageKey,
             `${template.slug}-preview.pdf`,
           )
