@@ -11,8 +11,13 @@ import { Course } from '../../courses/entities/course.entity';
 import {
   AdminEnrollmentQueryDto,
   CreateCourseProviderProductDto,
+  GrantExternalCourseAccessDto,
   UpdateCourseProviderProductDto,
 } from '../dto/admin-course-commerce.dto';
+import {
+  AdminCourseAccessGrant,
+  AdminCourseAccessGrantStatus,
+} from '../entities/admin-course-access-grant.entity';
 import { CourseEnrollment } from '../entities/course-enrollment.entity';
 import { CourseOrderProviderSnapshot } from '../entities/course-order-provider-snapshot.entity';
 import { CourseProviderProduct } from '../entities/course-provider-product.entity';
@@ -20,8 +25,10 @@ import { CoursePaymentAttempt } from '../entities/course-payment-attempt.entity'
 import { CoursePurchaseOrder } from '../entities/course-purchase-order.entity';
 import { DemoPaymentGatewayService } from '../providers/demo-payment-gateway.service';
 import {
+  ADMIN_EXTERNAL_PAYMENT_PROVIDER,
   CommerceCurrency,
   CommerceSortOrder,
+  CourseAccessType,
   CourseEnrollmentStatus,
   CoursePaymentAttemptStatus,
   CoursePaymentProvider,
@@ -29,6 +36,7 @@ import {
   CourseProviderVerificationStatus,
   CoursePurchaseStatus,
 } from '../types/course-commerce.type';
+import { User, UserRole } from 'src/users/entities/user.entity';
 import { StorePackageProviderProduct } from 'src/package-store/entities/store-package-provider-product.entity';
 import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
 import { GooglePlayBillingService } from 'src/billing/google-play/google-play-billing.service';
@@ -51,6 +59,9 @@ export class AdminCourseCommerceService {
 
     @InjectRepository(CourseEnrollment)
     private readonly enrollmentRepository: Repository<CourseEnrollment>,
+
+    @InjectRepository(AdminCourseAccessGrant)
+    private readonly externalGrantRepository: Repository<AdminCourseAccessGrant>,
 
     @InjectRepository(CourseProviderProduct)
     private readonly providerProductRepository: Repository<CourseProviderProduct>,
@@ -282,6 +293,214 @@ export class AdminCourseCommerceService {
     };
   }
 
+  async grantExternalCourseAccess(params: {
+    courseId: string;
+    adminUserId: string;
+    dto: GrantExternalCourseAccessDto;
+  }) {
+    const paymentAmount = this.normalizeMoney(
+      params.dto.paymentAmount,
+      'paymentAmount',
+    );
+    const amountEur = this.normalizeMoney(params.dto.amountEur, 'amountEur');
+
+    if (
+      params.dto.paymentCurrency === CommerceCurrency.EUR &&
+      paymentAmount !== amountEur
+    ) {
+      throw new BadRequestException(
+        'For EUR payments, amountEur must equal paymentAmount.',
+      );
+    }
+
+    const externalReference = params.dto.externalReference.trim();
+    const paidAt = params.dto.paidAt ? new Date(params.dto.paidAt) : new Date();
+
+    if (paidAt.getTime() > Date.now() + 5 * 60 * 1000) {
+      throw new BadRequestException('paidAt cannot be in the future.');
+    }
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [`external-course-access:${params.courseId}:${params.dto.userId}`],
+      );
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [`external-course-reference:${externalReference}`],
+      );
+
+      const course = await manager.getRepository(Course).findOne({
+        where: { id: params.courseId },
+      });
+      if (!course) throw new NotFoundException('Course not found.');
+
+      const user = await manager.getRepository(User).findOne({
+        where: { id: params.dto.userId, role: UserRole.USER },
+      });
+      if (!user) throw new NotFoundException('User not found.');
+
+      const grantRepository = manager.getRepository(AdminCourseAccessGrant);
+      const duplicateReference = await grantRepository.findOne({
+        where: { externalReference },
+      });
+      if (duplicateReference) {
+        throw new ConflictException(
+          'This external payment reference has already been recorded.',
+        );
+      }
+
+      const existingActiveGrant = await grantRepository.findOne({
+        where: {
+          userId: user.id,
+          courseId: course.id,
+          status: AdminCourseAccessGrantStatus.ACTIVE,
+        },
+      });
+      if (existingActiveGrant) {
+        throw new ConflictException(
+          'This user already has active external access to the course.',
+        );
+      }
+
+      const activeStoreOrder = await manager
+        .getRepository(CoursePurchaseOrder)
+        .findOne({
+          where: {
+            userId: user.id,
+            courseId: course.id,
+            status: CoursePurchaseStatus.PAID,
+          },
+        });
+      if (activeStoreOrder) {
+        throw new ConflictException(
+          'This user already has a paid store order for the course.',
+        );
+      }
+
+      const enrollmentRepository = manager.getRepository(CourseEnrollment);
+      let enrollment = await enrollmentRepository.findOne({
+        where: { userId: user.id, courseId: course.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (enrollment?.status === CourseEnrollmentStatus.ACTIVE) {
+        throw new ConflictException(
+          enrollment.orderId
+            ? 'This user already has active store access to the course.'
+            : 'This user already has active access to the course.',
+        );
+      }
+
+      if (!enrollment) {
+        enrollment = enrollmentRepository.create({
+          userId: user.id,
+          courseId: course.id,
+          orderId: null,
+          status: CourseEnrollmentStatus.ACTIVE,
+          accessType: CourseAccessType.LIFETIME,
+          enrolledAt: paidAt,
+          expiresAt: null,
+          refundedAt: null,
+          lastAccessedAt: null,
+        });
+      } else {
+        enrollment.orderId = null;
+        enrollment.status = CourseEnrollmentStatus.ACTIVE;
+        enrollment.accessType = CourseAccessType.LIFETIME;
+        enrollment.enrolledAt = paidAt;
+        enrollment.expiresAt = null;
+        enrollment.refundedAt = null;
+      }
+
+      enrollment = await enrollmentRepository.save(enrollment);
+
+      const grant = await grantRepository.save(
+        grantRepository.create({
+          userId: user.id,
+          courseId: course.id,
+          enrollmentId: enrollment.id,
+          paymentAmount,
+          paymentCurrency: params.dto.paymentCurrency,
+          amountEur,
+          paymentMethod: params.dto.paymentMethod,
+          externalReference,
+          paidAt,
+          notes: params.dto.notes?.trim() || null,
+          status: AdminCourseAccessGrantStatus.ACTIVE,
+          grantedByAdminId: params.adminUserId,
+          revokedAt: null,
+          revokedByAdminId: null,
+          revokeReason: null,
+        }),
+      );
+
+      return { grant, enrollment };
+    });
+
+    return {
+      message: 'External course access granted successfully.',
+      enrollmentId: result.enrollment.id,
+      grant: this.mapExternalGrant(result.grant),
+    };
+  }
+
+  async revokeExternalCourseAccess(params: {
+    grantId: string;
+    adminUserId: string;
+    reason: string;
+  }) {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const grantRepository = manager.getRepository(AdminCourseAccessGrant);
+      const grant = await grantRepository.findOne({
+        where: { id: params.grantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!grant) {
+        throw new NotFoundException('External course access grant not found.');
+      }
+
+      if (grant.status === AdminCourseAccessGrantStatus.REVOKED) {
+        return { grant, enrollmentRevoked: false, alreadyRevoked: true };
+      }
+
+      const enrollmentRepository = manager.getRepository(CourseEnrollment);
+      const enrollment = await enrollmentRepository.findOne({
+        where: { id: grant.enrollmentId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      const now = new Date();
+      grant.status = AdminCourseAccessGrantStatus.REVOKED;
+      grant.revokedAt = now;
+      grant.revokedByAdminId = params.adminUserId;
+      grant.revokeReason = params.reason.trim();
+      await grantRepository.save(grant);
+
+      let enrollmentRevoked = false;
+      if (
+        enrollment &&
+        enrollment.orderId === null &&
+        enrollment.status === CourseEnrollmentStatus.ACTIVE
+      ) {
+        enrollment.status = CourseEnrollmentStatus.REVOKED;
+        await enrollmentRepository.save(enrollment);
+        enrollmentRevoked = true;
+      }
+
+      return { grant, enrollmentRevoked, alreadyRevoked: false };
+    });
+
+    return {
+      message: result.alreadyRevoked
+        ? 'External course access was already revoked.'
+        : 'External course access revoked successfully.',
+      enrollmentRevoked: result.enrollmentRevoked,
+      grant: this.mapExternalGrant(result.grant),
+    };
+  }
+
   async getEnrollmentSummary(courseId: string) {
     await this.getCourse(courseId);
 
@@ -346,13 +565,25 @@ export class AdminCourseCommerceService {
       })
       .getCount();
 
+    const externalRevenueResult = await this.externalGrantRepository
+      .createQueryBuilder('externalGrant')
+      .select('COALESCE(SUM(externalGrant.amountEur), 0)', 'total')
+      .where('externalGrant.courseId = :courseId', { courseId })
+      .andWhere('externalGrant.paidAt >= :startOfYear', { startOfYear })
+      .getRawOne<{ total: string }>();
+
+    const totalRevenueEur = (
+      Number(revenueResult?.total ?? 0) +
+      Number(externalRevenueResult?.total ?? 0)
+    ).toFixed(2);
+
     return {
       courseId,
       totalStudents,
       activeNow,
       revenueYtd: {
         currency: CommerceCurrency.EUR,
-        amount: revenueResult?.total ?? '0.00',
+        amount: totalRevenueEur,
       },
       refundedLast30Days,
       activeWindowMinutes: 15,
@@ -379,6 +610,17 @@ export class AdminCourseCommerceService {
         'purchaseOrder.providerTransaction',
         'providerTransaction',
       )
+      .leftJoinAndSelect(
+        'enrollment.externalGrants',
+        'externalGrant',
+        `externalGrant.id = (
+          SELECT latest."id"
+          FROM "admin_course_access_grants" latest
+          WHERE latest."enrollmentId" = enrollment."id"
+          ORDER BY latest."createdAt" DESC
+          LIMIT 1
+        )`,
+      )
       .where('enrollment.courseId = :courseId', { courseId })
       .skip((page - 1) * limit)
       .take(limit);
@@ -390,12 +632,16 @@ export class AdminCourseCommerceService {
     }
 
     if (query.paymentProvider) {
-      queryBuilder.andWhere(
-        'purchaseOrder.paymentProvider = :paymentProvider',
-        {
-          paymentProvider: query.paymentProvider,
-        },
-      );
+      if (query.paymentProvider === ADMIN_EXTERNAL_PAYMENT_PROVIDER) {
+        queryBuilder.andWhere('externalGrant.id IS NOT NULL');
+      } else {
+        queryBuilder.andWhere(
+          'purchaseOrder.paymentProvider = :paymentProvider',
+          {
+            paymentProvider: query.paymentProvider,
+          },
+        );
+      }
     }
 
     if (query.search?.trim()) {
@@ -405,14 +651,20 @@ export class AdminCourseCommerceService {
         `(
           purchaseOrder.orderNumber ILIKE :search
           OR CAST(enrollment.userId AS TEXT) ILIKE :search
+          OR user.fullName ILIKE :search
           OR user.email ILIKE :search
+          OR user.phone ILIKE :search
+          OR externalGrant.externalReference ILIKE :search
         )`,
         { search },
       );
     }
 
     if (query.sortBy === 'amountPaid') {
-      queryBuilder.orderBy('purchaseOrder.payableAmountEur', sortOrder);
+      queryBuilder.orderBy(
+        'COALESCE(purchaseOrder.payableAmountEur, externalGrant.amountEur)',
+        sortOrder,
+      );
     } else {
       queryBuilder.orderBy('enrollment.enrolledAt', sortOrder);
     }
@@ -420,49 +672,71 @@ export class AdminCourseCommerceService {
     const [enrollments, total] = await queryBuilder.getManyAndCount();
 
     return {
-      items: enrollments.map((enrollment) => ({
-        id: enrollment.id,
-        student: this.mapUser(enrollment.user),
-        order: enrollment.order
-          ? {
-              id: enrollment.order.id,
-              orderNumber: enrollment.order.orderNumber,
-              amountPaid: enrollment.order.paymentAmount,
-              currency: enrollment.order.paymentCurrency,
-              amountPaidEur: enrollment.order.payableAmountEur,
-              paymentProvider: enrollment.order.paymentProvider,
-              status: enrollment.order.status,
-              paidAt: enrollment.order.paidAt,
-              refundedAt: enrollment.order.refundedAt,
-              billing: {
-                provider: enrollment.order.providerSnapshot?.provider ?? null,
-                productId: enrollment.order.providerSnapshot?.productId ?? null,
-                productType:
-                  enrollment.order.providerSnapshot?.productType ?? null,
-                basePlanId:
-                  enrollment.order.providerSnapshot?.basePlanId ?? null,
-                offerId: enrollment.order.providerSnapshot?.offerId ?? null,
-                environment:
-                  enrollment.order.providerTransaction?.environment ?? null,
-                verificationStatus:
-                  enrollment.order.providerTransaction?.verificationStatus ??
-                  null,
-                providerTransactionId:
-                  enrollment.order.providerTransaction?.providerTransactionId ??
-                  null,
-                tokenHash:
-                  enrollment.order.providerTransaction?.tokenHash ?? null,
-                verifiedAt:
-                  enrollment.order.providerTransaction?.verifiedAt ?? null,
-              },
-            }
-          : null,
-        enrollmentStatus: enrollment.status,
-        accessType: enrollment.accessType,
-        enrolledAt: enrollment.enrolledAt,
-        refundedAt: enrollment.refundedAt,
-        lastAccessedAt: enrollment.lastAccessedAt,
-      })),
+      items: enrollments.map((enrollment) => {
+        const externalGrant = this.getExternalGrant(enrollment);
+
+        return {
+          id: enrollment.id,
+          courseId: enrollment.courseId,
+          userId: enrollment.userId,
+          student: this.mapUser(enrollment.user),
+          order: enrollment.order
+            ? {
+                id: enrollment.order.id,
+                orderNumber: enrollment.order.orderNumber,
+                amountPaid: enrollment.order.paymentAmount,
+                currency: enrollment.order.paymentCurrency,
+                amountPaidEur: enrollment.order.payableAmountEur,
+                paymentProvider: enrollment.order.paymentProvider,
+                status: enrollment.order.status,
+                paidAt: enrollment.order.paidAt,
+                refundedAt: enrollment.order.refundedAt,
+                billing: {
+                  provider: enrollment.order.providerSnapshot?.provider ?? null,
+                  productId:
+                    enrollment.order.providerSnapshot?.productId ?? null,
+                  productType:
+                    enrollment.order.providerSnapshot?.productType ?? null,
+                  basePlanId:
+                    enrollment.order.providerSnapshot?.basePlanId ?? null,
+                  offerId: enrollment.order.providerSnapshot?.offerId ?? null,
+                  environment:
+                    enrollment.order.providerTransaction?.environment ?? null,
+                  verificationStatus:
+                    enrollment.order.providerTransaction?.verificationStatus ??
+                    null,
+                  providerTransactionId:
+                    enrollment.order.providerTransaction
+                      ?.providerTransactionId ?? null,
+                  tokenHash:
+                    enrollment.order.providerTransaction?.tokenHash ?? null,
+                  verifiedAt:
+                    enrollment.order.providerTransaction?.verifiedAt ?? null,
+                },
+              }
+            : null,
+          externalGrant: externalGrant
+            ? this.mapExternalGrant(externalGrant)
+            : null,
+          amountPaid:
+            enrollment.order?.paymentAmount ??
+            externalGrant?.paymentAmount ??
+            '0.00',
+          currency:
+            enrollment.order?.paymentCurrency ??
+            externalGrant?.paymentCurrency ??
+            CommerceCurrency.EUR,
+          paymentProvider:
+            enrollment.order?.paymentProvider ??
+            (externalGrant ? ADMIN_EXTERNAL_PAYMENT_PROVIDER : null),
+          paymentReference: externalGrant?.externalReference ?? null,
+          enrollmentStatus: enrollment.status,
+          accessType: enrollment.accessType,
+          enrolledAt: enrollment.enrolledAt,
+          refundedAt: enrollment.refundedAt,
+          lastAccessedAt: enrollment.lastAccessedAt,
+        };
+      }),
       meta: {
         page,
         limit,
@@ -485,12 +759,19 @@ export class AdminCourseCommerceService {
           providerSnapshot: true,
           providerTransaction: true,
         },
+        externalGrants: true,
       },
     });
 
     if (!enrollment) {
       throw new NotFoundException('Course enrollment not found.');
     }
+
+    const externalGrant = enrollment.externalGrants
+      .slice()
+      .sort(
+        (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+      )[0];
 
     const refundOperation = enrollment.order
       ? await this.refundOperationRepository.findOne({
@@ -588,6 +869,23 @@ export class AdminCourseCommerceService {
               : null,
           }
         : null,
+
+      externalGrant: externalGrant
+        ? this.mapExternalGrant(externalGrant)
+        : null,
+
+      amountPaid:
+        enrollment.order?.paymentAmount ??
+        externalGrant?.paymentAmount ??
+        '0.00',
+      currency:
+        enrollment.order?.paymentCurrency ??
+        externalGrant?.paymentCurrency ??
+        CommerceCurrency.EUR,
+      paymentProvider:
+        enrollment.order?.paymentProvider ??
+        (externalGrant ? ADMIN_EXTERNAL_PAYMENT_PROVIDER : null),
+      paymentReference: externalGrant?.externalReference ?? null,
 
       status: enrollment.status,
       accessType: enrollment.accessType,
@@ -1347,6 +1645,43 @@ export class AdminCourseCommerceService {
       createdAt: providerProduct.createdAt,
       updatedAt: providerProduct.updatedAt,
     };
+  }
+
+  private getExternalGrant(
+    enrollment: CourseEnrollment,
+  ): AdminCourseAccessGrant | null {
+    return enrollment.externalGrants?.[0] ?? null;
+  }
+
+  private mapExternalGrant(grant: AdminCourseAccessGrant) {
+    return {
+      id: grant.id,
+      paymentAmount: grant.paymentAmount,
+      paymentCurrency: grant.paymentCurrency,
+      amountEur: grant.amountEur,
+      paymentMethod: grant.paymentMethod,
+      externalReference: grant.externalReference,
+      paidAt: grant.paidAt,
+      notes: grant.notes,
+      status: grant.status,
+      grantedByAdminId: grant.grantedByAdminId,
+      revokedAt: grant.revokedAt,
+      revokedByAdminId: grant.revokedByAdminId,
+      revokeReason: grant.revokeReason,
+      createdAt: grant.createdAt,
+      updatedAt: grant.updatedAt,
+    };
+  }
+
+  private normalizeMoney(value: string, fieldName: string): string {
+    const amount = Number(value);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 9999999999.99) {
+      throw new BadRequestException(
+        `${fieldName} is outside the allowed range.`,
+      );
+    }
+
+    return amount.toFixed(2);
   }
 
   private async getCourse(courseId: string): Promise<Course> {

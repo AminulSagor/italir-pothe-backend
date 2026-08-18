@@ -7,6 +7,7 @@ import { Course } from '../courses/entities/course.entity';
 import { AdminCourseCommerceController } from './controllers/admin-course-commerce.controller';
 import { CourseCommerceController } from './controllers/course-commerce.controller';
 import { CourseEnrollment } from './entities/course-enrollment.entity';
+import { AdminCourseAccessGrant } from './entities/admin-course-access-grant.entity';
 import { CourseOrderProviderSnapshot } from './entities/course-order-provider-snapshot.entity';
 import { CourseOrderProviderTransaction } from './entities/course-order-provider-transaction.entity';
 import { CoursePaymentAttempt } from './entities/course-payment-attempt.entity';
@@ -37,6 +38,7 @@ import { InfluencerHubModule } from 'src/influencer-hub/influencer-hub.module';
       CoursePurchaseOrder,
       CoursePaymentAttempt,
       CourseEnrollment,
+      AdminCourseAccessGrant,
       CourseProviderProduct,
       CourseOrderProviderSnapshot,
       CourseOrderProviderTransaction,

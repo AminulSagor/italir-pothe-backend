@@ -20,7 +20,9 @@ import { UserRole } from 'src/users/entities/user.entity';
 import {
   AdminEnrollmentQueryDto,
   CreateCourseProviderProductDto,
+  GrantExternalCourseAccessDto,
   RefundCourseOrderDto,
+  RevokeExternalCourseAccessDto,
   UpdateCourseProviderProductDto,
 } from '../dto/admin-course-commerce.dto';
 import { AdminCourseCommerceService } from '../services/admin-course-commerce.service';
@@ -86,6 +88,32 @@ export class AdminCourseCommerceController {
     courseId: string,
   ) {
     return this.adminCourseCommerceService.getEnrollmentSummary(courseId);
+  }
+
+  @Post('courses/:courseId/external-access')
+  async grantExternalCourseAccess(
+    @Param('courseId', new ParseUUIDPipe({ version: '4' })) courseId: string,
+    @Body() dto: GrantExternalCourseAccessDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.adminCourseCommerceService.grantExternalCourseAccess({
+      courseId,
+      adminUserId: this.getAdminId(request),
+      dto,
+    });
+  }
+
+  @Post('course-external-access/:grantId/revoke')
+  async revokeExternalCourseAccess(
+    @Param('grantId', new ParseUUIDPipe({ version: '4' })) grantId: string,
+    @Body() dto: RevokeExternalCourseAccessDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.adminCourseCommerceService.revokeExternalCourseAccess({
+      grantId,
+      adminUserId: this.getAdminId(request),
+      reason: dto.reason,
+    });
   }
 
   @Get('courses/:courseId/enrollments')

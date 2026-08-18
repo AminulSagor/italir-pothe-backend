@@ -8,6 +8,16 @@ export enum CoursePaymentProvider {
   APP_STORE = 'app_store',
 }
 
+export const ADMIN_EXTERNAL_PAYMENT_PROVIDER = 'admin_external';
+
+export enum AdminExternalPaymentMethod {
+  CASH = 'cash',
+  BANK_TRANSFER = 'bank_transfer',
+  MOBILE_BANKING = 'mobile_banking',
+  CARD = 'card',
+  OTHER = 'other',
+}
+
 export enum CourseProviderProductType {
   NON_CONSUMABLE = 'non_consumable',
 }

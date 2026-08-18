@@ -5,6 +5,7 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -16,6 +17,7 @@ import {
   CourseEnrollmentStatus,
 } from '../types/course-commerce.type';
 import { CoursePurchaseOrder } from './course-purchase-order.entity';
+import { AdminCourseAccessGrant } from './admin-course-access-grant.entity';
 
 @Entity('course_enrollments')
 @Index(['userId', 'courseId'], {
@@ -34,8 +36,8 @@ export class CourseEnrollment {
   courseId: string | null;
 
   @Index()
-  @Column({ type: 'uuid' })
-  orderId: string;
+  @Column({ type: 'uuid', nullable: true })
+  orderId: string | null;
 
   @Column({
     type: 'enum',
@@ -98,8 +100,12 @@ export class CourseEnrollment {
   course: Course | null;
 
   @ManyToOne(() => CoursePurchaseOrder, {
+    nullable: true,
     onDelete: 'RESTRICT',
   })
   @JoinColumn({ name: 'orderId' })
-  order: CoursePurchaseOrder;
+  order: CoursePurchaseOrder | null;
+
+  @OneToMany(() => AdminCourseAccessGrant, (grant) => grant.enrollment)
+  externalGrants: AdminCourseAccessGrant[];
 }
