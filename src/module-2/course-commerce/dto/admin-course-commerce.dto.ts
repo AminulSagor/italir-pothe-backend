@@ -21,6 +21,7 @@ import {
   CommerceCurrency,
   CommerceSortOrder,
   CourseEnrollmentStatus,
+  CourseAccessType,
   CoursePaymentProvider,
   CourseProviderProductType,
 } from '../types/course-commerce.type';
@@ -47,6 +48,17 @@ export class CreateCourseProviderProductDto {
   @IsOptional()
   @IsEnum(CourseProviderProductType)
   productType?: CourseProviderProductType;
+
+  @IsOptional()
+  @IsEnum(CourseAccessType)
+  accessType?: CourseAccessType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  durationDays?: number | null;
 
   @IsOptional()
   @Transform(trim)
@@ -79,6 +91,17 @@ export class UpdateCourseProviderProductDto {
   @IsOptional()
   @IsEnum(CourseProviderProductType)
   productType?: CourseProviderProductType;
+
+  @IsOptional()
+  @IsEnum(CourseAccessType)
+  accessType?: CourseAccessType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  durationDays?: number | null;
 
   @IsOptional()
   @Transform(trim)
@@ -150,6 +173,10 @@ export class GrantExternalCourseAccessDto {
   @IsUUID('4')
   userId: string;
 
+  @IsOptional()
+  @IsUUID('4')
+  manualAccessOptionId?: string;
+
   @Transform(trim)
   @IsString()
   @Matches(moneyPattern, {
@@ -185,6 +212,39 @@ export class GrantExternalCourseAccessDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+}
+
+export class CreateCourseManualAccessOptionDto {
+  @IsEnum(CourseAccessType)
+  accessType: CourseAccessType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  durationDays?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class UpdateCourseManualAccessOptionDto {
+  @IsOptional()
+  @IsEnum(CourseAccessType)
+  accessType?: CourseAccessType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  durationDays?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }
 
 export class RevokeExternalCourseAccessDto {

@@ -20,10 +20,12 @@ import { UserRole } from 'src/users/entities/user.entity';
 import {
   AdminEnrollmentQueryDto,
   CreateCourseProviderProductDto,
+  CreateCourseManualAccessOptionDto,
   GrantExternalCourseAccessDto,
   RefundCourseOrderDto,
   RevokeExternalCourseAccessDto,
   UpdateCourseProviderProductDto,
+  UpdateCourseManualAccessOptionDto,
 } from '../dto/admin-course-commerce.dto';
 import { AdminCourseCommerceService } from '../services/admin-course-commerce.service';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
@@ -79,6 +81,48 @@ export class AdminCourseCommerceController {
     return this.adminCourseCommerceService.deleteProviderProduct(
       courseId,
       mappingId,
+    );
+  }
+
+  @Get('courses/:courseId/manual-access-options')
+  async findManualAccessOptions(
+    @Param('courseId', new ParseUUIDPipe({ version: '4' })) courseId: string,
+  ) {
+    return this.adminCourseCommerceService.findManualAccessOptions(courseId);
+  }
+
+  @Post('courses/:courseId/manual-access-options')
+  async createManualAccessOption(
+    @Param('courseId', new ParseUUIDPipe({ version: '4' })) courseId: string,
+    @Body() dto: CreateCourseManualAccessOptionDto,
+  ) {
+    return this.adminCourseCommerceService.createManualAccessOption(
+      courseId,
+      dto,
+    );
+  }
+
+  @Patch('courses/:courseId/manual-access-options/:optionId')
+  async updateManualAccessOption(
+    @Param('courseId', new ParseUUIDPipe({ version: '4' })) courseId: string,
+    @Param('optionId', new ParseUUIDPipe({ version: '4' })) optionId: string,
+    @Body() dto: UpdateCourseManualAccessOptionDto,
+  ) {
+    return this.adminCourseCommerceService.updateManualAccessOption(
+      courseId,
+      optionId,
+      dto,
+    );
+  }
+
+  @Delete('courses/:courseId/manual-access-options/:optionId')
+  async deleteManualAccessOption(
+    @Param('courseId', new ParseUUIDPipe({ version: '4' })) courseId: string,
+    @Param('optionId', new ParseUUIDPipe({ version: '4' })) optionId: string,
+  ) {
+    return this.adminCourseCommerceService.deleteManualAccessOption(
+      courseId,
+      optionId,
     );
   }
 

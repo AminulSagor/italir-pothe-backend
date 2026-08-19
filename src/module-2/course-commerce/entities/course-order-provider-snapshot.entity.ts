@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 
 import {
+  CourseAccessType,
   CoursePaymentProvider,
   CourseProviderProductType,
 } from '../types/course-commerce.type';
@@ -56,6 +57,16 @@ export class CourseOrderProviderSnapshot {
     enum: CourseProviderProductType,
   })
   productType: CourseProviderProductType;
+
+  @Column({
+    type: 'varchar',
+    length: 30,
+    default: CourseAccessType.LIFETIME,
+  })
+  accessType: CourseAccessType;
+
+  @Column({ type: 'smallint', nullable: true })
+  durationDays: number | null;
 
   @Column({
     type: 'varchar',

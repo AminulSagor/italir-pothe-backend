@@ -13,6 +13,7 @@ import { CourseOrderProviderTransaction } from './entities/course-order-provider
 import { CoursePaymentAttempt } from './entities/course-payment-attempt.entity';
 import { CoursePurchaseOrder } from './entities/course-purchase-order.entity';
 import { CourseProviderProduct } from './entities/course-provider-product.entity';
+import { CourseManualAccessOption } from './entities/course-manual-access-option.entity';
 import { DemoForexRateService } from './providers/demo-forex-rate.service';
 import { DemoPaymentGatewayService } from './providers/demo-payment-gateway.service';
 import { FOREX_RATE_PROVIDER } from './providers/forex-rate-provider';
@@ -40,6 +41,7 @@ import { InfluencerHubModule } from 'src/influencer-hub/influencer-hub.module';
       CourseEnrollment,
       AdminCourseAccessGrant,
       CourseProviderProduct,
+      CourseManualAccessOption,
       CourseOrderProviderSnapshot,
       CourseOrderProviderTransaction,
 

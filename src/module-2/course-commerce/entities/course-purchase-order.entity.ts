@@ -139,6 +139,9 @@ export class CoursePurchaseOrder {
   })
   refundedAt: Date | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  entitlementExpiresAt: Date | null;
+
   @CreateDateColumn({
     type: 'timestamptz',
   })

@@ -11,14 +11,12 @@ import {
 
 import { Course } from '../../courses/entities/course.entity';
 import {
+  CourseAccessType,
   CoursePaymentProvider,
   CourseProviderProductType,
 } from '../types/course-commerce.type';
 
 @Entity('course_provider_products')
-@Index(['provider', 'productId'], {
-  unique: true,
-})
 @Index(['courseId', 'provider', 'isActive'])
 export class CourseProviderProduct {
   @PrimaryGeneratedColumn('uuid')
@@ -48,6 +46,16 @@ export class CourseProviderProduct {
     default: CourseProviderProductType.NON_CONSUMABLE,
   })
   productType: CourseProviderProductType;
+
+  @Column({
+    type: 'varchar',
+    length: 30,
+    default: CourseAccessType.LIFETIME,
+  })
+  accessType: CourseAccessType;
+
+  @Column({ type: 'smallint', nullable: true })
+  durationDays: number | null;
 
   /**
    * Used primarily for Google Play subscriptions.

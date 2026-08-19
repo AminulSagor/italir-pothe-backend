@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 
 import { CourseProviderProduct } from '../../course-commerce/entities/course-provider-product.entity';
 import {
+  CourseAccessType,
   CourseEnrollmentStatus,
   CoursePaymentProvider,
 } from '../../course-commerce/types/course-commerce.type';
@@ -220,6 +221,11 @@ export class CoursesService {
       },
     });
 
+    if (enrollment && !this.hasEnrollmentAccess(enrollment)) {
+      enrollment.status = CourseEnrollmentStatus.EXPIRED;
+      await this.enrollmentRepository.save(enrollment);
+    }
+
     const progress = await this.courseProgressRepository.findOne({
       where: {
         userId,
@@ -234,6 +240,23 @@ export class CoursesService {
     if (courseIds.length === 0) {
       return new Map<string, CourseEnrollment>();
     }
+
+    await this.enrollmentRepository
+      .createQueryBuilder()
+      .update(CourseEnrollment)
+      .set({ status: CourseEnrollmentStatus.EXPIRED })
+      .where('"userId" = :userId', { userId })
+      .andWhere('"courseId" IN (:...courseIds)', { courseIds })
+      .andWhere('"status" = :status', {
+        status: CourseEnrollmentStatus.ACTIVE,
+      })
+      .andWhere('"accessType" = :accessType', {
+        accessType: CourseAccessType.TIME_LIMITED,
+      })
+      .andWhere('"expiresAt" IS NOT NULL AND "expiresAt" <= :now', {
+        now: new Date(),
+      })
+      .execute();
 
     const enrollments = await this.enrollmentRepository.find({
       where: {
@@ -268,7 +291,7 @@ export class CoursesService {
     progress: UserCourseProgress | null,
   ) {
     const base = this.mapCourse(course, providerProduct);
-    const isEnrolled = Boolean(enrollment);
+    const isEnrolled = this.hasEnrollmentAccess(enrollment);
 
     return {
       ...base,
@@ -410,11 +433,15 @@ export class CoursesService {
       },
     });
 
-    return new Map(
-      providerProducts
-        .filter((item) => Boolean(item.courseId))
-        .map((item) => [item.courseId as string, item]),
-    );
+    const result = new Map<string, CourseProviderProduct>();
+    for (const item of providerProducts) {
+      if (!item.courseId) continue;
+      const current = result.get(item.courseId);
+      if (!current || item.accessType === CourseAccessType.LIFETIME) {
+        result.set(item.courseId, item);
+      }
+    }
+    return result;
   }
 
   private mapCourse(
@@ -442,11 +469,23 @@ export class CoursesService {
             provider: providerProduct.provider,
             productId: providerProduct.productId,
             productType: providerProduct.productType,
+            accessType: providerProduct.accessType,
+            durationDays: providerProduct.durationDays,
             basePlanId: providerProduct.basePlanId,
             offerId: providerProduct.offerId,
             isActive: providerProduct.isActive,
           }
         : null,
     };
+  }
+
+  private hasEnrollmentAccess(enrollment: CourseEnrollment | null): boolean {
+    if (!enrollment || enrollment.status !== CourseEnrollmentStatus.ACTIVE) {
+      return false;
+    }
+    return (
+      enrollment.accessType === CourseAccessType.LIFETIME ||
+      Boolean(enrollment.expiresAt && enrollment.expiresAt.getTime() > Date.now())
+    );
   }
 }

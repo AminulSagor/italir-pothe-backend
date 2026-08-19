@@ -11,7 +11,9 @@ import { Course } from '../../courses/entities/course.entity';
 import {
   AdminEnrollmentQueryDto,
   CreateCourseProviderProductDto,
+  CreateCourseManualAccessOptionDto,
   GrantExternalCourseAccessDto,
+  UpdateCourseManualAccessOptionDto,
   UpdateCourseProviderProductDto,
 } from '../dto/admin-course-commerce.dto';
 import {
@@ -21,6 +23,7 @@ import {
 import { CourseEnrollment } from '../entities/course-enrollment.entity';
 import { CourseOrderProviderSnapshot } from '../entities/course-order-provider-snapshot.entity';
 import { CourseProviderProduct } from '../entities/course-provider-product.entity';
+import { CourseManualAccessOption } from '../entities/course-manual-access-option.entity';
 import { CoursePaymentAttempt } from '../entities/course-payment-attempt.entity';
 import { CoursePurchaseOrder } from '../entities/course-purchase-order.entity';
 import { DemoPaymentGatewayService } from '../providers/demo-payment-gateway.service';
@@ -66,6 +69,9 @@ export class AdminCourseCommerceService {
     @InjectRepository(CourseProviderProduct)
     private readonly providerProductRepository: Repository<CourseProviderProduct>,
 
+    @InjectRepository(CourseManualAccessOption)
+    private readonly manualAccessOptionRepository: Repository<CourseManualAccessOption>,
+
     @InjectRepository(CourseOrderProviderSnapshot)
     private readonly providerSnapshotRepository: Repository<CourseOrderProviderSnapshot>,
 
@@ -91,11 +97,16 @@ export class AdminCourseCommerceService {
     const productId = dto.productId.trim();
     const productType =
       dto.productType ?? CourseProviderProductType.NON_CONSUMABLE;
+    const accessType = dto.accessType ?? CourseAccessType.LIFETIME;
+    const durationDays = dto.durationDays ?? null;
     const basePlanId = dto.basePlanId?.trim() || null;
     const offerId = dto.offerId?.trim() || null;
 
     this.validateProviderProductConfiguration({
+      provider: dto.provider,
       productType,
+      accessType,
+      durationDays,
       basePlanId,
     });
 
@@ -104,11 +115,11 @@ export class AdminCourseCommerceService {
 
       const repository = manager.getRepository(CourseProviderProduct);
 
-      const duplicateCourseProduct = await repository.findOne({
-        where: {
-          provider: dto.provider,
-          productId,
-        },
+      const duplicateCourseProduct = await this.findDuplicateProviderProduct({
+        repository,
+        provider: dto.provider,
+        productId,
+        basePlanId,
       });
 
       if (duplicateCourseProduct) {
@@ -116,6 +127,20 @@ export class AdminCourseCommerceService {
           'This provider product ID is already mapped to another course version.',
         );
       }
+
+      await this.assertProviderProductFamilyMatches({
+        repository,
+        provider: dto.provider,
+        productId,
+        productType,
+      });
+      await this.assertCourseDurationAvailable({
+        repository,
+        courseId,
+        provider: dto.provider,
+        accessType,
+        durationDays,
+      });
 
       await this.assertProductNotMappedToPackage(
         dto.provider,
@@ -131,6 +156,8 @@ export class AdminCourseCommerceService {
           provider: dto.provider,
           productId,
           productType,
+          accessType,
+          durationDays,
           basePlanId,
           offerId,
           isActive,
@@ -170,6 +197,9 @@ export class AdminCourseCommerceService {
 
     const productId = dto.productId?.trim() ?? current.productId;
     const productType = dto.productType ?? current.productType;
+    const accessType = dto.accessType ?? current.accessType;
+    const durationDays =
+      dto.durationDays !== undefined ? dto.durationDays : current.durationDays;
     const basePlanId =
       dto.basePlanId !== undefined
         ? dto.basePlanId?.trim() || null
@@ -179,13 +209,18 @@ export class AdminCourseCommerceService {
     const isActive = dto.isActive ?? current.isActive;
 
     this.validateProviderProductConfiguration({
+      provider: current.provider,
       productType,
+      accessType,
+      durationDays,
       basePlanId,
     });
 
     const identityIsChanging =
       productId !== current.productId ||
       productType !== current.productType ||
+      accessType !== current.accessType ||
+      durationDays !== current.durationDays ||
       basePlanId !== current.basePlanId ||
       offerId !== current.offerId;
 
@@ -203,14 +238,13 @@ export class AdminCourseCommerceService {
       }
     }
 
-    const duplicate = await this.providerProductRepository
-      .createQueryBuilder('providerProduct')
-      .where('providerProduct.provider = :provider', {
-        provider: current.provider,
-      })
-      .andWhere('providerProduct.productId = :productId', { productId })
-      .andWhere('providerProduct.id != :mappingId', { mappingId })
-      .getOne();
+    const duplicate = await this.findDuplicateProviderProduct({
+      repository: this.providerProductRepository,
+      provider: current.provider,
+      productId,
+      basePlanId,
+      excludeId: mappingId,
+    });
 
     if (duplicate) {
       throw new ConflictException(
@@ -227,24 +261,35 @@ export class AdminCourseCommerceService {
 
       const repository = manager.getRepository(CourseProviderProduct);
 
-      const duplicateCourseProduct = await repository
-        .createQueryBuilder('providerProduct')
-        .where('providerProduct.provider = :provider', {
-          provider: current.provider,
-        })
-        .andWhere('providerProduct.productId = :productId', {
-          productId,
-        })
-        .andWhere('providerProduct.id != :mappingId', {
-          mappingId,
-        })
-        .getOne();
+      const duplicateCourseProduct = await this.findDuplicateProviderProduct({
+        repository,
+        provider: current.provider,
+        productId,
+        basePlanId,
+        excludeId: mappingId,
+      });
 
       if (duplicateCourseProduct) {
         throw new ConflictException(
           'This provider product ID is already mapped to another course version.',
         );
       }
+
+      await this.assertProviderProductFamilyMatches({
+        repository,
+        provider: current.provider,
+        productId,
+        productType,
+        excludeId: mappingId,
+      });
+      await this.assertCourseDurationAvailable({
+        repository,
+        courseId,
+        provider: current.provider,
+        accessType,
+        durationDays,
+        excludeId: mappingId,
+      });
 
       await this.assertProductNotMappedToPackage(
         current.provider,
@@ -254,6 +299,8 @@ export class AdminCourseCommerceService {
 
       current.productId = productId;
       current.productType = productType;
+      current.accessType = accessType;
+      current.durationDays = durationDays;
       current.basePlanId = basePlanId;
       current.offerId = offerId;
       current.isActive = isActive;
@@ -291,6 +338,130 @@ export class AdminCourseCommerceService {
       message: 'Course provider product mapping deleted successfully.',
       providerProductId: mappingId,
     };
+  }
+
+  async findManualAccessOptions(courseId: string) {
+    await this.getCourse(courseId);
+
+    const items = await this.manualAccessOptionRepository.find({
+      where: { courseId },
+      order: { accessType: 'ASC', durationDays: 'ASC', createdAt: 'ASC' },
+    });
+
+    return { items: items.map((item) => this.mapManualAccessOption(item)) };
+  }
+
+  async createManualAccessOption(
+    courseId: string,
+    dto: CreateCourseManualAccessOptionDto,
+  ) {
+    await this.getCourse(courseId);
+    const durationDays = this.normalizeDuration(
+      dto.accessType,
+      dto.durationDays,
+    );
+
+    const id = await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [`course-manual-access:${courseId}`],
+      );
+      const repository = manager.getRepository(CourseManualAccessOption);
+      const duplicate = await this.findManualOption(
+        repository,
+        courseId,
+        dto.accessType,
+        durationDays,
+      );
+      if (duplicate) {
+        throw new ConflictException(
+          'This manual course-access option is already configured.',
+        );
+      }
+
+      const saved = await repository.save(
+        repository.create({
+          courseId,
+          accessType: dto.accessType,
+          durationDays,
+          isActive: dto.isActive ?? true,
+        }),
+      );
+      return saved.id;
+    });
+
+    return this.mapManualAccessOption(
+      await this.getManualAccessOptionEntity(courseId, id),
+    );
+  }
+
+  async updateManualAccessOption(
+    courseId: string,
+    optionId: string,
+    dto: UpdateCourseManualAccessOptionDto,
+  ) {
+    await this.getCourse(courseId);
+    const current = await this.getManualAccessOptionEntity(courseId, optionId);
+    const accessType = dto.accessType ?? current.accessType;
+    const durationDays = this.normalizeDuration(
+      accessType,
+      dto.durationDays !== undefined ? dto.durationDays : current.durationDays,
+    );
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+        [`course-manual-access:${courseId}`],
+      );
+      const repository = manager.getRepository(CourseManualAccessOption);
+      const duplicate = await this.findManualOption(
+        repository,
+        courseId,
+        accessType,
+        durationDays,
+        optionId,
+      );
+      if (duplicate) {
+        throw new ConflictException(
+          'This manual course-access option is already configured.',
+        );
+      }
+
+      current.accessType = accessType;
+      current.durationDays = durationDays;
+      current.isActive = dto.isActive ?? current.isActive;
+      await repository.save(current);
+    });
+
+    return this.mapManualAccessOption(
+      await this.getManualAccessOptionEntity(courseId, optionId),
+    );
+  }
+
+  async deleteManualAccessOption(courseId: string, optionId: string) {
+    const option = await this.getManualAccessOptionEntity(courseId, optionId);
+    const usedQuery = this.externalGrantRepository
+      .createQueryBuilder('grant')
+      .where('grant.courseId = :courseId', { courseId })
+      .andWhere('grant.accessType = :accessType', {
+        accessType: option.accessType,
+      });
+    if (option.durationDays === null) {
+      usedQuery.andWhere('grant.durationDays IS NULL');
+    } else {
+      usedQuery.andWhere('grant.durationDays = :durationDays', {
+        durationDays: option.durationDays,
+      });
+    }
+    const used = await usedQuery.getCount();
+    if (used > 0) {
+      throw new ConflictException(
+        'This manual access option has grant history. Deactivate it instead of deleting it.',
+      );
+    }
+
+    await this.manualAccessOptionRepository.delete({ id: optionId, courseId });
+    return { message: 'Manual course-access option deleted successfully.' };
   }
 
   async grantExternalCourseAccess(params: {
@@ -340,6 +511,36 @@ export class AdminCourseCommerceService {
       });
       if (!user) throw new NotFoundException('User not found.');
 
+      const manualOptionRepository = manager.getRepository(
+        CourseManualAccessOption,
+      );
+      const manualOption = params.dto.manualAccessOptionId
+        ? await manualOptionRepository.findOne({
+            where: {
+              id: params.dto.manualAccessOptionId,
+              courseId: course.id,
+              isActive: true,
+            },
+          })
+        : await manualOptionRepository.findOne({
+            where: {
+              courseId: course.id,
+              accessType: CourseAccessType.LIFETIME,
+              isActive: true,
+            },
+          });
+
+      if (!manualOption) {
+        throw new BadRequestException(
+          params.dto.manualAccessOptionId
+            ? 'The selected manual course-access option is unavailable.'
+            : 'Lifetime manual access is not enabled for this course.',
+        );
+      }
+
+      const accessType = manualOption.accessType;
+      const durationDays = manualOption.durationDays;
+
       const grantRepository = manager.getRepository(AdminCourseAccessGrant);
       const duplicateReference = await grantRepository.findOne({
         where: { externalReference },
@@ -357,12 +558,6 @@ export class AdminCourseCommerceService {
           status: AdminCourseAccessGrantStatus.ACTIVE,
         },
       });
-      if (existingActiveGrant) {
-        throw new ConflictException(
-          'This user already has active external access to the course.',
-        );
-      }
-
       const activeStoreOrder = await manager
         .getRepository(CoursePurchaseOrder)
         .findOne({
@@ -384,13 +579,47 @@ export class AdminCourseCommerceService {
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (enrollment?.status === CourseEnrollmentStatus.ACTIVE) {
+      if (
+        enrollment?.status === CourseEnrollmentStatus.ACTIVE &&
+        enrollment.orderId
+      ) {
         throw new ConflictException(
-          enrollment.orderId
-            ? 'This user already has active store access to the course.'
-            : 'This user already has active access to the course.',
+          'This user already has active store access to the course.',
         );
       }
+
+      if (
+        enrollment?.status === CourseEnrollmentStatus.ACTIVE &&
+        enrollment.accessType === CourseAccessType.LIFETIME
+      ) {
+        throw new ConflictException(
+          'This user already has lifetime access to the course.',
+        );
+      }
+
+      if (existingActiveGrant) {
+        existingActiveGrant.status = AdminCourseAccessGrantStatus.REVOKED;
+        existingActiveGrant.revokedAt = new Date();
+        existingActiveGrant.revokedByAdminId = params.adminUserId;
+        existingActiveGrant.revokeReason =
+          'Superseded by a new external access grant.';
+        await grantRepository.save(existingActiveGrant);
+      }
+
+      const now = new Date();
+      const expiresAt =
+        accessType === CourseAccessType.TIME_LIMITED && durationDays
+          ? this.addDays(
+              new Date(
+                Math.max(
+                  now.getTime(),
+                  paidAt.getTime(),
+                  enrollment?.expiresAt?.getTime() ?? 0,
+                ),
+              ),
+              durationDays,
+            )
+          : null;
 
       if (!enrollment) {
         enrollment = enrollmentRepository.create({
@@ -398,18 +627,18 @@ export class AdminCourseCommerceService {
           courseId: course.id,
           orderId: null,
           status: CourseEnrollmentStatus.ACTIVE,
-          accessType: CourseAccessType.LIFETIME,
+          accessType,
           enrolledAt: paidAt,
-          expiresAt: null,
+          expiresAt,
           refundedAt: null,
           lastAccessedAt: null,
         });
       } else {
         enrollment.orderId = null;
         enrollment.status = CourseEnrollmentStatus.ACTIVE;
-        enrollment.accessType = CourseAccessType.LIFETIME;
-        enrollment.enrolledAt = paidAt;
-        enrollment.expiresAt = null;
+        enrollment.accessType = accessType;
+        enrollment.enrolledAt = enrollment.enrolledAt ?? paidAt;
+        enrollment.expiresAt = expiresAt;
         enrollment.refundedAt = null;
       }
 
@@ -423,6 +652,9 @@ export class AdminCourseCommerceService {
           paymentAmount,
           paymentCurrency: params.dto.paymentCurrency,
           amountEur,
+          accessType,
+          durationDays,
+          expiresAt,
           paymentMethod: params.dto.paymentMethod,
           externalReference,
           paidAt,
@@ -946,11 +1178,13 @@ export class AdminCourseCommerceService {
       });
 
       if (enrollment) {
-        enrollment.status = CourseEnrollmentStatus.REFUNDED;
-
-        enrollment.refundedAt = now;
-
-        await enrollmentRepository.save(enrollment);
+        await this.restorePreviousPaidEntitlement({
+          manager,
+          enrollment,
+          refundedOrderId: order.id,
+          fallbackStatus: CourseEnrollmentStatus.REFUNDED,
+          occurredAt: now,
+        });
       }
 
       const reference = `refund_demo_${order.id.replace(/-/g, '')}`;
@@ -1319,11 +1553,13 @@ export class AdminCourseCommerceService {
          * repurchase of the same course.
          */
         if (enrollment) {
-          enrollment.status = CourseEnrollmentStatus.REFUNDED;
-
-          enrollment.refundedAt = now;
-
-          await enrollmentRepository.save(enrollment);
+          await this.restorePreviousPaidEntitlement({
+            manager,
+            enrollment,
+            refundedOrderId: order.id,
+            fallbackStatus: CourseEnrollmentStatus.REFUNDED,
+            occurredAt: now,
+          });
         }
 
         const refundReference = `refund:${operation.providerOrderId}`;
@@ -1593,18 +1829,51 @@ export class AdminCourseCommerceService {
   }
 
   private validateProviderProductConfiguration(input: {
+    provider: CoursePaymentProvider;
     productType: CourseProviderProductType;
+    accessType: CourseAccessType;
+    durationDays: number | null;
     basePlanId: string | null;
   }) {
-    if (input.productType !== CourseProviderProductType.NON_CONSUMABLE) {
+    if (input.accessType === CourseAccessType.LIFETIME) {
+      if (
+        input.productType !== CourseProviderProductType.NON_CONSUMABLE ||
+        input.durationDays !== null ||
+        input.basePlanId
+      ) {
+        throw new BadRequestException(
+          'Lifetime access requires a non-consumable product without durationDays or basePlanId.',
+        );
+      }
+      return;
+    }
+
+    if (
+      input.productType !== CourseProviderProductType.SUBSCRIPTION ||
+      !Number.isInteger(input.durationDays) ||
+      (input.durationDays ?? 0) < 1 ||
+      (input.durationDays ?? 0) > 3650
+    ) {
       throw new BadRequestException(
-        'Lifetime courses must use non-consumable store products.',
+        'Time-limited access requires a subscription product and durationDays between 1 and 3650.',
       );
     }
 
-    if (input.basePlanId) {
+    if (
+      input.provider === CoursePaymentProvider.GOOGLE_PLAY &&
+      !input.basePlanId
+    ) {
       throw new BadRequestException(
-        'A non-consumable course product cannot have a basePlanId.',
+        'Google Play time-limited access requires a basePlanId.',
+      );
+    }
+
+    if (
+      input.provider === CoursePaymentProvider.APP_STORE &&
+      input.basePlanId
+    ) {
+      throw new BadRequestException(
+        'App Store mappings do not use a basePlanId.',
       );
     }
   }
@@ -1639,6 +1908,8 @@ export class AdminCourseCommerceService {
       provider: providerProduct.provider,
       productId: providerProduct.productId,
       productType: providerProduct.productType,
+      accessType: providerProduct.accessType,
+      durationDays: providerProduct.durationDays,
       basePlanId: providerProduct.basePlanId,
       offerId: providerProduct.offerId,
       isActive: providerProduct.isActive,
@@ -1659,6 +1930,9 @@ export class AdminCourseCommerceService {
       paymentAmount: grant.paymentAmount,
       paymentCurrency: grant.paymentCurrency,
       amountEur: grant.amountEur,
+      accessType: grant.accessType,
+      durationDays: grant.durationDays,
+      expiresAt: grant.expiresAt,
       paymentMethod: grant.paymentMethod,
       externalReference: grant.externalReference,
       paidAt: grant.paidAt,
@@ -1750,6 +2024,243 @@ export class AdminCourseCommerceService {
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [
       lockKey,
     ]);
+  }
+
+  private normalizeDuration(
+    accessType: CourseAccessType,
+    durationDays?: number | null,
+  ): number | null {
+    if (accessType === CourseAccessType.LIFETIME) {
+      if (durationDays !== undefined && durationDays !== null) {
+        throw new BadRequestException(
+          'Lifetime access cannot have durationDays.',
+        );
+      }
+      return null;
+    }
+
+    if (
+      !Number.isInteger(durationDays) ||
+      (durationDays ?? 0) < 1 ||
+      (durationDays ?? 0) > 3650
+    ) {
+      throw new BadRequestException(
+        'Time-limited access requires durationDays between 1 and 3650.',
+      );
+    }
+    return durationDays as number;
+  }
+
+  private addDays(date: Date, days: number): Date {
+    return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+
+  private mapManualAccessOption(option: CourseManualAccessOption) {
+    return {
+      id: option.id,
+      courseId: option.courseId,
+      accessType: option.accessType,
+      durationDays: option.durationDays,
+      isActive: option.isActive,
+      createdAt: option.createdAt,
+      updatedAt: option.updatedAt,
+    };
+  }
+
+  private async getManualAccessOptionEntity(
+    courseId: string,
+    optionId: string,
+  ) {
+    const option = await this.manualAccessOptionRepository.findOne({
+      where: { id: optionId, courseId },
+    });
+    if (!option) {
+      throw new NotFoundException('Manual course-access option not found.');
+    }
+    return option;
+  }
+
+  private async findManualOption(
+    repository: Repository<CourseManualAccessOption>,
+    courseId: string,
+    accessType: CourseAccessType,
+    durationDays: number | null,
+    excludeId?: string,
+  ) {
+    const query = repository
+      .createQueryBuilder('option')
+      .where('option.courseId = :courseId', { courseId })
+      .andWhere('option.accessType = :accessType', { accessType });
+    if (durationDays === null) {
+      query.andWhere('option.durationDays IS NULL');
+    } else {
+      query.andWhere('option.durationDays = :durationDays', { durationDays });
+    }
+    if (excludeId) query.andWhere('option.id != :excludeId', { excludeId });
+    return query.getOne();
+  }
+
+  private async findDuplicateProviderProduct(params: {
+    repository: Repository<CourseProviderProduct>;
+    provider: CoursePaymentProvider;
+    productId: string;
+    basePlanId: string | null;
+    excludeId?: string;
+  }) {
+    const query = params.repository
+      .createQueryBuilder('providerProduct')
+      .where('providerProduct.provider = :provider', {
+        provider: params.provider,
+      })
+      .andWhere('providerProduct.productId = :productId', {
+        productId: params.productId,
+      });
+    if (params.basePlanId) {
+      query.andWhere('providerProduct.basePlanId = :basePlanId', {
+        basePlanId: params.basePlanId,
+      });
+    } else {
+      query.andWhere('providerProduct.basePlanId IS NULL');
+    }
+    if (params.excludeId) {
+      query.andWhere('providerProduct.id != :excludeId', {
+        excludeId: params.excludeId,
+      });
+    }
+    return query.getOne();
+  }
+
+  private async assertCourseDurationAvailable(params: {
+    repository: Repository<CourseProviderProduct>;
+    courseId: string;
+    provider: CoursePaymentProvider;
+    accessType: CourseAccessType;
+    durationDays: number | null;
+    excludeId?: string;
+  }): Promise<void> {
+    if (params.accessType !== CourseAccessType.TIME_LIMITED) return;
+    const query = params.repository
+      .createQueryBuilder('providerProduct')
+      .where('providerProduct.courseId = :courseId', {
+        courseId: params.courseId,
+      })
+      .andWhere('providerProduct.provider = :provider', {
+        provider: params.provider,
+      })
+      .andWhere('providerProduct.accessType = :accessType', {
+        accessType: CourseAccessType.TIME_LIMITED,
+      })
+      .andWhere('providerProduct.durationDays = :durationDays', {
+        durationDays: params.durationDays,
+      });
+    if (params.excludeId) {
+      query.andWhere('providerProduct.id != :excludeId', {
+        excludeId: params.excludeId,
+      });
+    }
+    if (await query.getExists()) {
+      throw new ConflictException(
+        'This course already has the same time-limited duration for this provider.',
+      );
+    }
+  }
+
+  private async assertProviderProductFamilyMatches(params: {
+    repository: Repository<CourseProviderProduct>;
+    provider: CoursePaymentProvider;
+    productId: string;
+    productType: CourseProviderProductType;
+    excludeId?: string;
+  }): Promise<void> {
+    const query = params.repository
+      .createQueryBuilder('providerProduct')
+      .where('providerProduct.provider = :provider', {
+        provider: params.provider,
+      })
+      .andWhere('providerProduct.productId = :productId', {
+        productId: params.productId,
+      })
+      .andWhere('providerProduct.productType != :productType', {
+        productType: params.productType,
+      });
+    if (params.excludeId) {
+      query.andWhere('providerProduct.id != :excludeId', {
+        excludeId: params.excludeId,
+      });
+    }
+    if (await query.getExists()) {
+      throw new ConflictException(
+        'A store product ID cannot be both a lifetime product and a subscription.',
+      );
+    }
+  }
+
+  private async restorePreviousPaidEntitlement(params: {
+    manager: EntityManager;
+    enrollment: CourseEnrollment;
+    refundedOrderId: string;
+    fallbackStatus: CourseEnrollmentStatus;
+    occurredAt: Date;
+  }): Promise<void> {
+    const orderRepository = params.manager.getRepository(CoursePurchaseOrder);
+    const enrollmentRepository = params.manager.getRepository(CourseEnrollment);
+    const paidOrders = await orderRepository
+      .createQueryBuilder('purchaseOrder')
+      .leftJoinAndSelect('purchaseOrder.providerSnapshot', 'providerSnapshot')
+      .where('purchaseOrder.userId = :userId', {
+        userId: params.enrollment.userId,
+      })
+      .andWhere('purchaseOrder.courseId = :courseId', {
+        courseId: params.enrollment.courseId,
+      })
+      .andWhere('purchaseOrder.status = :status', {
+        status: CoursePurchaseStatus.PAID,
+      })
+      .andWhere('purchaseOrder.id != :refundedOrderId', {
+        refundedOrderId: params.refundedOrderId,
+      })
+      .orderBy('purchaseOrder.paidAt', 'DESC', 'NULLS LAST')
+      .addOrderBy('purchaseOrder.createdAt', 'DESC')
+      .getMany();
+
+    const lifetimeOrder = paidOrders.find(
+      (order) =>
+        (order.providerSnapshot?.accessType ?? CourseAccessType.LIFETIME) ===
+        CourseAccessType.LIFETIME,
+    );
+    const timedOrder = paidOrders
+      .filter(
+        (order) =>
+          order.providerSnapshot?.accessType ===
+            CourseAccessType.TIME_LIMITED &&
+          Boolean(
+            order.entitlementExpiresAt &&
+              order.entitlementExpiresAt > params.occurredAt,
+          ),
+      )
+      .sort(
+        (left, right) =>
+          (right.entitlementExpiresAt?.getTime() ?? 0) -
+          (left.entitlementExpiresAt?.getTime() ?? 0),
+      )[0];
+    const fallbackOrder = lifetimeOrder ?? timedOrder;
+
+    if (fallbackOrder) {
+      params.enrollment.orderId = fallbackOrder.id;
+      params.enrollment.status = CourseEnrollmentStatus.ACTIVE;
+      params.enrollment.accessType = lifetimeOrder
+        ? CourseAccessType.LIFETIME
+        : CourseAccessType.TIME_LIMITED;
+      params.enrollment.expiresAt = lifetimeOrder
+        ? null
+        : fallbackOrder.entitlementExpiresAt;
+      params.enrollment.refundedAt = null;
+    } else {
+      params.enrollment.status = params.fallbackStatus;
+      params.enrollment.refundedAt = params.occurredAt;
+    }
+
+    await enrollmentRepository.save(params.enrollment);
   }
 
   private async assertProductNotMappedToPackage(

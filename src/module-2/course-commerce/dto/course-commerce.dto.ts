@@ -31,6 +31,10 @@ export class CourseQuoteQueryDto {
   provider: CoursePaymentProvider;
 
   @IsOptional()
+  @IsUUID('4')
+  providerProductId?: string;
+
+  @IsOptional()
   @Transform(upper)
   @IsEnum(CommerceCurrency)
   currency?: CommerceCurrency;
@@ -57,6 +61,10 @@ export class CreateCoursePurchaseOrderDto {
       'productId may contain only letters, numbers, dots, underscores and hyphens.',
   })
   productId: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  providerProductId?: string;
 
   @IsOptional()
   @Transform(upper)

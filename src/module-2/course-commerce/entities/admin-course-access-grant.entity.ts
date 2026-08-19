@@ -14,6 +14,7 @@ import { User } from '../../../users/entities/user.entity';
 import {
   AdminExternalPaymentMethod,
   CommerceCurrency,
+  CourseAccessType,
 } from '../types/course-commerce.type';
 import { CourseEnrollment } from './course-enrollment.entity';
 
@@ -49,6 +50,19 @@ export class AdminCourseAccessGrant {
 
   @Column({ type: 'numeric', precision: 10, scale: 2 })
   amountEur: string;
+
+  @Column({
+    type: 'varchar',
+    length: 30,
+    default: CourseAccessType.LIFETIME,
+  })
+  accessType: CourseAccessType;
+
+  @Column({ type: 'smallint', nullable: true })
+  durationDays: number | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  expiresAt: Date | null;
 
   @Column({ type: 'varchar', length: 40 })
   paymentMethod: AdminExternalPaymentMethod;

@@ -856,11 +856,13 @@ export class AppStoreNotificationService {
       });
 
       if (enrollment) {
-        enrollment.status = params.enrollmentStatus;
-
-        enrollment.refundedAt = params.eventTime;
-
-        await enrollmentRepository.save(enrollment);
+        await this.restorePreviousCourseEntitlement({
+          manager,
+          enrollment,
+          refundedOrderId: order.id,
+          fallbackStatus: params.enrollmentStatus,
+          occurredAt: params.eventTime,
+        });
       }
 
       const providerReference = `apple-refund:${params.transactionId}`;
@@ -926,6 +928,10 @@ export class AppStoreNotificationService {
           id: params.orderId,
         },
 
+        relations: {
+          providerSnapshot: true,
+        },
+
         lock: {
           mode: 'pessimistic_write',
         },
@@ -988,6 +994,9 @@ export class AppStoreNotificationService {
       });
 
       if (!enrollment) {
+        const accessType =
+          order.providerSnapshot?.accessType ?? CourseAccessType.LIFETIME;
+
         enrollment = enrollmentRepository.create({
           userId: order.userId,
 
@@ -997,26 +1006,42 @@ export class AppStoreNotificationService {
 
           status: CourseEnrollmentStatus.ACTIVE,
 
-          accessType: CourseAccessType.LIFETIME,
+          accessType,
 
           enrolledAt: params.eventTime,
 
-          expiresAt: null,
+          expiresAt:
+            accessType === CourseAccessType.TIME_LIMITED
+              ? order.entitlementExpiresAt
+              : null,
 
           refundedAt: null,
 
           lastAccessedAt: null,
         });
       } else {
+        const accessType =
+          order.providerSnapshot?.accessType ?? CourseAccessType.LIFETIME;
+
         enrollment.orderId = order.id;
 
         enrollment.status = CourseEnrollmentStatus.ACTIVE;
 
-        enrollment.accessType = CourseAccessType.LIFETIME;
+        enrollment.accessType = accessType;
 
         enrollment.refundedAt = null;
 
-        enrollment.expiresAt = null;
+        enrollment.expiresAt =
+          accessType === CourseAccessType.TIME_LIMITED
+            ? order.entitlementExpiresAt
+            : null;
+      }
+
+      if (
+        enrollment.accessType === CourseAccessType.TIME_LIMITED &&
+        (!enrollment.expiresAt || enrollment.expiresAt <= params.eventTime)
+      ) {
+        enrollment.status = CourseEnrollmentStatus.EXPIRED;
       }
 
       await enrollmentRepository.save(enrollment);
@@ -1063,6 +1088,73 @@ export class AppStoreNotificationService {
         orderId: order.id,
       };
     });
+  }
+
+  private async restorePreviousCourseEntitlement(params: {
+    manager: EntityManager;
+    enrollment: CourseEnrollment;
+    refundedOrderId: string;
+    fallbackStatus: CourseEnrollmentStatus;
+    occurredAt: Date;
+  }): Promise<void> {
+    const orderRepository = params.manager.getRepository(CoursePurchaseOrder);
+    const enrollmentRepository = params.manager.getRepository(CourseEnrollment);
+    const paidOrders = await orderRepository
+      .createQueryBuilder('purchaseOrder')
+      .leftJoinAndSelect('purchaseOrder.providerSnapshot', 'providerSnapshot')
+      .where('purchaseOrder.userId = :userId', {
+        userId: params.enrollment.userId,
+      })
+      .andWhere('purchaseOrder.courseId = :courseId', {
+        courseId: params.enrollment.courseId,
+      })
+      .andWhere('purchaseOrder.status = :status', {
+        status: CoursePurchaseStatus.PAID,
+      })
+      .andWhere('purchaseOrder.id != :refundedOrderId', {
+        refundedOrderId: params.refundedOrderId,
+      })
+      .orderBy('purchaseOrder.paidAt', 'DESC', 'NULLS LAST')
+      .addOrderBy('purchaseOrder.createdAt', 'DESC')
+      .getMany();
+    const lifetimeOrder = paidOrders.find(
+      (order) =>
+        (order.providerSnapshot?.accessType ?? CourseAccessType.LIFETIME) ===
+        CourseAccessType.LIFETIME,
+    );
+    const timedOrder = paidOrders
+      .filter(
+        (order) =>
+          order.providerSnapshot?.accessType ===
+            CourseAccessType.TIME_LIMITED &&
+          Boolean(
+            order.entitlementExpiresAt &&
+              order.entitlementExpiresAt > params.occurredAt,
+          ),
+      )
+      .sort(
+        (left, right) =>
+          (right.entitlementExpiresAt?.getTime() ?? 0) -
+          (left.entitlementExpiresAt?.getTime() ?? 0),
+      )[0];
+    const fallbackOrder = lifetimeOrder ?? timedOrder;
+
+    if (fallbackOrder) {
+      params.enrollment.orderId = fallbackOrder.id;
+      params.enrollment.status = CourseEnrollmentStatus.ACTIVE;
+      params.enrollment.accessType = lifetimeOrder
+        ? CourseAccessType.LIFETIME
+        : CourseAccessType.TIME_LIMITED;
+      params.enrollment.expiresAt = lifetimeOrder
+        ? null
+        : fallbackOrder.entitlementExpiresAt;
+      params.enrollment.refundedAt = null;
+    } else {
+      params.enrollment.status = params.fallbackStatus;
+      params.enrollment.refundedAt = params.occurredAt;
+    }
+
+    await enrollmentRepository.save(params.enrollment);
   }
 
   private async revokePackageOrder(params: {

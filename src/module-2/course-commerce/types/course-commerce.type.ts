@@ -20,6 +20,7 @@ export enum AdminExternalPaymentMethod {
 
 export enum CourseProviderProductType {
   NON_CONSUMABLE = 'non_consumable',
+  SUBSCRIPTION = 'subscription',
 }
 
 export enum CourseProviderEnvironment {
@@ -59,6 +60,7 @@ export enum CourseEnrollmentStatus {
 
 export enum CourseAccessType {
   LIFETIME = 'lifetime',
+  TIME_LIMITED = 'time_limited',
 }
 
 export enum CommerceSortOrder {
@@ -71,6 +73,8 @@ export interface CourseProviderProductResponse {
   provider: CoursePaymentProvider;
   productId: string;
   productType: CourseProviderProductType;
+  accessType: CourseAccessType;
+  durationDays: number | null;
   basePlanId: string | null;
   offerId: string | null;
   isActive: boolean;

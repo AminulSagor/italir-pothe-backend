@@ -123,6 +123,8 @@ export class CourseCommerceService {
       providerProduct = this.requireActiveProviderProduct(
         course,
         query.provider,
+        undefined,
+        query.providerProductId,
       );
     }
 
@@ -135,6 +137,11 @@ export class CourseCommerceService {
       if (!providerProduct) {
         throw new BadRequestException(
           'Payment provider is required before applying a coupon.',
+        );
+      }
+      if (providerProduct.accessType !== CourseAccessType.LIFETIME) {
+        throw new BadRequestException(
+          'Coupons are not supported for time-limited course options.',
         );
       }
 
@@ -203,7 +210,12 @@ export class CourseCommerceService {
       discountAmountEur: quote.discountAmountEur,
       payableAmountEur: quote.payableAmountEur,
       forexRate: quote.forexRate,
-      alreadyEnrolled: Boolean(enrollment),
+      alreadyEnrolled: this.hasEnrollmentAccess(enrollment),
+
+      purchaseOptions: (course.providerProducts ?? [])
+        .filter((item) => item.isActive && item.provider === query.provider)
+        .filter((item) => !this.isCouponProviderProductId(item.productId))
+        .map((item) => this.mapProviderProduct(item)),
 
       supportedProviders: (course.providerProducts ?? [])
         .filter((item) => item.isActive)
@@ -234,6 +246,8 @@ export class CourseCommerceService {
     const regularProviderProduct = this.requireActiveProviderProduct(
       course,
       dto.paymentProvider,
+      undefined,
+      dto.providerProductId,
     );
 
     let providerProduct = regularProviderProduct;
@@ -246,12 +260,16 @@ export class CourseCommerceService {
       where: {
         userId,
         courseId: course.id,
-        status: CourseEnrollmentStatus.ACTIVE,
       },
     });
 
-    if (existingEnrollment) {
-      throw new ConflictException('You already have access to this course.');
+    if (
+      this.hasEnrollmentAccess(existingEnrollment) &&
+      existingEnrollment?.accessType === CourseAccessType.LIFETIME
+    ) {
+      throw new ConflictException(
+        'You already have lifetime access to this course.',
+      );
     }
 
     const existingOrder = await this.purchaseOrderRepository.findOne({
@@ -299,6 +317,11 @@ export class CourseCommerceService {
     let quote: CalculatedCourseQuote;
 
     if (dto.couponCode?.trim()) {
+      if (regularProviderProduct.accessType !== CourseAccessType.LIFETIME) {
+        throw new BadRequestException(
+          'Coupons are not supported for time-limited course options.',
+        );
+      }
       couponResolution =
         await this.influencerHubService.resolveCouponForCheckout({
           couponCode: dto.couponCode,
@@ -335,6 +358,7 @@ export class CourseCommerceService {
         course,
         dto.paymentProvider,
         dto.productId,
+        dto.providerProductId,
       );
 
       checkoutProductId = providerProduct.productId;
@@ -381,6 +405,7 @@ export class CourseCommerceService {
           idempotencyKey: dto.idempotencyKey,
           paidAt: null,
           refundedAt: null,
+          entitlementExpiresAt: null,
         }),
       );
 
@@ -391,6 +416,8 @@ export class CourseCommerceService {
           provider: providerProduct.provider,
           productId: checkoutProductId,
           productType: providerProduct.productType,
+          accessType: providerProduct.accessType,
+          durationDays: providerProduct.durationDays,
           basePlanId: checkoutBasePlanId,
           offerId: checkoutOfferId,
         }),
@@ -475,15 +502,6 @@ export class CourseCommerceService {
         );
       }
 
-      if (
-        order.providerSnapshot.productType !==
-        CourseProviderProductType.NON_CONSUMABLE
-      ) {
-        throw new BadRequestException(
-          'A lifetime course must use a non-consumable Google Play product.',
-        );
-      }
-
       /*
        * Development/demo verification flow
        */
@@ -564,6 +582,94 @@ export class CourseCommerceService {
       const expectedObfuscatedAccountId = createHash('sha256')
         .update(order.userId)
         .digest('hex');
+
+      if (
+        order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED
+      ) {
+        currentStep = 'GOOGLE_SUBSCRIPTION_VERIFY';
+        const verifiedSubscription =
+          await this.googlePlayBillingService.verifySubscription({
+            purchaseToken,
+            expectedProductId: order.providerSnapshot.productId,
+            expectedBasePlanId: order.providerSnapshot.basePlanId,
+            expectedOfferId: order.providerSnapshot.offerId,
+            expectedObfuscatedAccountId,
+          });
+        const providerReference =
+          verifiedSubscription.latestOrderId ||
+          `google-play:${verifiedSubscription.purchaseTokenHash}`;
+        const verifiedExpiresAt = new Date(verifiedSubscription.expiresAt);
+        const payload = {
+          source: 'google_play_developer_api_subscription',
+          productId: verifiedSubscription.productId,
+          basePlanId: verifiedSubscription.basePlanId,
+          offerId: verifiedSubscription.offerId,
+          latestOrderId: verifiedSubscription.latestOrderId,
+          subscriptionState: verifiedSubscription.subscriptionState,
+          acknowledgementState: verifiedSubscription.acknowledgementState,
+          startedAt: verifiedSubscription.startedAt,
+          expiryTime: verifiedSubscription.expiresAt,
+          autoRenewEnabled: verifiedSubscription.autoRenewEnabled,
+          regionCode: verifiedSubscription.regionCode,
+          isTestPurchase: verifiedSubscription.isTestPurchase,
+        };
+
+        const restoredCompletion =
+          await this.restoreExistingGooglePlayCoursePurchase({
+            currentOrder: order,
+            tokenHash: verifiedSubscription.purchaseTokenHash,
+            providerReference,
+            environment: verifiedSubscription.isTestPurchase
+              ? CourseProviderEnvironment.SANDBOX
+              : CourseProviderEnvironment.PRODUCTION,
+            payload,
+            verifiedExpiresAt,
+          });
+
+        const completion =
+          restoredCompletion ??
+          (await (async () => {
+            await this.markProviderTransactionVerified({
+              order,
+              tokenHash: verifiedSubscription.purchaseTokenHash,
+              providerTransactionId: providerReference,
+              environment: verifiedSubscription.isTestPurchase
+                ? CourseProviderEnvironment.SANDBOX
+                : CourseProviderEnvironment.PRODUCTION,
+              payload,
+            });
+            return this.completePayment({
+              orderId: order.id,
+              provider: CoursePaymentProvider.GOOGLE_PLAY,
+              providerReference,
+              verifiedExpiresAt,
+            });
+          })());
+
+        const acknowledgement =
+          await this.googlePlayBillingService.acknowledgeSubscription({
+            subscriptionId: order.providerSnapshot.productId,
+            purchaseToken,
+          });
+
+        return {
+          ...completion,
+          googlePlayProcessing: {
+            type: 'subscription',
+            acknowledged: acknowledgement.acknowledged,
+            alreadyAcknowledged: acknowledgement.alreadyAcknowledged,
+          },
+        };
+      }
+
+      if (
+        order.providerSnapshot.productType !==
+        CourseProviderProductType.NON_CONSUMABLE
+      ) {
+        throw new BadRequestException(
+          'A lifetime course must use a non-consumable Google Play product.',
+        );
+      }
 
       this.logger.log({
         source,
@@ -858,8 +964,9 @@ export class CourseCommerceService {
     }
 
     if (
+      order.providerSnapshot.accessType === CourseAccessType.LIFETIME &&
       order.providerSnapshot.productType !==
-      CourseProviderProductType.NON_CONSUMABLE
+        CourseProviderProductType.NON_CONSUMABLE
     ) {
       throw new BadRequestException(
         'A lifetime course must use a non-consumable App Store product.',
@@ -917,7 +1024,10 @@ export class CourseCommerceService {
        */
       expectedAppAccountToken: order.id,
 
-      expectedType: Type.NON_CONSUMABLE,
+      expectedType:
+        order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED
+          ? Type.NON_RENEWING_SUBSCRIPTION
+          : Type.NON_CONSUMABLE,
     });
 
     const tokenHash = this.appStoreBillingService.hash(
@@ -949,6 +1059,11 @@ export class CourseCommerceService {
       provider: CoursePaymentProvider.APP_STORE,
 
       providerReference: verified.transactionId,
+
+      verifiedExpiresAt:
+        order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED
+          ? verified.expiresDate
+          : null,
     });
   }
 
@@ -1004,6 +1119,7 @@ export class CourseCommerceService {
   }
 
   async findMyEnrollments(userId: string, query: MyEnrollmentQueryDto) {
+    await this.expireDueEnrollments(userId);
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
 
@@ -1062,6 +1178,8 @@ export class CourseCommerceService {
   async getCourseAccess(userId: string, courseId: string) {
     await this.getPublishedCourse(courseId);
 
+    await this.expireDueEnrollments(userId, courseId);
+
     const enrollment = await this.enrollmentRepository.findOne({
       where: {
         userId,
@@ -1072,7 +1190,7 @@ export class CourseCommerceService {
 
     return {
       courseId,
-      hasAccess: Boolean(enrollment),
+      hasAccess: this.hasEnrollmentAccess(enrollment),
       enrollment: enrollment
         ? {
             id: enrollment.id,
@@ -1086,6 +1204,7 @@ export class CourseCommerceService {
   }
 
   async recordCourseAccess(userId: string, courseId: string) {
+    await this.expireDueEnrollments(userId, courseId);
     const enrollment = await this.enrollmentRepository.findOne({
       where: {
         userId,
@@ -1094,7 +1213,7 @@ export class CourseCommerceService {
       },
     });
 
-    if (!enrollment) {
+    if (!enrollment || !this.hasEnrollmentAccess(enrollment)) {
       throw new BadRequestException(
         'An active enrollment is required to access this course.',
       );
@@ -1167,6 +1286,7 @@ export class CourseCommerceService {
     providerReference: string;
     environment: CourseProviderEnvironment;
     payload: Record<string, unknown>;
+    verifiedExpiresAt?: Date | null;
   }) {
     const transactionRepository = this.dataSource.getRepository(
       CourseOrderProviderTransaction,
@@ -1220,7 +1340,9 @@ export class CourseCommerceService {
     const expectedProductId = params.currentOrder.providerSnapshot.productId;
     const sameProduct =
       existingTransaction.productId === expectedProductId &&
-      existingOrder.providerSnapshot.productId === expectedProductId;
+      existingOrder.providerSnapshot.productId === expectedProductId &&
+      existingOrder.providerSnapshot.basePlanId ===
+        params.currentOrder.providerSnapshot.basePlanId;
 
     if (!sameCourse || !sameProduct) {
       throw new ConflictException({
@@ -1249,6 +1371,7 @@ export class CourseCommerceService {
       orderId: existingOrder.id,
       provider: CoursePaymentProvider.GOOGLE_PLAY,
       providerReference: params.providerReference,
+      verifiedExpiresAt: params.verifiedExpiresAt,
     });
 
     await this.markSupersededGooglePlayOrder({
@@ -1575,6 +1698,7 @@ export class CourseCommerceService {
     orderId: string;
     provider: CoursePaymentProvider;
     providerReference: string;
+    verifiedExpiresAt?: Date | null;
   }) {
     return this.dataSource.transaction(async (manager) => {
       const orderRepository = manager.getRepository(CoursePurchaseOrder);
@@ -1670,14 +1794,28 @@ export class CourseCommerceService {
           where: {
             userId: order.userId,
             courseId,
-            status: CourseEnrollmentStatus.ACTIVE,
           },
+          lock: { mode: 'pessimistic_write' },
         });
 
         if (!existingEnrollment) {
           throw new ConflictException(
             'The paid course order is missing its active enrollment.',
           );
+        }
+
+        if (
+          providerSnapshot.accessType === CourseAccessType.TIME_LIMITED &&
+          params.verifiedExpiresAt &&
+          (!existingEnrollment.expiresAt ||
+            existingEnrollment.expiresAt < params.verifiedExpiresAt)
+        ) {
+          existingEnrollment.status = CourseEnrollmentStatus.ACTIVE;
+          existingEnrollment.accessType = CourseAccessType.TIME_LIMITED;
+          existingEnrollment.expiresAt = params.verifiedExpiresAt;
+          order.entitlementExpiresAt = params.verifiedExpiresAt;
+          await orderRepository.save(order);
+          await enrollmentRepository.save(existingEnrollment);
         }
 
         return {
@@ -1689,6 +1827,7 @@ export class CourseCommerceService {
             status: existingEnrollment.status,
             accessType: existingEnrollment.accessType,
             enrolledAt: existingEnrollment.enrolledAt,
+            expiresAt: existingEnrollment.expiresAt,
           },
         };
       }
@@ -1716,6 +1855,8 @@ export class CourseCommerceService {
       }
 
       const now = new Date();
+      const accessType = providerSnapshot.accessType;
+      const durationDays = providerSnapshot.durationDays;
 
       if (!existingReference) {
         await attemptRepository.save(
@@ -1737,8 +1878,6 @@ export class CourseCommerceService {
       order.paidAt = now;
       order.refundedAt = null;
 
-      await orderRepository.save(order);
-
       let enrollment = await enrollmentRepository.findOne({
         where: {
           userId: order.userId,
@@ -1746,24 +1885,44 @@ export class CourseCommerceService {
         },
       });
 
+      const calculatedExpiresAt =
+        accessType === CourseAccessType.TIME_LIMITED
+          ? params.verifiedExpiresAt ??
+            this.addDays(
+              new Date(
+                Math.max(now.getTime(), enrollment?.expiresAt?.getTime() ?? 0),
+              ),
+              this.requireDurationDays(durationDays),
+            )
+          : null;
+
+      order.entitlementExpiresAt = calculatedExpiresAt;
+      await orderRepository.save(order);
+
       if (!enrollment) {
         enrollment = enrollmentRepository.create({
           userId: order.userId,
           courseId,
           orderId: order.id,
           status: CourseEnrollmentStatus.ACTIVE,
-          accessType: CourseAccessType.LIFETIME,
+          accessType,
           enrolledAt: now,
-          expiresAt: null,
+          expiresAt: calculatedExpiresAt,
           refundedAt: null,
           lastAccessedAt: null,
         });
       } else {
         enrollment.orderId = order.id;
         enrollment.status = CourseEnrollmentStatus.ACTIVE;
-        enrollment.accessType = CourseAccessType.LIFETIME;
-        enrollment.enrolledAt = now;
-        enrollment.expiresAt = null;
+        if (enrollment.accessType !== CourseAccessType.LIFETIME) {
+          enrollment.accessType = accessType;
+          enrollment.expiresAt = calculatedExpiresAt;
+        }
+        if (accessType === CourseAccessType.LIFETIME) {
+          enrollment.accessType = CourseAccessType.LIFETIME;
+          enrollment.expiresAt = null;
+        }
+        enrollment.enrolledAt = enrollment.enrolledAt ?? now;
         enrollment.refundedAt = null;
       }
 
@@ -1784,6 +1943,7 @@ export class CourseCommerceService {
           status: enrollment.status,
           accessType: enrollment.accessType,
           enrolledAt: enrollment.enrolledAt,
+          expiresAt: enrollment.expiresAt,
         },
       };
     });
@@ -1976,10 +2136,17 @@ export class CourseCommerceService {
     course: Course,
     provider: CoursePaymentProvider,
     productId?: string,
+    providerProductId?: string,
   ) {
     const activeProducts = (course.providerProducts ?? []).filter(
       (item) => item.provider === provider && item.isActive,
     );
+
+    if (providerProductId?.trim()) {
+      return activeProducts.find(
+        (item) => item.id === providerProductId.trim(),
+      );
+    }
 
     if (productId?.trim()) {
       const requestedProductId = productId.trim();
@@ -1991,7 +2158,9 @@ export class CourseCommerceService {
 
     return (
       activeProducts.find(
-        (item) => !this.isCouponProviderProductId(item.productId),
+        (item) =>
+          item.accessType === CourseAccessType.LIFETIME &&
+          !this.isCouponProviderProductId(item.productId),
       ) ?? activeProducts[0]
     );
   }
@@ -2000,11 +2169,13 @@ export class CourseCommerceService {
     course: Course,
     provider: CoursePaymentProvider,
     productId?: string,
+    providerProductId?: string,
   ) {
     const providerProduct = this.getActiveProviderProduct(
       course,
       provider,
       productId,
+      providerProductId,
     );
 
     if (!providerProduct) {
@@ -2015,11 +2186,25 @@ export class CourseCommerceService {
       );
     }
 
-    if (
-      providerProduct.productType !== CourseProviderProductType.NON_CONSUMABLE
+    if (providerProduct.accessType === CourseAccessType.LIFETIME) {
+      if (
+        providerProduct.productType !==
+          CourseProviderProductType.NON_CONSUMABLE ||
+        providerProduct.durationDays !== null ||
+        providerProduct.basePlanId
+      ) {
+        throw new BadRequestException(
+          'The lifetime course mapping is invalid.',
+        );
+      }
+    } else if (
+      providerProduct.productType !== CourseProviderProductType.SUBSCRIPTION ||
+      !providerProduct.durationDays ||
+      (provider === CoursePaymentProvider.GOOGLE_PLAY &&
+        !providerProduct.basePlanId)
     ) {
       throw new BadRequestException(
-        'Lifetime courses must use non-consumable store products.',
+        'The time-limited course mapping is invalid.',
       );
     }
 
@@ -2032,10 +2217,57 @@ export class CourseCommerceService {
       provider: providerProduct.provider,
       productId: providerProduct.productId,
       productType: providerProduct.productType,
+      accessType: providerProduct.accessType,
+      durationDays: providerProduct.durationDays,
       basePlanId: providerProduct.basePlanId,
       offerId: providerProduct.offerId,
       isActive: providerProduct.isActive,
     };
+  }
+
+  private hasEnrollmentAccess(enrollment: CourseEnrollment | null): boolean {
+    if (!enrollment || enrollment.status !== CourseEnrollmentStatus.ACTIVE) {
+      return false;
+    }
+    return (
+      enrollment.accessType === CourseAccessType.LIFETIME ||
+      Boolean(enrollment.expiresAt && enrollment.expiresAt.getTime() > Date.now())
+    );
+  }
+
+  private requireDurationDays(durationDays: number | null): number {
+    if (!durationDays || durationDays < 1 || durationDays > 3650) {
+      throw new ConflictException(
+        'The time-limited course order has an invalid duration snapshot.',
+      );
+    }
+    return durationDays;
+  }
+
+  private addDays(date: Date, days: number): Date {
+    return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+
+  private async expireDueEnrollments(
+    userId: string,
+    courseId?: string,
+  ): Promise<void> {
+    const query = this.enrollmentRepository
+      .createQueryBuilder()
+      .update(CourseEnrollment)
+      .set({ status: CourseEnrollmentStatus.EXPIRED })
+      .where('"userId" = :userId', { userId })
+      .andWhere('"status" = :status', {
+        status: CourseEnrollmentStatus.ACTIVE,
+      })
+      .andWhere('"accessType" = :accessType', {
+        accessType: CourseAccessType.TIME_LIMITED,
+      })
+      .andWhere('"expiresAt" IS NOT NULL AND "expiresAt" <= :now', {
+        now: new Date(),
+      });
+    if (courseId) query.andWhere('"courseId" = :courseId', { courseId });
+    await query.execute();
   }
 
   private async getPublishedCourse(courseId: string): Promise<Course> {
@@ -2179,6 +2411,8 @@ export class CourseCommerceService {
             provider: order.providerSnapshot.provider,
             productId: order.providerSnapshot.productId,
             productType: order.providerSnapshot.productType,
+            accessType: order.providerSnapshot.accessType,
+            durationDays: order.providerSnapshot.durationDays,
             basePlanId: order.providerSnapshot.basePlanId,
             offerId: order.providerSnapshot.offerId,
           }
@@ -2195,6 +2429,7 @@ export class CourseCommerceService {
       status: order.status,
       paidAt: order.paidAt,
       refundedAt: order.refundedAt,
+      entitlementExpiresAt: order.entitlementExpiresAt,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
     };
