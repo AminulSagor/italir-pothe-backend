@@ -37,8 +37,11 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('signup')
-  async signup(@Body() signupDto: SignupDto) {
-    return this.authService.signup(signupDto);
+  async signup(
+    @Body() signupDto: SignupDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.authService.signup(signupDto, request.ip);
   }
 
   @Post('admin/create')
@@ -54,20 +57,32 @@ export class AuthController {
 
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
-  async verifyOtp(@Body() verifyOtpDto: VerifyOtpDto) {
-    return this.authService.verifyOtp(verifyOtpDto);
+  async verifyOtp(
+    @Body() verifyOtpDto: VerifyOtpDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.authService.verifyOtp(verifyOtpDto, request.ip);
   }
 
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
-  async resendOtp(@Body() resendOtpDto: ResendOtpDto) {
-    return this.authService.resendSignupOtp(resendOtpDto);
+  async resendOtp(
+    @Body() resendOtpDto: ResendOtpDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.authService.resendSignupOtp(resendOtpDto, request.ip);
   }
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-    return this.authService.requestPasswordReset(forgotPasswordDto);
+  async forgotPassword(
+    @Body() forgotPasswordDto: ForgotPasswordDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.authService.requestPasswordReset(
+      forgotPasswordDto,
+      request.ip,
+    );
   }
 
   @Post('verify-reset-otp')
@@ -75,8 +90,9 @@ export class AuthController {
   async verifyResetOtp(
     @Body()
     verifyDto: VerifyPasswordResetOtpDto,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.authService.verifyPasswordResetOtp(verifyDto);
+    return this.authService.verifyPasswordResetOtp(verifyDto, request.ip);
   }
 
   @Post('reset-password')

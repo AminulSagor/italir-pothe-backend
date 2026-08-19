@@ -62,6 +62,7 @@ export class UserSettingsController {
     return this.userSettingsService.requestEmailChangeOtp(
       this.getUserId(request),
       dto,
+      request.ip,
     );
   }
 
@@ -73,6 +74,7 @@ export class UserSettingsController {
     return this.userSettingsService.verifyEmailChangeOtp(
       this.getUserId(request),
       dto,
+      request.ip,
     );
   }
 
@@ -84,6 +86,7 @@ export class UserSettingsController {
     return this.userSettingsService.requestPhoneChangeOtp(
       this.getUserId(request),
       dto,
+      request.ip,
     );
   }
 
@@ -95,6 +98,7 @@ export class UserSettingsController {
     return this.userSettingsService.verifyPhoneChangeOtp(
       this.getUserId(request),
       dto,
+      request.ip,
     );
   }
 

@@ -1,4 +1,12 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+} from '@nestjs/common';
+import type { Request } from 'express';
 
 import { AccountDeletionService } from './account-deletion.service';
 import { ConfirmAccountDeletionDto } from './dto/confirm-account-deletion.dto';
@@ -12,13 +20,16 @@ export class AccountDeletionController {
 
   @Post('request-otp')
   @HttpCode(HttpStatus.OK)
-  requestOtp(@Body() dto: RequestAccountDeletionOtpDto) {
-    return this.accountDeletionService.requestDeletionOtp(dto);
+  requestOtp(@Body() dto: RequestAccountDeletionOtpDto, @Req() req: Request) {
+    return this.accountDeletionService.requestDeletionOtp(dto, req.ip);
   }
 
   @Post('confirm')
   @HttpCode(HttpStatus.OK)
-  confirmDeletion(@Body() dto: ConfirmAccountDeletionDto) {
-    return this.accountDeletionService.confirmDeletion(dto);
+  confirmDeletion(
+    @Body() dto: ConfirmAccountDeletionDto,
+    @Req() req: Request,
+  ) {
+    return this.accountDeletionService.confirmDeletion(dto, req.ip);
   }
 }

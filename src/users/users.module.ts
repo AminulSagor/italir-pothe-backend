@@ -7,7 +7,7 @@ import { Otp } from './entities/otp.entity';
 import { PresenceModule } from '../presence/presence.module';
 import { FilesModule } from 'src/files/files.module';
 import { SmsService } from 'src/common/services/sms.service';
-import { EmailService } from 'src/common/services/email.service';
+import { MailModule } from 'src/common/mail/mail.module';
 import { UserLearningActivityTimeEntry } from 'src/module-2/learning-activity/entities/user-learning-activity-time-entry.entity';
 import { LeaderboardProfile } from 'src/module-2/leaderboard/entities/leaderboard-profile.entity';
 import { UserStreak } from 'src/module-2/scoring/entities/user-streak.entity';
@@ -38,12 +38,12 @@ import { UserAccountDeletionService } from './user-account-deletion.service';
     PresenceModule,
     FilesModule,
     LearningActivityModule,
+    MailModule,
   ],
   providers: [
     UsersService,
     UserAccountDeletionService,
     SmsService,
-    EmailService,
     AdminUserDirectoryService,
   ],
   controllers: [UsersController, AdminUserDirectoryController],

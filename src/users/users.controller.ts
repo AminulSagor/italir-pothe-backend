@@ -119,6 +119,7 @@ export class UsersController {
     return this.usersService.requestEmailChangeOtp(
       this.getCurrentUserId(request),
       dto,
+      request.ip,
     );
   }
 
@@ -130,6 +131,7 @@ export class UsersController {
     return this.usersService.verifyEmailChangeOtp(
       this.getCurrentUserId(request),
       dto,
+      request.ip,
     );
   }
 
@@ -141,6 +143,7 @@ export class UsersController {
     return this.usersService.requestPhoneChangeOtp(
       this.getCurrentUserId(request),
       dto,
+      request.ip,
     );
   }
 
@@ -152,6 +155,7 @@ export class UsersController {
     return this.usersService.verifyPhoneChangeOtp(
       this.getCurrentUserId(request),
       dto,
+      request.ip,
     );
   }
 

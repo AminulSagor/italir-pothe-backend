@@ -76,8 +76,13 @@ export class UserSettingsService {
   async requestEmailChangeOtp(
     userId: string,
     dto: RequestEmailChangeOtpDto,
+    ipAddress?: string,
   ): Promise<ContactChangeOtpResponse> {
-    const result = await this.usersService.requestEmailChangeOtp(userId, dto);
+    const result = await this.usersService.requestEmailChangeOtp(
+      userId,
+      dto,
+      ipAddress,
+    );
 
     return {
       message: result.message,
@@ -90,8 +95,13 @@ export class UserSettingsService {
   async verifyEmailChangeOtp(
     userId: string,
     dto: VerifyEmailChangeOtpDto,
+    ipAddress?: string,
   ): Promise<UserSettingsProfileResponse> {
-    const result = await this.usersService.verifyEmailChangeOtp(userId, dto);
+    const result = await this.usersService.verifyEmailChangeOtp(
+      userId,
+      dto,
+      ipAddress,
+    );
     const profile = await this.getProfile(userId);
 
     return {
@@ -103,8 +113,13 @@ export class UserSettingsService {
   async requestPhoneChangeOtp(
     userId: string,
     dto: RequestPhoneChangeOtpDto,
+    ipAddress?: string,
   ): Promise<ContactChangeOtpResponse> {
-    const result = await this.usersService.requestPhoneChangeOtp(userId, dto);
+    const result = await this.usersService.requestPhoneChangeOtp(
+      userId,
+      dto,
+      ipAddress,
+    );
 
     return {
       message: result.message,
@@ -117,8 +132,13 @@ export class UserSettingsService {
   async verifyPhoneChangeOtp(
     userId: string,
     dto: VerifyPhoneChangeOtpDto,
+    ipAddress?: string,
   ): Promise<UserSettingsProfileResponse> {
-    const result = await this.usersService.verifyPhoneChangeOtp(userId, dto);
+    const result = await this.usersService.verifyPhoneChangeOtp(
+      userId,
+      dto,
+      ipAddress,
+    );
     const profile = await this.getProfile(userId);
 
     return {

@@ -7,6 +7,7 @@ import { randomInt } from 'crypto';
 import { Repository } from 'typeorm';
 
 import { EmailService } from '../common/services/email.service';
+import { OtpRateLimitService } from '../common/mail/otp-rate-limit.service';
 import { SmsService } from '../common/services/sms.service';
 import { UserAccountDeletionService } from '../users/user-account-deletion.service';
 import { Otp, OtpPurpose } from '../users/entities/otp.entity';
@@ -19,7 +20,6 @@ import { RequestAccountDeletionOtpDto } from './dto/request-account-deletion-otp
 @Injectable()
 export class AccountDeletionService {
   private readonly otpExpiryMinutes = 10;
-  private readonly otpRequestCooldownSeconds = 60;
   private readonly maximumOtpAttempts = 5;
 
   private readonly genericRequestMessage =
@@ -35,11 +35,15 @@ export class AccountDeletionService {
     private readonly userAccountDeletionService: UserAccountDeletionService,
 
     private readonly emailService: EmailService,
+    private readonly otpRateLimitService: OtpRateLimitService,
     private readonly smsService: SmsService,
     private readonly configService: ConfigService,
   ) {}
 
-  async requestDeletionOtp(dto: RequestAccountDeletionOtpDto) {
+  async requestDeletionOtp(
+    dto: RequestAccountDeletionOtpDto,
+    ipAddress?: string,
+  ) {
     /*
      * Silently ignore bots that fill the hidden website field.
      */
@@ -50,6 +54,11 @@ export class AccountDeletionService {
     }
 
     const identifier = this.normalizeIdentifier(dto.identifier);
+    await this.otpRateLimitService.recordSendEndpointAttempt({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_DELETION,
+    });
 
     const user = await this.findEligibleUser(identifier);
 
@@ -62,26 +71,11 @@ export class AccountDeletionService {
       };
     }
 
-    const existingOtp = await this.otpRepository.findOne({
-      where: {
-        identifier,
-        purpose: OtpPurpose.ACCOUNT_DELETION,
-      },
-      order: {
-        createdAt: 'DESC',
-      },
+    await this.otpRateLimitService.recordSendRequest({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_DELETION,
     });
-
-    if (existingOtp) {
-      const secondsSinceLastRequest =
-        (Date.now() - existingOtp.createdAt.getTime()) / 1000;
-
-      if (secondsSinceLastRequest < this.otpRequestCooldownSeconds) {
-        return {
-          message: this.genericRequestMessage,
-        };
-      }
-    }
 
     await this.otpRepository.delete({
       identifier,
@@ -89,25 +83,22 @@ export class AccountDeletionService {
     });
 
     const otp = randomInt(100000, 1000000).toString();
-
     const codeHash = await bcrypt.hash(otp, 10);
-
     const expiresAt = new Date();
-
     expiresAt.setMinutes(expiresAt.getMinutes() + this.otpExpiryMinutes);
 
-    const otpRecord = this.otpRepository.create({
-      identifier,
-      purpose: OtpPurpose.ACCOUNT_DELETION,
-      code: codeHash,
-      expiresAt,
-      attemptCount: 0,
-      resetTokenHash: null,
-      resetTokenExpiresAt: null,
-      verifiedAt: null,
-    });
-
-    await this.otpRepository.save(otpRecord);
+    await this.otpRepository.save(
+      this.otpRepository.create({
+        identifier,
+        purpose: OtpPurpose.ACCOUNT_DELETION,
+        code: codeHash,
+        expiresAt,
+        attemptCount: 0,
+        resetTokenHash: null,
+        resetTokenExpiresAt: null,
+        verifiedAt: null,
+      }),
+    );
 
     await this.sendOtp(identifier, otp);
 
@@ -117,8 +108,14 @@ export class AccountDeletionService {
     };
   }
 
-  async confirmDeletion(dto: ConfirmAccountDeletionDto) {
+  async confirmDeletion(dto: ConfirmAccountDeletionDto, ipAddress?: string) {
     const identifier = this.normalizeIdentifier(dto.identifier);
+
+    await this.otpRateLimitService.recordVerificationAttempt({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_DELETION,
+    });
 
     const user = await this.findEligibleUser(identifier);
 

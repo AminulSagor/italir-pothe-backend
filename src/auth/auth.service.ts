@@ -25,6 +25,7 @@ import {
 } from './dto/auth.dto';
 
 import { EmailService } from '../common/services/email.service';
+import { OtpRateLimitService } from '../common/mail/otp-rate-limit.service';
 import { SmsService } from '../common/services/sms.service';
 
 import { DevicePlatform } from '../devices/enums/device.enums';
@@ -55,6 +56,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly smsService: SmsService,
     private readonly emailService: EmailService,
+    private readonly otpRateLimitService: OtpRateLimitService,
     private readonly configService: ConfigService,
 
     private readonly storeWalletService: StoreWalletService,
@@ -227,7 +229,7 @@ export class AuthService {
     return createHash('sha256').update(resetToken).digest('hex');
   }
 
-  async signup(signupDto: SignupDto) {
+  async signup(signupDto: SignupDto, ipAddress?: string) {
     const fullName = signupDto.fullName.trim();
 
     const email = signupDto.email?.trim().toLowerCase() || null;
@@ -237,6 +239,18 @@ export class AuthService {
     if (!email && !phone) {
       throw new BadRequestException('Email or phone number is required');
     }
+
+    const identifier = email ?? phone;
+
+    if (!identifier) {
+      throw new BadRequestException('Email or phone number is required');
+    }
+
+    await this.otpRateLimitService.recordSendEndpointAttempt({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_VERIFICATION,
+    });
 
     if (email) {
       const existingEmail = await this.userRepository.findOne({
@@ -262,6 +276,12 @@ export class AuthService {
       }
     }
 
+    await this.otpRateLimitService.recordSendRequest({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_VERIFICATION,
+    });
+
     const password = await bcrypt.hash(signupDto.password, 10);
 
     const newUser = this.userRepository.create({
@@ -276,12 +296,6 @@ export class AuthService {
     await this.userRepository.save(newUser);
 
     await this.storeWalletService.initializeForNewUser(newUser.id);
-
-    const identifier = email ?? phone;
-
-    if (!identifier) {
-      throw new BadRequestException('Email or phone number is required');
-    }
 
     const otp = await this.generateAndSaveOtp(
       identifier,
@@ -403,8 +417,14 @@ export class AuthService {
     };
   }
 
-  async verifyOtp(verifyOtpDto: VerifyOtpDto) {
+  async verifyOtp(verifyOtpDto: VerifyOtpDto, ipAddress?: string) {
     const identifier = this.normalizeIdentifier(verifyOtpDto.identifier);
+
+    await this.otpRateLimitService.recordVerificationAttempt({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_VERIFICATION,
+    });
 
     await this.validateAndConsumeOtp(
       identifier,
@@ -444,8 +464,14 @@ export class AuthService {
     };
   }
 
-  async resendSignupOtp(resendOtpDto: ResendOtpDto) {
+  async resendSignupOtp(resendOtpDto: ResendOtpDto, ipAddress?: string) {
     const identifier = this.normalizeIdentifier(resendOtpDto.identifier);
+
+    await this.otpRateLimitService.recordSendEndpointAttempt({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_VERIFICATION,
+    });
 
     const user = await this.findUserByIdentifier(identifier);
 
@@ -456,6 +482,12 @@ export class AuthService {
     if (user.isVerified) {
       throw new BadRequestException('Account is already verified');
     }
+
+    await this.otpRateLimitService.recordSendRequest({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.ACCOUNT_VERIFICATION,
+    });
 
     const otp = await this.generateAndSaveOtp(
       identifier,
@@ -470,8 +502,16 @@ export class AuthService {
     };
   }
 
-  async requestPasswordReset(forgotPasswordDto: ForgotPasswordDto) {
+  async requestPasswordReset(
+    forgotPasswordDto: ForgotPasswordDto,
+    ipAddress?: string,
+  ) {
     const identifier = this.normalizeIdentifier(forgotPasswordDto.identifier);
+    await this.otpRateLimitService.recordSendEndpointAttempt({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.PASSWORD_RESET,
+    });
 
     const user = await this.findUserByIdentifier(identifier);
 
@@ -483,6 +523,12 @@ export class AuthService {
         message: 'If an account exists, a reset code has been sent.',
       };
     }
+
+    await this.otpRateLimitService.recordSendRequest({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.PASSWORD_RESET,
+    });
 
     const otp = await this.generateAndSaveOtp(
       identifier,
@@ -497,8 +543,17 @@ export class AuthService {
     };
   }
 
-  async verifyPasswordResetOtp(verifyDto: VerifyPasswordResetOtpDto) {
+  async verifyPasswordResetOtp(
+    verifyDto: VerifyPasswordResetOtpDto,
+    ipAddress?: string,
+  ) {
     const identifier = this.normalizeIdentifier(verifyDto.identifier);
+
+    await this.otpRateLimitService.recordVerificationAttempt({
+      identifier,
+      ipAddress,
+      purpose: OtpPurpose.PASSWORD_RESET,
+    });
 
     const otpRecord = await this.otpRepository.findOne({
       where: {

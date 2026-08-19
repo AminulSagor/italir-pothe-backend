@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 
 import { EmailService } from '../common/services/email.service';
+import { OtpRateLimitService } from '../common/mail/otp-rate-limit.service';
 import { SmsService } from '../common/services/sms.service';
 
 import {
@@ -53,6 +54,7 @@ export class UsersService {
     private presenceService: PresenceService,
     private smsService: SmsService,
     private emailService: EmailService,
+    private readonly otpRateLimitService: OtpRateLimitService,
     private filesService: FilesService,
     private configService: ConfigService,
   ) {}
@@ -216,9 +218,20 @@ export class UsersService {
     };
   }
 
-  async requestEmailChangeOtp(userId: string, dto: RequestEmailChangeOtpDto) {
-    const user = await this.findUserById(userId);
+  async requestEmailChangeOtp(
+    userId: string,
+    dto: RequestEmailChangeOtpDto,
+    ipAddress?: string,
+  ) {
     const email = this.normalizeEmail(dto.email);
+
+    await this.otpRateLimitService.recordSendEndpointAttempt({
+      identifier: email,
+      ipAddress,
+      purpose: OtpPurpose.CHANGE_EMAIL,
+    });
+
+    const user = await this.findUserById(userId);
 
     if (user.email === email && user.isEmailVerified) {
       throw new BadRequestException(
@@ -227,6 +240,12 @@ export class UsersService {
     }
 
     await this.ensureEmailIsAvailable(email, user.id);
+
+    await this.otpRateLimitService.recordSendRequest({
+      identifier: email,
+      ipAddress,
+      purpose: OtpPurpose.CHANGE_EMAIL,
+    });
 
     const otpIdentifier = this.createProfileChangeOtpIdentifier(
       user.id,
@@ -239,7 +258,11 @@ export class UsersService {
       OtpPurpose.CHANGE_EMAIL,
     );
 
-    await this.emailService.sendOtpEmail(email, otp);
+    await this.emailService.sendOtpEmail(
+      email,
+      otp,
+      OtpPurpose.CHANGE_EMAIL,
+    );
 
     return {
       message: 'Verification code sent to your new email.',
@@ -248,9 +271,20 @@ export class UsersService {
     };
   }
 
-  async verifyEmailChangeOtp(userId: string, dto: VerifyEmailChangeOtpDto) {
-    const user = await this.findUserById(userId);
+  async verifyEmailChangeOtp(
+    userId: string,
+    dto: VerifyEmailChangeOtpDto,
+    ipAddress?: string,
+  ) {
     const email = this.normalizeEmail(dto.email);
+
+    await this.otpRateLimitService.recordVerificationAttempt({
+      identifier: email,
+      ipAddress,
+      purpose: OtpPurpose.CHANGE_EMAIL,
+    });
+
+    const user = await this.findUserById(userId);
 
     if (user.email === email && user.isEmailVerified) {
       throw new BadRequestException(
@@ -284,9 +318,20 @@ export class UsersService {
     };
   }
 
-  async requestPhoneChangeOtp(userId: string, dto: RequestPhoneChangeOtpDto) {
-    const user = await this.findUserById(userId);
+  async requestPhoneChangeOtp(
+    userId: string,
+    dto: RequestPhoneChangeOtpDto,
+    ipAddress?: string,
+  ) {
     const phone = dto.phone.trim();
+
+    await this.otpRateLimitService.recordSendEndpointAttempt({
+      identifier: phone,
+      ipAddress,
+      purpose: OtpPurpose.CHANGE_PHONE,
+    });
+
+    const user = await this.findUserById(userId);
 
     if (user.phone === phone && user.isPhoneVerified) {
       throw new BadRequestException(
@@ -295,6 +340,12 @@ export class UsersService {
     }
 
     await this.ensurePhoneIsAvailable(phone, user.id);
+
+    await this.otpRateLimitService.recordSendRequest({
+      identifier: phone,
+      ipAddress,
+      purpose: OtpPurpose.CHANGE_PHONE,
+    });
 
     const otpIdentifier = this.createProfileChangeOtpIdentifier(
       user.id,
@@ -316,9 +367,20 @@ export class UsersService {
     };
   }
 
-  async verifyPhoneChangeOtp(userId: string, dto: VerifyPhoneChangeOtpDto) {
-    const user = await this.findUserById(userId);
+  async verifyPhoneChangeOtp(
+    userId: string,
+    dto: VerifyPhoneChangeOtpDto,
+    ipAddress?: string,
+  ) {
     const phone = dto.phone.trim();
+
+    await this.otpRateLimitService.recordVerificationAttempt({
+      identifier: phone,
+      ipAddress,
+      purpose: OtpPurpose.CHANGE_PHONE,
+    });
+
+    const user = await this.findUserById(userId);
 
     if (user.phone === phone && user.isPhoneVerified) {
       throw new BadRequestException(

@@ -74,7 +74,7 @@ export class SmsService {
     }
 
     if (this.isBypass) {
-      this.logger.log(`[BYPASS MODE] SMS for ${phone}: ${message}`);
+      this.logger.log(`[BYPASS MODE] SMS OTP skipped purpose=${purpose}`);
 
       return;
     }

@@ -4,8 +4,10 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 
 import { OtpPurpose } from '../../users/entities/otp.entity';
+import { EmailSuppressionService } from '../mail/email-suppression.service';
 
 export interface ContactEnquiryEmailPayload {
   name: string;
@@ -29,6 +31,8 @@ interface ZeptoMailSendPayload {
   reply_to?: ZeptoMailAddress[];
   subject: string;
   htmlbody: string;
+  textbody?: string;
+  client_reference?: string;
   track_clicks?: boolean;
   track_opens?: boolean;
 }
@@ -37,22 +41,40 @@ interface ZeptoMailSendPayload {
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly emailSuppressionService: EmailSuppressionService,
+  ) {}
 
   async sendOtpEmail(
     email: string,
     otp: string,
     purpose: OtpPurpose = OtpPurpose.ACCOUNT_VERIFICATION,
   ): Promise<void> {
+    const recipientEmail = email.trim().toLowerCase();
+    const correlationId = randomUUID();
+    const recipientHash =
+      this.emailSuppressionService.recipientHash(recipientEmail);
+
     if (this.configService.get<string>('EMAIL_BYPASS') === 'true') {
-      this.logger.log(`[BYPASS MODE] Email OTP for ${email} is: ${otp}`);
+      this.logger.log(
+        `OTP email bypassed correlationId=${correlationId} purpose=${purpose} recipientHash=${recipientHash}`,
+      );
 
       return;
     }
 
+    if (await this.emailSuppressionService.isSuppressed(recipientEmail)) {
+      this.logger.warn(
+        `OTP email suppressed correlationId=${correlationId} purpose=${purpose} recipientHash=${recipientHash}`,
+      );
+      throw new ServiceUnavailableException(
+        'Could not send verification email. Please try again later.',
+      );
+    }
+
     const fromEmail = this.getFromEmail();
     const fromName = this.getFromName();
-    const recipientEmail = email.trim().toLowerCase();
 
     let subject: string;
     let instruction: string;
@@ -78,6 +100,17 @@ export class EmailService {
 
         securityMessage =
           'If you did not request account deletion, do not share this code and safely ignore this email.';
+
+        break;
+
+      case OtpPurpose.CHANGE_EMAIL:
+        subject = 'Confirm your new Italir Pothe email';
+
+        instruction =
+          'Use the following code to confirm your new email address:';
+
+        securityMessage =
+          'If you did not request this email change, do not share this code and safely ignore this email.';
 
         break;
 
@@ -169,7 +202,30 @@ export class EmailService {
     </div>
   `;
 
+    const textBody = [
+      subject,
+      '',
+      'Hello,',
+      '',
+      instruction,
+      '',
+      otp,
+      '',
+      'This code will expire in 10 minutes.',
+      ...(purpose === OtpPurpose.ACCOUNT_DELETION
+        ? ['', 'Account deletion is permanent and cannot be undone.']
+        : []),
+      '',
+      securityMessage,
+      '',
+      'Regards,',
+      'Italir Pothe',
+    ].join('\n');
+
     try {
+      this.logger.log(
+        `Sending OTP email correlationId=${correlationId} purpose=${purpose} recipientHash=${recipientHash}`,
+      );
       await this.sendEmail({
         from: {
           address: fromEmail,
@@ -186,12 +242,17 @@ export class EmailService {
 
         subject,
         htmlbody: htmlBody,
+        textbody: textBody,
+        client_reference: correlationId,
         track_clicks: false,
         track_opens: false,
       });
+      this.logger.log(
+        `OTP email accepted correlationId=${correlationId} purpose=${purpose} recipientHash=${recipientHash}`,
+      );
     } catch (error) {
       this.logger.error(
-        'Failed to send OTP email using ZeptoMail API',
+        `OTP email failed correlationId=${correlationId} purpose=${purpose} recipientHash=${recipientHash}`,
         error instanceof Error ? error.stack : undefined,
       );
 
@@ -377,38 +438,92 @@ export class EmailService {
 
     const authorizationHeader = this.createAuthorizationHeader(token);
 
-    const controller = new AbortController();
+    const maximumAttempts = 3;
 
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 15_000);
+    for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
 
-    try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            Authorization: authorizationHeader,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const responseBody = await response.text();
 
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          Authorization: authorizationHeader,
-        },
+        if (response.ok) {
+          return;
+        }
 
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-
-      const responseBody = await response.text();
-
-      if (!response.ok) {
+        const retryable = response.status === 429 || response.status >= 500;
         const errorMessage = this.extractApiError(responseBody);
 
-        throw new Error(
-          `ZeptoMail API request failed with status ${response.status}: ${errorMessage}`,
+        if (!retryable || attempt === maximumAttempts) {
+          throw new Error(
+            `ZeptoMail API request failed with status ${response.status}: ${errorMessage}`,
+          );
+        }
+
+        const delayMs = this.getRetryDelayMs(
+          attempt,
+          response.headers.get('retry-after'),
         );
+        this.logger.warn(
+          `Temporary ZeptoMail failure correlationId=${payload.client_reference ?? 'none'} status=${response.status} attempt=${attempt}/${maximumAttempts} retryInMs=${delayMs}`,
+        );
+        await this.sleep(delayMs);
+      } catch (error) {
+        if (
+          attempt === maximumAttempts ||
+          !this.isTemporaryNetworkError(error)
+        ) {
+          throw error;
+        }
+
+        const delayMs = this.getRetryDelayMs(attempt);
+        this.logger.warn(
+          `Temporary ZeptoMail network failure correlationId=${payload.client_reference ?? 'none'} attempt=${attempt}/${maximumAttempts} retryInMs=${delayMs}`,
+        );
+        await this.sleep(delayMs);
+      } finally {
+        clearTimeout(timeout);
       }
-    } finally {
-      clearTimeout(timeout);
     }
+  }
+
+  private getRetryDelayMs(attempt: number, retryAfter?: string | null): number {
+    if (retryAfter) {
+      const seconds = Number(retryAfter);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.min(seconds * 1000, 5_000);
+      }
+
+      const retryDate = Date.parse(retryAfter);
+      if (Number.isFinite(retryDate)) {
+        return Math.min(Math.max(retryDate - Date.now(), 0), 5_000);
+      }
+    }
+
+    const exponentialDelay = Math.min(250 * 2 ** (attempt - 1), 2_000);
+    const jitter = Math.floor(Math.random() * 100);
+    return exponentialDelay + jitter;
+  }
+
+  private isTemporaryNetworkError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+    return error.name === 'AbortError' || error instanceof TypeError;
+  }
+
+  private sleep(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   private createAuthorizationHeader(token: string): string {
