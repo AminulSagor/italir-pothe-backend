@@ -30,12 +30,14 @@ export class ZeptoMailWebhookController {
   async handleWebhook(
     @Req() request: RawBodyRequest<Request>,
     @Headers('producer-signature') producerSignature: string | undefined,
+    @Headers('x-zeptomail-webhook-secret') webhookSecret: string | undefined,
     @Body() body: unknown,
   ) {
     const payload = this.validateAndParsePayload(
       request.rawBody,
       body,
       producerSignature,
+      webhookSecret,
     );
     const eventName = this.firstString(payload.event_name)
       .toLowerCase()
@@ -86,6 +88,7 @@ export class ZeptoMailWebhookController {
     rawBody: Buffer | undefined,
     body: unknown,
     producerSignature?: string,
+    webhookSecret?: string,
   ): Record<string, unknown> {
     const secret = this.configService
       .get<string>('ZEPTOMAIL_WEBHOOK_SECRET')
@@ -97,7 +100,15 @@ export class ZeptoMailWebhookController {
       );
     }
 
-    if (!rawBody?.length || !producerSignature) {
+    if (!rawBody?.length) {
+      throw new UnauthorizedException('Invalid ZeptoMail webhook request');
+    }
+
+    if (webhookSecret && this.matchesSecret(webhookSecret, secret)) {
+      return this.parsePayload(body);
+    }
+
+    if (!producerSignature) {
       throw new UnauthorizedException('Invalid ZeptoMail webhook signature');
     }
 
@@ -151,8 +162,11 @@ export class ZeptoMailWebhookController {
       throw new UnauthorizedException('Invalid ZeptoMail webhook signature');
     }
 
-    const candidate =
-      this.isRecord(body) && 'data' in body ? body.data : body;
+    return this.parsePayload(body);
+  }
+
+  private parsePayload(body: unknown): Record<string, unknown> {
+    const candidate = this.isRecord(body) && 'data' in body ? body.data : body;
     if (this.isRecord(candidate)) {
       return candidate;
     }
@@ -169,6 +183,16 @@ export class ZeptoMailWebhookController {
     }
 
     throw new BadRequestException('Invalid ZeptoMail webhook payload');
+  }
+
+  private matchesSecret(received: string, expected: string): boolean {
+    const receivedBuffer = Buffer.from(received);
+    const expectedBuffer = Buffer.from(expected);
+
+    return (
+      receivedBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(receivedBuffer, expectedBuffer)
+    );
   }
 
   private extractRecipients(
