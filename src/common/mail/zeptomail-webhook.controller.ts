@@ -42,12 +42,27 @@ export class ZeptoMailWebhookController {
       return { received: true, suppressed: false };
     }
 
-    const payload = this.validateAndParsePayload(
-      request.rawBody,
-      body,
-      producerSignature,
-      webhookSecret,
-    );
+    let payload: Record<string, unknown>;
+
+    try {
+      payload = this.validateAndParsePayload(
+        request.rawBody,
+        body,
+        producerSignature,
+        webhookSecret,
+      );
+    } catch (error) {
+      /*
+       * ZeptoMail may attach a producer signature to its verification POST
+       * before the custom authorization header has been persisted. Confirm
+       * reachability without trusting or processing that payload.
+       */
+      if (error instanceof UnauthorizedException) {
+        return { received: true, suppressed: false };
+      }
+
+      throw error;
+    }
     const eventName = this.firstString(payload.event_name)
       .toLowerCase()
       .replace(/[^a-z]/g, '');
