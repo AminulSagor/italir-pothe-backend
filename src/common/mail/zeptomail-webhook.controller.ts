@@ -6,13 +6,13 @@ import {
   HttpCode,
   HttpStatus,
   Post,
-  RawBodyRequest,
   Req,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
+import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 
 import { EmailSuppressionReason } from './entities/email-suppression.entity';
