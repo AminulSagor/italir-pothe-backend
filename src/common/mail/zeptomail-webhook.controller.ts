@@ -33,6 +33,15 @@ export class ZeptoMailWebhookController {
     @Headers('x-zeptomail-webhook-secret') webhookSecret: string | undefined,
     @Body() body: unknown,
   ) {
+    /*
+     * ZeptoMail validates a new endpoint with an unauthenticated POST before
+     * it persists the configured custom headers. Acknowledge that probe, but
+     * never parse or act on its payload.
+     */
+    if (!producerSignature && !webhookSecret) {
+      return { received: true, suppressed: false };
+    }
+
     const payload = this.validateAndParsePayload(
       request.rawBody,
       body,
