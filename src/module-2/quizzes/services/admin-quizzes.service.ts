@@ -536,6 +536,71 @@ export class AdminQuizzesService {
     };
   }
 
+  async permanentlyDeleteQuestion(questionId: string) {
+    const existingQuestion = await this.questionRepository.findOne({
+      where: { id: questionId },
+      select: { id: true, quizId: true },
+    });
+
+    if (!existingQuestion) {
+      throw new NotFoundException('Quiz question not found');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const lockedQuiz = await manager.getRepository(Quiz).findOne({
+        where: { id: existingQuestion.quizId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!lockedQuiz) {
+        throw new NotFoundException('Quiz not found');
+      }
+
+      const questionRepository = manager.getRepository(QuizQuestion);
+      const question = await questionRepository.findOne({
+        where: { id: questionId, quizId: existingQuestion.quizId },
+        select: { id: true },
+      });
+
+      if (!question) {
+        throw new NotFoundException('Quiz question not found');
+      }
+
+      await questionRepository.delete({ id: question.id });
+
+      const remainingQuestions = await questionRepository.find({
+        where: { quizId: existingQuestion.quizId },
+        select: { id: true, sortOrder: true, createdAt: true },
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      });
+
+      const highestSortOrder = remainingQuestions.reduce(
+        (highestOrder, item) => Math.max(highestOrder, item.sortOrder),
+        0,
+      );
+      const temporaryOrderStart =
+        highestSortOrder + remainingQuestions.length + 1;
+
+      for (const [index, item] of remainingQuestions.entries()) {
+        await questionRepository.update(
+          { id: item.id, quizId: existingQuestion.quizId },
+          { sortOrder: temporaryOrderStart + index },
+        );
+      }
+
+      for (const [index, item] of remainingQuestions.entries()) {
+        await questionRepository.update(
+          { id: item.id, quizId: existingQuestion.quizId },
+          { sortOrder: index + 1 },
+        );
+      }
+
+      await this.refreshQuizQuestionCount(manager, existingQuestion.quizId);
+    });
+
+    return this.findQuestionsByQuiz(existingQuestion.quizId);
+  }
+
   private async getLessonById(lessonId: string) {
     const lesson = await this.lessonRepository.findOne({
       where: {

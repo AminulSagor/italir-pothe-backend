@@ -117,4 +117,9 @@ export class AdminQuizzesController {
   async archiveQuestion(@Param('questionId') questionId: string) {
     return this.adminQuizzesService.archiveQuestion(questionId);
   }
+
+  @Delete('quiz-questions/:questionId/permanent')
+  async permanentlyDeleteQuestion(@Param('questionId') questionId: string) {
+    return this.adminQuizzesService.permanentlyDeleteQuestion(questionId);
+  }
 }
