@@ -41,8 +41,11 @@ export class GeminiLiveService {
       19 * 60 * 60,
       Math.max(300, options.ttlSeconds + 300),
     );
-    const liveConfig: Record<string, unknown> = {
-      responseModalities: ['AUDIO'],
+    const setup: Record<string, unknown> = {
+      model: `models/${this.liveModel}`,
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+      },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
       realtimeInputConfig: {
@@ -75,10 +78,7 @@ export class GeminiLiveService {
         uses: 1,
         expireTime: new Date(now + sessionLifetimeSeconds * 1000).toISOString(),
         newSessionExpireTime: new Date(now + 60_000).toISOString(),
-        liveConnectConstraints: {
-          model: `models/${this.liveModel}`,
-          config: liveConfig,
-        },
+        bidiGenerateContentSetup: setup,
       },
       'ephemeral_token',
     );
@@ -94,18 +94,7 @@ export class GeminiLiveService {
       socketUrl: GEMINI_LIVE_SOCKET,
       model: this.liveModel,
       expiresAt: new Date(now + sessionLifetimeSeconds * 1000).toISOString(),
-      setup: {
-        model: `models/${this.liveModel}`,
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-        },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-        realtimeInputConfig: liveConfig.realtimeInputConfig,
-        sessionResumption: liveConfig.sessionResumption,
-        contextWindowCompression: liveConfig.contextWindowCompression,
-        systemInstruction: liveConfig.systemInstruction,
-      },
+      setup,
     };
   }
 
