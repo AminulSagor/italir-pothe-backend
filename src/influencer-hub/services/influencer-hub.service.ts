@@ -571,8 +571,7 @@ export class InfluencerHubService {
     const basePriceEur = this.formatMoney(
       this.parseMoney(params.basePriceEur, 'Base price'),
     );
-    const accessType =
-      params.accessType ?? InfluencerCouponAccessType.LIFETIME;
+    const accessType = params.accessType ?? InfluencerCouponAccessType.LIFETIME;
     const durationDays = this.normalizeCouponDuration(
       accessType,
       params.durationDays,
@@ -852,10 +851,10 @@ export class InfluencerHubService {
         item.isActive &&
         item.productDomain === params.productDomain &&
         productMatches &&
-        item.provider === params.provider
-        && item.accessType === params.accessType
-        && item.durationDays === params.durationDays
-        && item.regularProviderBasePlanId === params.regularProviderBasePlanId
+        item.provider === params.provider &&
+        item.accessType === params.accessType &&
+        item.durationDays === params.durationDays &&
+        item.regularProviderBasePlanId === params.regularProviderBasePlanId
       );
     });
 
@@ -965,17 +964,13 @@ export class InfluencerHubService {
               durationDays: params.durationDays,
               regularProviderProductId,
               discountedProviderProductId:
-                params.accessType ===
-                  InfluencerCouponAccessType.TIME_LIMITED &&
+                params.accessType === InfluencerCouponAccessType.TIME_LIMITED &&
                 params.provider === InfluencerBillingProvider.GOOGLE_PLAY
                   ? regularProviderProductId
-                  : this.buildCouponProviderProductId(
-                      regularProviderProductId,
-                    ),
+                  : this.buildCouponProviderProductId(regularProviderProductId),
               regularProviderBasePlanId: params.regularProviderBasePlanId,
               providerBasePlanId:
-                params.accessType ===
-                  InfluencerCouponAccessType.TIME_LIMITED &&
+                params.accessType === InfluencerCouponAccessType.TIME_LIMITED &&
                 params.provider === InfluencerBillingProvider.GOOGLE_PLAY
                   ? this.buildCouponProviderBasePlanId(
                       params.regularProviderBasePlanId,
@@ -1007,7 +1002,7 @@ export class InfluencerHubService {
     }
 
     if (coupon.ownerType === InfluencerCouponOwnerType.PRODUCT) {
-      const hasMatchingMapping = (coupon.providerMappings ?? []).some(
+      const matchingMappings = (coupon.providerMappings ?? []).filter(
         (item) => {
           const productMatches =
             params.productDomain === InfluencerCouponProductDomain.COURSE
@@ -1018,17 +1013,15 @@ export class InfluencerHubService {
             item.isActive &&
             item.productDomain === params.productDomain &&
             productMatches &&
-            item.provider === params.provider
-            && item.accessType === params.accessType
-            && item.durationDays === params.durationDays
-            &&
-              item.regularProviderBasePlanId ===
-                params.regularProviderBasePlanId
+            item.provider === params.provider &&
+            item.accessType === params.accessType &&
+            item.durationDays === params.durationDays &&
+            item.regularProviderBasePlanId === params.regularProviderBasePlanId
           );
         },
       );
 
-      if (!hasMatchingMapping) {
+      if (matchingMappings.length === 0) {
         const regularProviderProductId =
           params.regularProviderProductId?.trim();
 
@@ -1076,6 +1069,46 @@ export class InfluencerHubService {
         coupon.providerMappings = await this.mappingRepository.find({
           where: { couponId: coupon.id },
         });
+      } else if (
+        params.accessType === InfluencerCouponAccessType.TIME_LIMITED &&
+        params.provider === InfluencerBillingProvider.GOOGLE_PLAY
+      ) {
+        const regularProviderProductId =
+          params.regularProviderProductId?.trim();
+
+        if (!regularProviderProductId) {
+          throw new BadRequestException(
+            'regularProviderProductId is required to resolve a product-owned coupon.',
+          );
+        }
+
+        const [mapping, ...duplicateMappings] = matchingMappings;
+        const expectedProviderBasePlanId = this.buildCouponProviderBasePlanId(
+          params.regularProviderBasePlanId,
+        );
+        const mappingNeedsRepair =
+          mapping.regularProviderProductId !== regularProviderProductId ||
+          mapping.discountedProviderProductId !== regularProviderProductId ||
+          mapping.providerBasePlanId !== expectedProviderBasePlanId;
+
+        if (mappingNeedsRepair) {
+          mapping.regularProviderProductId = regularProviderProductId;
+          mapping.discountedProviderProductId = regularProviderProductId;
+          mapping.providerBasePlanId = expectedProviderBasePlanId;
+          mapping.providerOfferId = null;
+          mapping.isActive = true;
+          await this.mappingRepository.save(mapping);
+        }
+
+        if (duplicateMappings.length > 0) {
+          await this.mappingRepository.remove(duplicateMappings);
+        }
+
+        if (mappingNeedsRepair || duplicateMappings.length > 0) {
+          coupon.providerMappings = await this.mappingRepository.find({
+            where: { couponId: coupon.id },
+          });
+        }
       }
     }
 
@@ -1185,8 +1218,7 @@ export class InfluencerHubService {
       durationDays: params.mapping.durationDays,
       regularProviderProductId: params.mapping.regularProviderProductId,
       discountedProviderProductId: params.mapping.discountedProviderProductId,
-      regularProviderBasePlanId:
-        params.mapping.regularProviderBasePlanId,
+      regularProviderBasePlanId: params.mapping.regularProviderBasePlanId,
       providerBasePlanId: params.mapping.providerBasePlanId,
       providerOfferId: params.mapping.providerOfferId,
       basePriceEur: this.formatMoney(baseMinor),
@@ -1299,8 +1331,7 @@ export class InfluencerHubService {
       );
     }
 
-    const accessType =
-      item.accessType ?? InfluencerCouponAccessType.LIFETIME;
+    const accessType = item.accessType ?? InfluencerCouponAccessType.LIFETIME;
     const durationDays = this.normalizeCouponDuration(
       accessType,
       item.durationDays,
@@ -1314,8 +1345,7 @@ export class InfluencerHubService {
       durationDays,
       regularProviderProductId: item.regularProviderProductId.trim(),
       discountedProviderProductId: item.discountedProviderProductId.trim(),
-      regularProviderBasePlanId:
-        item.regularProviderBasePlanId?.trim() || null,
+      regularProviderBasePlanId: item.regularProviderBasePlanId?.trim() || null,
       providerBasePlanId: item.providerBasePlanId?.trim() || null,
       providerOfferId: item.providerOfferId?.trim() || null,
       isActive: item.isActive ?? true,
@@ -1461,10 +1491,7 @@ export class InfluencerHubService {
     regularProviderBasePlanId: string | null;
     providerBasePlanId: string | null;
   }) {
-    if (
-      params.productDomain ===
-      InfluencerCouponProductDomain.STORE_PACKAGE
-    ) {
+    if (params.productDomain === InfluencerCouponProductDomain.STORE_PACKAGE) {
       if (
         params.accessType !== InfluencerCouponAccessType.LIFETIME ||
         params.durationDays !== null ||
@@ -1500,9 +1527,7 @@ export class InfluencerHubService {
         !params.regularProviderBasePlanId ||
         !params.providerBasePlanId ||
         params.providerBasePlanId !==
-          this.buildCouponProviderBasePlanId(
-            params.regularProviderBasePlanId,
-          )
+          this.buildCouponProviderBasePlanId(params.regularProviderBasePlanId)
       ) {
         throw new BadRequestException(
           'Google Play time-limited coupons must use the same product ID and a "coupon-" prefixed discounted base plan.',
