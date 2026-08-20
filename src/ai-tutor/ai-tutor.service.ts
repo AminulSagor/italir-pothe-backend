@@ -1,13 +1,15 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ForbiddenException,
   GatewayTimeoutException,
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 
 import {
   AiTutorLiveEventDto,
@@ -68,6 +70,7 @@ export class AiTutorService {
     private readonly usageService: AiTutorUsageService,
     private readonly liveSessionService: AiTutorLiveSessionService,
     private readonly geminiLiveService: GeminiLiveService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async startVoiceSession(
@@ -341,8 +344,45 @@ export class AiTutorService {
   }
 
   async getLevelTestProfile(userId: string) {
+    const profileEntity = await this.profileRepository.findOne({
+      where: { userId },
+    });
+    const maxAttempts = this.levelTestMaxAttempts;
+    const attemptsUsed = profileEntity?.attemptCount ?? 0;
     return {
-      profile: await this.findStoredProfile(userId),
+      profile: profileEntity ? this.toProfilePayload(profileEntity) : null,
+      attemptsUsed,
+      maxAttempts,
+      attemptsRemaining: Math.max(0, maxAttempts - attemptsUsed),
+      canAttempt: attemptsUsed < maxAttempts,
+    };
+  }
+
+  async startLevelTestVoiceSession(user: AiTutorAuthenticatedUser) {
+    await this.assertLevelTestAttemptAvailable(user.id);
+    const ttlSeconds = 600;
+    const credential = await this.geminiLiveService.createEphemeralCredential({
+      ttlSeconds,
+      systemInstruction: this.buildLevelTestSystemInstruction(
+        user.fullName ?? 'Italian learner',
+      ),
+    });
+
+    return {
+      sessionId: `level-test-${randomUUID()}`,
+      provider: 'gemini_live',
+      sessionPurpose: 'level_test',
+      isFree: true,
+      url: credential.socketUrl,
+      socketUrl: credential.socketUrl,
+      room: 'gemini-live-level-test',
+      identity: user.id,
+      token: credential.token,
+      model: credential.model,
+      setup: credential.setup,
+      credentialExpiresAt: credential.expiresAt,
+      ttlSeconds,
+      allocatedSeconds: ttlSeconds,
     };
   }
 
@@ -382,6 +422,23 @@ export class AiTutorService {
     user: AiTutorAuthenticatedUser,
     dto: EvaluateAiTutorLevelTestDto,
   ) {
+    await this.assertLevelTestAttemptAvailable(user.id);
+    const skillCounts = dto.answers.reduce<Record<string, number>>(
+      (counts, answer) => ({
+        ...counts,
+        [answer.skill]: (counts[answer.skill] ?? 0) + 1,
+      }),
+      {},
+    );
+    if (
+      skillCounts.speaking !== 1 ||
+      skillCounts.vocabulary !== 2 ||
+      skillCounts.grammar !== 3
+    ) {
+      throw new BadRequestException(
+        'The level test requires one speaking assessment and five configured multiple-choice answers.',
+      );
+    }
     const response = await this.requestJson('/v1/level-test/evaluate', {
       userId: user.id,
       displayName: user.fullName ?? 'Italian learner',
@@ -394,6 +451,31 @@ export class AiTutorService {
       ...(this.asRecord(response) ?? {}),
       profile: storedProfile,
     };
+  }
+
+  private buildLevelTestSystemInstruction(displayName: string): string {
+    return `You are conducting Italir Pothe's free spoken Italian CEFR level assessment for ${displayName}.
+Start immediately with a short welcome, then ask one spoken question at a time in Italian. Begin easy and adapt from A1 toward C2 based only on the learner's replies. Ask 4 to 6 concise questions covering introduction, daily life, practical situations, vocabulary range, grammar and fluency.
+This is an assessment: do not teach, correct, reveal answers, or ask the learner to type or write. Do not ask multiple questions in one turn. Briefly acknowledge an answer and continue. If the learner cannot understand, simplify once in Italian; a short Bangla or English clarification is allowed only when requested.
+After enough evidence, say that the speaking section is complete and ask the learner to tap the red finish button to continue to the multiple-choice section. Keep every spoken response concise.`;
+  }
+
+  private get levelTestMaxAttempts(): number {
+    const configured = Number(
+      this.configService.get<string>('AI_TUTOR_LEVEL_TEST_MAX_ATTEMPTS') ?? 3,
+    );
+    return Number.isInteger(configured) && configured > 0
+      ? Math.min(configured, 100)
+      : 3;
+  }
+
+  private async assertLevelTestAttemptAvailable(userId: string) {
+    const profile = await this.profileRepository.findOne({ where: { userId } });
+    if ((profile?.attemptCount ?? 0) >= this.levelTestMaxAttempts) {
+      throw new ForbiddenException(
+        'The maximum number of free level-test attempts has been reached.',
+      );
+    }
   }
 
   private buildLiveSystemInstruction(options: {
@@ -463,23 +545,37 @@ Recent mistake tags: ${JSON.stringify(options.recentMistakeTags.slice(0, 12))}`.
     userId: string,
     profile: AiTutorProfilePayload,
   ): Promise<AiTutorProfilePayload> {
-    const existing = await this.profileRepository.findOne({
-      where: { userId },
+    const saved = await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`ai-tutor-level-test:${userId}`],
+      );
+      const repository = manager.getRepository(AiTutorLearnerProfile);
+      const existing = await repository.findOne({
+        where: { userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if ((existing?.attemptCount ?? 0) >= this.levelTestMaxAttempts) {
+        throw new ForbiddenException(
+          'The maximum number of free level-test attempts has been reached.',
+        );
+      }
+      const entity = existing
+        ? repository.merge(existing, {
+            ...profile,
+            completedAt: new Date(profile.completedAt),
+            attemptCount: existing.attemptCount + 1,
+          })
+        : repository.create({
+            userId,
+            ...profile,
+            completedAt: new Date(profile.completedAt),
+            attemptCount: 1,
+          });
+      return repository.save(entity);
     });
-    const entity = existing
-      ? this.profileRepository.merge(existing, {
-          ...profile,
-          completedAt: new Date(profile.completedAt),
-          attemptCount: existing.attemptCount + 1,
-        })
-      : this.profileRepository.create({
-          userId,
-          ...profile,
-          completedAt: new Date(profile.completedAt),
-          attemptCount: 1,
-        });
 
-    return this.toProfilePayload(await this.profileRepository.save(entity));
+    return this.toProfilePayload(saved);
   }
 
   private parseProfileResponse(response: unknown): AiTutorProfilePayload {

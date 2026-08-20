@@ -237,8 +237,8 @@ export class AiTutorLevelTestAnswerDto {
 
 export class EvaluateAiTutorLevelTestDto {
   @IsArray()
-  @ArrayMinSize(10)
-  @ArrayMaxSize(10)
+  @ArrayMinSize(6)
+  @ArrayMaxSize(6)
   @ValidateNested({ each: true })
   @Type(() => AiTutorLevelTestAnswerDto)
   answers: AiTutorLevelTestAnswerDto[];

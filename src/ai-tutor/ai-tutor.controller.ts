@@ -103,6 +103,12 @@ export class AiTutorController {
     return this.aiTutorService.getLevelTestProfile(user.id);
   }
 
+  @Post('level-test/voice/session')
+  async startLevelTestVoiceSession(@Req() request: AuthenticatedRequest) {
+    const user = this.requireUser(request);
+    return this.aiTutorService.startLevelTestVoiceSession(user);
+  }
+
   @Post('level-test/transcribe')
   @UseInterceptors(
     FileInterceptor('audio', {
