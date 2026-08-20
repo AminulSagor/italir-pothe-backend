@@ -51,10 +51,12 @@ export class GeminiLiveService {
       realtimeInputConfig: {
         automaticActivityDetection: {
           disabled: false,
+          startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
           prefixPaddingMs: this.numberConfig(
             'GEMINI_VAD_PREFIX_PADDING_MS',
-            300,
+            500,
           ),
+          endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
           silenceDurationMs: this.numberConfig(
             'GEMINI_VAD_SILENCE_DURATION_MS',
             900,
