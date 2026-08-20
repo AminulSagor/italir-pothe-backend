@@ -27,6 +27,7 @@ import {
   QuizQuestionStatus,
 } from '../entities/quiz-question.entity';
 import { QuizSequenceItem } from '../entities/quiz-sequence-item.entity';
+import { QuizSession } from '../entities/quiz-session.entity';
 import { Quiz, QuizStatus } from '../entities/quiz.entity';
 import { QuizQuestionFormat } from '../types/quiz-question-format.type';
 
@@ -226,6 +227,66 @@ export class AdminQuizzesService {
 
     return {
       message: 'Quiz archived successfully',
+    };
+  }
+
+  async getPermanentDeleteCheck(quizId: string) {
+    const quiz = await this.getQuizById(quizId);
+    const learnerSessionCount = await this.dataSource
+      .getRepository(QuizSession)
+      .count({ where: { quizId: quiz.id } });
+
+    const requiresArchiveFirst = quiz.status !== QuizStatus.ARCHIVED;
+    const hasLearnerHistory = learnerSessionCount > 0;
+
+    return {
+      quizId: quiz.id,
+      status: quiz.status,
+      learnerSessionCount,
+      canDeletePermanently: !requiresArchiveFirst && !hasLearnerHistory,
+      requiresArchiveFirst,
+      hasLearnerHistory,
+      recommendation: requiresArchiveFirst
+        ? 'Archive the quiz before permanently deleting it.'
+        : hasLearnerHistory
+          ? 'This quiz has learner sessions and cannot be permanently deleted. Keep it archived to preserve learner history.'
+          : 'This archived quiz can be permanently deleted. Its questions and configuration will also be deleted.',
+    };
+  }
+
+  async permanentlyDeleteQuiz(quizId: string) {
+    await this.dataSource.transaction(async (manager) => {
+      const quiz = await manager.getRepository(Quiz).findOne({
+        where: { id: quizId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!quiz) {
+        throw new NotFoundException('Quiz not found');
+      }
+
+      if (quiz.status !== QuizStatus.ARCHIVED) {
+        throw new BadRequestException(
+          'Archive the quiz before permanent deletion.',
+        );
+      }
+
+      const learnerSessionCount = await manager.getRepository(QuizSession).count({
+        where: { quizId: quiz.id },
+      });
+
+      if (learnerSessionCount > 0) {
+        throw new BadRequestException(
+          'This quiz has learner sessions and cannot be permanently deleted. Keep it archived to preserve learner history.',
+        );
+      }
+
+      await manager.getRepository(Quiz).delete({ id: quiz.id });
+    });
+
+    return {
+      message: 'Quiz permanently deleted successfully.',
+      id: quizId,
     };
   }
 

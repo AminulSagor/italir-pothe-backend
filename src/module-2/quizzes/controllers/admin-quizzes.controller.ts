@@ -46,6 +46,11 @@ export class AdminQuizzesController {
     return this.adminQuizzesService.findQuizById(quizId);
   }
 
+  @Get('quizzes/:quizId/permanent-delete-check')
+  async getPermanentDeleteCheck(@Param('quizId') quizId: string) {
+    return this.adminQuizzesService.getPermanentDeleteCheck(quizId);
+  }
+
   @Patch('quizzes/:quizId')
   async updateQuiz(
     @Param('quizId') quizId: string,
@@ -67,6 +72,11 @@ export class AdminQuizzesController {
   @Delete('quizzes/:quizId')
   async archiveQuiz(@Param('quizId') quizId: string) {
     return this.adminQuizzesService.archiveQuiz(quizId);
+  }
+
+  @Delete('quizzes/:quizId/permanent')
+  async permanentlyDeleteQuiz(@Param('quizId') quizId: string) {
+    return this.adminQuizzesService.permanentlyDeleteQuiz(quizId);
   }
 
   @Post('quizzes/:quizId/questions')

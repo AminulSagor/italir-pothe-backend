@@ -21,6 +21,7 @@ import {
 
 import {
   InfluencerBillingProvider,
+  InfluencerCouponAccessType,
   InfluencerCouponOwnerType,
   InfluencerCouponProductDomain,
   InfluencerCouponStatus,
@@ -89,6 +90,17 @@ export class InfluencerProviderMappingDto {
   @IsEnum(InfluencerBillingProvider)
   provider: InfluencerBillingProvider;
 
+  @IsOptional()
+  @IsEnum(InfluencerCouponAccessType)
+  accessType?: InfluencerCouponAccessType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  durationDays?: number | null;
+
   @Transform(trim)
   @IsString()
   @MaxLength(255)
@@ -100,6 +112,12 @@ export class InfluencerProviderMappingDto {
   @MaxLength(255)
   @Matches(productIdPattern)
   discountedProviderProductId: string;
+
+  @IsOptional()
+  @Transform(nullableTrim)
+  @IsString()
+  @MaxLength(255)
+  regularProviderBasePlanId?: string | null;
 
   @IsOptional()
   @Transform(nullableTrim)
@@ -363,11 +381,28 @@ export class ValidateInfluencerCouponDto {
   provider: InfluencerBillingProvider;
 
   @IsOptional()
+  @IsEnum(InfluencerCouponAccessType)
+  accessType?: InfluencerCouponAccessType;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  durationDays?: number;
+
+  @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(255)
   @Matches(productIdPattern)
   regularProviderProductId?: string;
+
+  @IsOptional()
+  @Transform(nullableTrim)
+  @IsString()
+  @MaxLength(255)
+  regularProviderBasePlanId?: string;
 
   @IsOptional()
   @Transform(trim)

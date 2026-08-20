@@ -79,6 +79,7 @@ export class AdminCoursesService {
 
   async createCourse(dto: CreateCourseDto) {
     this.validatePricing(dto.isFree ?? true, dto.price);
+    this.validateCouponCodes(dto.couponCode, dto.timeLimitedCouponCode);
 
     const slug = this.createSlug(dto.slug || dto.title);
     await this.ensureCourseSlugIsAvailable(slug);
@@ -91,6 +92,7 @@ export class AdminCoursesService {
       isFree: dto.isFree ?? true,
       price: dto.isFree === false ? this.formatPrice(dto.price) : null,
       couponCode: dto.couponCode ?? null,
+      timeLimitedCouponCode: dto.timeLimitedCouponCode ?? null,
       finalExamTemplateId: dto.finalExamTemplateId ?? null,
       status: dto.status ?? CourseStatus.DRAFT,
       publishedAt: dto.status === CourseStatus.PUBLISHED ? new Date() : null,
@@ -141,6 +143,7 @@ export class AdminCoursesService {
         price: course.price,
         isFree: course.isFree,
         couponCode: course.couponCode,
+        timeLimitedCouponCode: course.timeLimitedCouponCode,
         finalExamTemplateId: course.finalExamTemplateId,
         totalStudentEnrollments: studentEnrollmentCounts.get(course.id) ?? 0,
       })),
@@ -257,6 +260,12 @@ export class AdminCoursesService {
       dto.price !== undefined ? dto.price : Number(course.price ?? 0);
 
     this.validatePricing(nextIsFree, nextPrice);
+    this.validateCouponCodes(
+      dto.couponCode !== undefined ? dto.couponCode : course.couponCode,
+      dto.timeLimitedCouponCode !== undefined
+        ? dto.timeLimitedCouponCode
+        : course.timeLimitedCouponCode,
+    );
 
     if (dto.title !== undefined) {
       course.title = dto.title;
@@ -286,6 +295,10 @@ export class AdminCoursesService {
 
     if (dto.couponCode !== undefined) {
       course.couponCode = dto.couponCode || null;
+    }
+
+    if (dto.timeLimitedCouponCode !== undefined) {
+      course.timeLimitedCouponCode = dto.timeLimitedCouponCode || null;
     }
 
     if (dto.finalExamTemplateId !== undefined) {
@@ -1064,6 +1077,20 @@ export class AdminCoursesService {
 
     if (price === undefined || price === null || price <= 0) {
       throw new BadRequestException('Paid course must have a valid price.');
+    }
+  }
+
+  private validateCouponCodes(
+    lifetimeCouponCode?: string | null,
+    timeLimitedCouponCode?: string | null,
+  ): void {
+    const lifetime = lifetimeCouponCode?.trim().toUpperCase() || null;
+    const timeLimited = timeLimitedCouponCode?.trim().toUpperCase() || null;
+
+    if (lifetime && timeLimited && lifetime === timeLimited) {
+      throw new BadRequestException(
+        'Lifetime and time-limited access must use different coupon codes.',
+      );
     }
   }
 

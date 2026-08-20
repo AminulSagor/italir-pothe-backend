@@ -43,6 +43,11 @@ export enum InfluencerBillingProvider {
   APP_STORE = 'app_store',
 }
 
+export enum InfluencerCouponAccessType {
+  LIFETIME = 'lifetime',
+  TIME_LIMITED = 'time_limited',
+}
+
 export enum InfluencerOrderDomain {
   COURSE = 'course',
   STORE_PACKAGE = 'store_package',
@@ -94,8 +99,11 @@ export interface InfluencerCheckoutCouponResolution {
   startsAt: Date | null;
   expiresAt: Date | null;
   provider: InfluencerBillingProvider;
+  accessType: InfluencerCouponAccessType;
+  durationDays: number | null;
   regularProviderProductId: string;
   discountedProviderProductId: string;
+  regularProviderBasePlanId: string | null;
   providerBasePlanId: string | null;
   providerOfferId: string | null;
   basePriceEur: string;

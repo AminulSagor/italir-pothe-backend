@@ -1,4 +1,4 @@
-import { Type } from "class-transformer";
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -12,24 +12,29 @@ import {
   Min,
   MinLength,
   ValidateNested,
-} from "class-validator";
+} from 'class-validator';
 
 const AI_TUTOR_LEVELS = [
-  "A1",
-  "A1+",
-  "A2",
-  "A2+",
-  "B1",
-  "B1+",
-  "B2",
-  "B2+",
-  "C1",
-  "C2",
+  'A1',
+  'A1+',
+  'A2',
+  'A2+',
+  'B1',
+  'B1+',
+  'B2',
+  'B2+',
+  'C1',
+  'C2',
 ] as const;
-const AI_TUTOR_GUIDED_MODES = ["guided", "assisted", "free"] as const;
-const AI_TUTOR_GUIDED_LEVELS = ["A1", "A2", "B1"] as const;
-const AI_TUTOR_CHAT_MODES = ["general", "writing_help"] as const;
-const AI_TUTOR_WRITING_SOURCE_LANGUAGES = ["english", "bangla"] as const;
+const AI_TUTOR_GUIDED_MODES = ['guided', 'assisted', 'free'] as const;
+const AI_TUTOR_GUIDED_LEVELS = ['A1', 'A2', 'B1'] as const;
+const AI_TUTOR_CHAT_MODES = ['general', 'writing_help'] as const;
+const AI_TUTOR_WRITING_SOURCE_LANGUAGES = ['english', 'bangla'] as const;
+const AI_TUTOR_LIVE_EVENT_TYPES = [
+  'user_transcript',
+  'assistant_transcript',
+  'resumption_handle',
+] as const;
 
 export class AiTutorLearnerProfileDto {
   @IsIn(AI_TUTOR_LEVELS)
@@ -69,6 +74,10 @@ export class AiTutorLearnerProfileDto {
 
 export class StartAiTutorVoiceSessionDto {
   @IsOptional()
+  @IsIn(['gemini_live'])
+  voiceTransport?: 'gemini_live';
+
+  @IsOptional()
   @IsString()
   @MaxLength(300)
   topic?: string;
@@ -99,16 +108,57 @@ export class StartAiTutorVoiceSessionDto {
 
   @IsOptional()
   @IsIn(AI_TUTOR_GUIDED_MODES)
-  guidedMode?: "guided" | "assisted" | "free";
+  guidedMode?: 'guided' | 'assisted' | 'free';
 
   @IsOptional()
   @IsIn(AI_TUTOR_GUIDED_LEVELS)
-  guidedLevel?: "A1" | "A2" | "B1";
+  guidedLevel?: 'A1' | 'A2' | 'B1';
+}
+
+export class AiTutorLiveEventDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  eventId: string;
+
+  @IsIn(AI_TUTOR_LIVE_EVENT_TYPES)
+  type: (typeof AI_TUTOR_LIVE_EVENT_TYPES)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  text?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  handle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  occurredAt?: string;
+}
+
+export class RecordAiTutorLiveEventsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => AiTutorLiveEventDto)
+  events: AiTutorLiveEventDto[];
+}
+
+export class ReconnectAiTutorVoiceSessionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  resumptionHandle?: string;
 }
 
 export class AiTutorChatHistoryMessageDto {
-  @IsIn(["user", "assistant"])
-  role: "user" | "assistant";
+  @IsIn(['user', 'assistant'])
+  role: 'user' | 'assistant';
 
   @IsString()
   @MaxLength(4000)
@@ -151,11 +201,11 @@ export class SendAiTutorMessageDto {
 
   @IsOptional()
   @IsIn(AI_TUTOR_CHAT_MODES)
-  chatMode?: "general" | "writing_help";
+  chatMode?: 'general' | 'writing_help';
 
   @IsOptional()
   @IsIn(AI_TUTOR_WRITING_SOURCE_LANGUAGES)
-  sourceLanguage?: "english" | "bangla";
+  sourceLanguage?: 'english' | 'bangla';
 }
 
 export class TranscribeAiTutorLevelTestDto {
@@ -171,8 +221,8 @@ export class AiTutorLevelTestAnswerDto {
   @MaxLength(80)
   questionId: string;
 
-  @IsIn(["speaking", "vocabulary", "grammar"])
-  skill: "speaking" | "vocabulary" | "grammar";
+  @IsIn(['speaking', 'vocabulary', 'grammar'])
+  skill: 'speaking' | 'vocabulary' | 'grammar';
 
   @IsString()
   @MinLength(1)

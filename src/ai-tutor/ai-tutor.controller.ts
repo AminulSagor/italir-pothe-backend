@@ -18,6 +18,8 @@ import type { AuthenticatedRequest } from '../common/interfaces/authenticated-re
 import { AiTutorService } from './ai-tutor.service';
 import {
   EvaluateAiTutorLevelTestDto,
+  ReconnectAiTutorVoiceSessionDto,
+  RecordAiTutorLiveEventsDto,
   SendAiTutorMessageDto,
   StartAiTutorVoiceSessionDto,
   TranscribeAiTutorLevelTestDto,
@@ -60,6 +62,30 @@ export class AiTutorController {
   ) {
     const user = this.requireUser(request);
     return this.aiTutorService.endVoiceSession(user.id, sessionId);
+  }
+
+  @Post('voice/sessions/:sessionId/reconnect')
+  async reconnectVoiceSession(
+    @Req() request: AuthenticatedRequest,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: ReconnectAiTutorVoiceSessionDto,
+  ) {
+    const user = this.requireUser(request);
+    return this.aiTutorService.reconnectVoiceSession(
+      user,
+      sessionId,
+      dto.resumptionHandle,
+    );
+  }
+
+  @Post('voice/sessions/:sessionId/events')
+  async recordLiveEvents(
+    @Req() request: AuthenticatedRequest,
+    @Param('sessionId') sessionId: string,
+    @Body() dto: RecordAiTutorLiveEventsDto,
+  ) {
+    const user = this.requireUser(request);
+    return this.aiTutorService.recordLiveEvents(user.id, sessionId, dto.events);
   }
 
   @Post('chat')

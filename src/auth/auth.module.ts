@@ -18,10 +18,12 @@ import { PackageStoreModule } from '../package-store/package-store.module';
 import { DevicesModule } from '../devices/devices.module';
 import { AccountModerationStatusService } from '../moderation/account-moderation-status.service';
 import { SessionSocketRegistryService } from './session-socket-registry.service';
+import { UserSocialAccount } from './entities/user-social-account.entity';
+import { SocialTokenVerifierService } from './social-token-verifier.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Otp, ModerationAction]),
+    TypeOrmModule.forFeature([User, Otp, ModerationAction, UserSocialAccount]),
 
     ConfigModule,
     PassportModule,
@@ -59,6 +61,7 @@ import { SessionSocketRegistryService } from './session-socket-registry.service'
     JwtStrategy,
     SmsService,
     AccountModerationStatusService,
+    SocialTokenVerifierService,
 
     // Tracks socket connections by authentication session.
     SessionSocketRegistryService,

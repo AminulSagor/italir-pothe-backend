@@ -21,6 +21,7 @@ import {
 import { ChangeUserPasswordDto } from './dto/change-user-password.dto';
 import { ConfirmAvatarUploadDto } from './dto/confirm-avatar-upload.dto';
 import { DeleteUserAccountDto } from './dto/delete-user-account.dto';
+import { SetUserPasswordDto } from './dto/set-user-password.dto';
 import { PrepareAvatarUploadDto } from './dto/prepare-avatar-upload.dto';
 import { UpdateFullNameDto } from './dto/update-full-name.dto';
 import {
@@ -132,15 +133,20 @@ export class UserSettingsController {
     );
   }
 
+  @Patch('password/set')
+  setPassword(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: SetUserPasswordDto,
+  ): Promise<UserSettingsMessageResponse> {
+    return this.userSettingsService.setPassword(this.getUserId(request), dto);
+  }
+
   @Delete('account')
   deleteAccount(
     @Req() request: AuthenticatedRequest,
     @Body() dto: DeleteUserAccountDto,
   ): Promise<UserSettingsMessageResponse> {
-    return this.userSettingsService.deleteAccount(
-      this.getUserId(request),
-      dto,
-    );
+    return this.userSettingsService.deleteAccount(this.getUserId(request), dto);
   }
 
   private getUserId(request: AuthenticatedRequest): string {

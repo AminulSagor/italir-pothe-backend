@@ -157,6 +157,7 @@ export class UsersService {
       isVerified: user.isVerified,
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,
+      hasPassword: Boolean(user.password),
       profilePhotoFileId: user.profilePhotoFileId,
       hapticsEnabled: user.hapticsEnabled,
       createdAt: user.createdAt,
@@ -258,11 +259,7 @@ export class UsersService {
       OtpPurpose.CHANGE_EMAIL,
     );
 
-    await this.emailService.sendOtpEmail(
-      email,
-      otp,
-      OtpPurpose.CHANGE_EMAIL,
-    );
+    await this.emailService.sendOtpEmail(email, otp, OtpPurpose.CHANGE_EMAIL);
 
     return {
       message: 'Verification code sent to your new email.',
@@ -461,6 +458,12 @@ export class UsersService {
     if (dto.newPassword !== dto.confirmNewPassword) {
       throw new BadRequestException(
         'New password and confirm password do not match.',
+      );
+    }
+
+    if (!user.password) {
+      throw new BadRequestException(
+        'No password is set. Use the set password flow.',
       );
     }
 

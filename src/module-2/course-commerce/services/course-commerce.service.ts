@@ -56,6 +56,7 @@ import { Environment, Type } from '@apple/app-store-server-library';
 import { InfluencerHubService } from 'src/influencer-hub/services/influencer-hub.service';
 import {
   InfluencerBillingProvider,
+  InfluencerCouponAccessType,
   InfluencerCouponProductDomain,
   InfluencerOrderDomain,
   type InfluencerCheckoutCouponResolution,
@@ -111,6 +112,7 @@ export class CourseCommerceService {
     const course = await this.getPublishedCourse(courseId);
 
     let providerProduct: CourseProviderProduct | null = null;
+    let selectedProviderProductId: string | null = null;
 
     if (!course.isFree) {
       if (!query.provider) {
@@ -120,12 +122,13 @@ export class CourseCommerceService {
         );
       }
 
-      providerProduct = this.requireActiveProviderProduct(
+      providerProduct = this.requireRegularProviderProduct(
         course,
         query.provider,
         undefined,
         query.providerProductId,
       );
+      selectedProviderProductId = providerProduct.id;
     }
 
     const currency = query.currency ?? CommerceCurrency.EUR;
@@ -139,26 +142,24 @@ export class CourseCommerceService {
           'Payment provider is required before applying a coupon.',
         );
       }
-      if (providerProduct.accessType !== CourseAccessType.LIFETIME) {
-        throw new BadRequestException(
-          'Coupons are not supported for time-limited course options.',
-        );
-      }
-
       couponResolution =
         await this.influencerHubService.resolveCouponForCheckout({
           couponCode: query.couponCode,
           productDomain: InfluencerCouponProductDomain.COURSE,
           productId: course.id,
           provider: query.provider as unknown as InfluencerBillingProvider,
+          accessType:
+            providerProduct.accessType as unknown as InfluencerCouponAccessType,
+          durationDays: providerProduct.durationDays,
           regularProviderProductId: providerProduct.productId,
+          regularProviderBasePlanId: providerProduct.basePlanId,
           basePriceEur: course.price ?? '0.00',
         });
 
-      providerProduct = this.requireActiveProviderProduct(
+      providerProduct = this.requireCouponProviderProduct(
         course,
         query.provider,
-        couponResolution.discountedProviderProductId,
+        couponResolution,
       );
 
       quote = await this.buildCourseQuoteFromInfluencerResolution(
@@ -198,6 +199,7 @@ export class CourseCommerceService {
               couponResolution?.providerOfferId ?? providerProduct.offerId,
           }
         : null,
+      selectedProviderProductId,
 
       baseCurrency: CommerceCurrency.EUR,
       selectedCurrency: quote.selectedCurrency,
@@ -214,11 +216,12 @@ export class CourseCommerceService {
 
       purchaseOptions: (course.providerProducts ?? [])
         .filter((item) => item.isActive && item.provider === query.provider)
-        .filter((item) => !this.isCouponProviderProductId(item.productId))
+        .filter((item) => !this.isCouponProviderProduct(item))
         .map((item) => this.mapProviderProduct(item)),
 
       supportedProviders: (course.providerProducts ?? [])
         .filter((item) => item.isActive)
+        .filter((item) => !this.isCouponProviderProduct(item))
         .map((item) => this.mapProviderProduct(item)),
 
       developmentVerification:
@@ -243,7 +246,7 @@ export class CourseCommerceService {
       );
     }
 
-    const regularProviderProduct = this.requireActiveProviderProduct(
+    const regularProviderProduct = this.requireRegularProviderProduct(
       course,
       dto.paymentProvider,
       undefined,
@@ -317,27 +320,26 @@ export class CourseCommerceService {
     let quote: CalculatedCourseQuote;
 
     if (dto.couponCode?.trim()) {
-      if (regularProviderProduct.accessType !== CourseAccessType.LIFETIME) {
-        throw new BadRequestException(
-          'Coupons are not supported for time-limited course options.',
-        );
-      }
       couponResolution =
         await this.influencerHubService.resolveCouponForCheckout({
           couponCode: dto.couponCode,
           productDomain: InfluencerCouponProductDomain.COURSE,
           productId: course.id,
           provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
+          accessType:
+            regularProviderProduct.accessType as unknown as InfluencerCouponAccessType,
+          durationDays: regularProviderProduct.durationDays,
           regularProviderProductId: regularProviderProduct.productId,
+          regularProviderBasePlanId: regularProviderProduct.basePlanId,
           basePriceEur: course.price ?? '0.00',
         });
 
       checkoutProductId = couponResolution.discountedProviderProductId;
 
-      providerProduct = this.requireActiveProviderProduct(
+      providerProduct = this.requireCouponProviderProduct(
         course,
         dto.paymentProvider,
-        checkoutProductId,
+        couponResolution,
       );
 
       checkoutBasePlanId = providerProduct.basePlanId;
@@ -2132,6 +2134,13 @@ export class CourseCommerceService {
     return productId.trim().toLowerCase().startsWith('coupon_');
   }
 
+  private isCouponProviderProduct(providerProduct: CourseProviderProduct) {
+    return (
+      this.isCouponProviderProductId(providerProduct.productId) ||
+      this.isCouponProviderProductId(providerProduct.basePlanId ?? '')
+    );
+  }
+
   private getActiveProviderProduct(
     course: Course,
     provider: CoursePaymentProvider,
@@ -2160,9 +2169,85 @@ export class CourseCommerceService {
       activeProducts.find(
         (item) =>
           item.accessType === CourseAccessType.LIFETIME &&
-          !this.isCouponProviderProductId(item.productId),
+          !this.isCouponProviderProduct(item),
       ) ?? activeProducts[0]
     );
+  }
+
+  private requireCouponProviderProduct(
+    course: Course,
+    provider: CoursePaymentProvider,
+    resolution: InfluencerCheckoutCouponResolution,
+  ) {
+    const providerProduct = (course.providerProducts ?? []).find(
+      (item) =>
+        item.isActive &&
+        item.provider === provider &&
+        item.productId === resolution.discountedProviderProductId &&
+        (item.basePlanId ?? null) === resolution.providerBasePlanId &&
+        item.accessType ===
+          (resolution.accessType as unknown as CourseAccessType) &&
+        (item.durationDays ?? null) === resolution.durationDays,
+    );
+
+    if (!providerProduct) {
+      throw new BadRequestException(
+        'The configured discounted store mapping is unavailable for this purchase option.',
+      );
+    }
+
+    return this.requireActiveProviderProduct(
+      course,
+      provider,
+      undefined,
+      providerProduct.id,
+    );
+  }
+
+  private requireRegularProviderProduct(
+    course: Course,
+    provider: CoursePaymentProvider,
+    productId?: string,
+    providerProductId?: string,
+  ) {
+    const selected = this.requireActiveProviderProduct(
+      course,
+      provider,
+      productId,
+      providerProductId,
+    );
+    if (!this.isCouponProviderProduct(selected)) return selected;
+
+    const regular = (course.providerProducts ?? []).find((item) => {
+      if (
+        !item.isActive ||
+        item.provider !== provider ||
+        this.isCouponProviderProduct(item) ||
+        item.accessType !== selected.accessType ||
+        item.durationDays !== selected.durationDays
+      ) {
+        return false;
+      }
+
+      if (
+        provider === CoursePaymentProvider.GOOGLE_PLAY &&
+        selected.accessType === CourseAccessType.TIME_LIMITED
+      ) {
+        return (
+          item.productId === selected.productId &&
+          selected.basePlanId === `coupon_${item.basePlanId ?? ''}`
+        );
+      }
+
+      return selected.productId === `coupon_${item.productId}`;
+    });
+
+    if (!regular) {
+      throw new BadRequestException(
+        'The discounted store mapping has no matching regular purchase option.',
+      );
+    }
+    return regular;
   }
 
   private requireActiveProviderProduct(

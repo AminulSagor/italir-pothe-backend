@@ -43,16 +43,9 @@ export class CoursesService {
       return courses.map((course) => this.mapCourse(course, null));
     }
 
-    const providerProducts = await this.providerProductRepository.find({
-      where: {
-        courseId: In(courses.map((course) => course.id)),
-        provider,
-        isActive: true,
-      },
-    });
-
-    const providerProductByCourseId = new Map(
-      providerProducts.map((item) => [item.courseId, item]),
+    const providerProductByCourseId = await this.getProviderProductMap(
+      courses,
+      provider,
     );
 
     return courses
@@ -198,13 +191,7 @@ export class CoursesService {
     }
 
     const providerProduct = provider
-      ? await this.providerProductRepository.findOne({
-          where: {
-            courseId,
-            provider,
-            isActive: true,
-          },
-        })
+      ? await this.getRegularProviderProduct(courseId, provider)
       : null;
 
     if (provider && !course.isFree && !providerProduct) {
@@ -381,13 +368,7 @@ export class CoursesService {
     }
 
     const providerProduct = provider
-      ? await this.providerProductRepository.findOne({
-          where: {
-            courseId,
-            provider,
-            isActive: true,
-          },
-        })
+      ? await this.getRegularProviderProduct(courseId, provider)
       : null;
 
     if (provider && !course.isFree && !providerProduct) {
@@ -435,13 +416,38 @@ export class CoursesService {
 
     const result = new Map<string, CourseProviderProduct>();
     for (const item of providerProducts) {
-      if (!item.courseId) continue;
+      if (!item.courseId || this.isCouponProviderProduct(item)) continue;
       const current = result.get(item.courseId);
       if (!current || item.accessType === CourseAccessType.LIFETIME) {
         result.set(item.courseId, item);
       }
     }
     return result;
+  }
+
+  private async getRegularProviderProduct(
+    courseId: string,
+    provider: CoursePaymentProvider,
+  ): Promise<CourseProviderProduct | null> {
+    const items = await this.providerProductRepository.find({
+      where: { courseId, provider, isActive: true },
+    });
+    const regularItems = items.filter(
+      (item) => !this.isCouponProviderProduct(item),
+    );
+    return (
+      regularItems.find(
+        (item) => item.accessType === CourseAccessType.LIFETIME,
+      ) ??
+      regularItems[0] ??
+      null
+    );
+  }
+
+  private isCouponProviderProduct(item: CourseProviderProduct): boolean {
+    return [item.productId, item.basePlanId ?? ''].some((value) =>
+      value.trim().toLowerCase().startsWith('coupon_'),
+    );
   }
 
   private mapCourse(

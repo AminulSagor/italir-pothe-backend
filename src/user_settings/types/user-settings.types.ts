@@ -5,6 +5,7 @@ export interface UserSettingsProfilePayload {
   phone: string | null;
   isEmailVerified: boolean;
   isPhoneVerified: boolean;
+  hasPassword: boolean;
   profilePhotoFileId: string | null;
   avatarUrl: string | null;
   canChangeEmail: boolean;

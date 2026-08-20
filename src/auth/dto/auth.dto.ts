@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsNotEmpty,
   IsOptional,
+  IsIn,
   IsString,
   Length,
   Matches,
@@ -89,6 +90,46 @@ export class LoginDto {
   @IsOptional()
   @IsEnum(DevicePlatform)
   platform?: DevicePlatform;
+}
+
+export class SocialLoginDto {
+  @IsNotEmpty()
+  @IsString()
+  token: string;
+
+  @IsOptional()
+  @IsIn(['classic', 'limited'])
+  tokenType?: 'classic' | 'limited';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  nonce?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  deviceId?: string;
+
+  @IsOptional()
+  @IsEnum(DevicePlatform)
+  platform?: DevicePlatform;
+}
+
+export class LinkSocialAccountDto {
+  @IsNotEmpty()
+  @IsString()
+  token: string;
+
+  @IsOptional()
+  @IsIn(['classic', 'limited'])
+  tokenType?: 'classic' | 'limited';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  nonce?: string;
 }
 
 export class VerifyOtpDto {

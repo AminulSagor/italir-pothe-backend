@@ -7,6 +7,10 @@ import { AiTutorService } from './ai-tutor.service';
 import { AiTutorUsageService } from './ai-tutor-usage.service';
 import { AiTutorLearnerProfile } from './entities/ai-tutor-learner-profile.entity';
 import { AiTutorVoiceUsageSession } from './entities/ai-tutor-voice-usage-session.entity';
+import { AiTutorLiveSession } from './entities/ai-tutor-live-session.entity';
+import { AiTutorLearningMemory } from './entities/ai-tutor-learning-memory.entity';
+import { AiTutorLiveSessionService } from './ai-tutor-live-session.service';
+import { GeminiLiveService } from './gemini-live.service';
 
 @Module({
   imports: [
@@ -14,9 +18,16 @@ import { AiTutorVoiceUsageSession } from './entities/ai-tutor-voice-usage-sessio
     TypeOrmModule.forFeature([
       AiTutorLearnerProfile,
       AiTutorVoiceUsageSession,
+      AiTutorLiveSession,
+      AiTutorLearningMemory,
     ]),
   ],
   controllers: [AiTutorController],
-  providers: [AiTutorService, AiTutorUsageService],
+  providers: [
+    AiTutorService,
+    AiTutorUsageService,
+    AiTutorLiveSessionService,
+    GeminiLiveService,
+  ],
 })
 export class AiTutorModule {}

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -11,15 +12,17 @@ import { InjectRepository } from '@nestjs/typeorm';
 
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes, randomInt } from 'crypto';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 
 import {
   CreateAdminDto,
   ForgotPasswordDto,
   LoginDto,
+  LinkSocialAccountDto,
   ResendOtpDto,
   ResetPasswordDto,
   SignupDto,
+  SocialLoginDto,
   VerifyOtpDto,
   VerifyPasswordResetOtpDto,
 } from './dto/auth.dto';
@@ -39,9 +42,15 @@ import { Otp, OtpPurpose } from '../users/entities/otp.entity';
 
 import { User, UserRole } from '../users/entities/user.entity';
 import { SessionSocketRegistryService } from './session-socket-registry.service';
+import {
+  SocialAuthProvider,
+  UserSocialAccount,
+} from './entities/user-social-account.entity';
+import { SocialTokenVerifierService } from './social-token-verifier.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly otpExpiryMinutes = 10;
   private readonly resetTokenExpiryMinutes = 10;
   private readonly maxOtpAttempts = 5;
@@ -52,6 +61,11 @@ export class AuthService {
 
     @InjectRepository(Otp)
     private readonly otpRepository: Repository<Otp>,
+
+    @InjectRepository(UserSocialAccount)
+    private readonly socialAccountRepository: Repository<UserSocialAccount>,
+
+    private readonly dataSource: DataSource,
 
     private readonly jwtService: JwtService,
     private readonly smsService: SmsService,
@@ -66,6 +80,7 @@ export class AuthService {
     private readonly userDeviceService: UserDeviceService,
 
     private readonly sessionSocketRegistry: SessionSocketRegistryService,
+    private readonly socialTokenVerifierService: SocialTokenVerifierService,
   ) {}
 
   private normalizeIdentifier(identifier: string): string {
@@ -380,6 +395,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (!user.password) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     const isPasswordValid = await bcrypt.compare(
       loginDto.password,
       user.password,
@@ -396,6 +415,197 @@ export class AuthService {
     }
 
     return this.generateToken(user, loginDto.deviceId, loginDto.platform);
+  }
+
+  async socialLogin(providerValue: 'google' | 'facebook', dto: SocialLoginDto) {
+    const provider = this.toSocialProvider(providerValue);
+    const identity = await this.socialTokenVerifierService.verify(
+      provider,
+      dto.token,
+      dto.tokenType,
+      dto.nonce,
+    );
+
+    let userId: string;
+    try {
+      userId = await this.dataSource.transaction(async (manager) => {
+        const socialRepository = manager.getRepository(UserSocialAccount);
+        const userRepository = manager.getRepository(User);
+        const existingIdentity = await socialRepository.findOne({
+          where: {
+            provider,
+            providerUserId: identity.providerUserId,
+          },
+        });
+
+        if (existingIdentity) return existingIdentity.userId;
+
+        let user =
+          identity.emailVerified && identity.email
+            ? await userRepository.findOne({ where: { email: identity.email } })
+            : null;
+
+        if (user) {
+          const providerConflict = await socialRepository.findOne({
+            where: { userId: user.id, provider },
+          });
+          if (
+            providerConflict &&
+            providerConflict.providerUserId !== identity.providerUserId
+          ) {
+            throw new ConflictException(
+              `A different ${provider} account is already linked.`,
+            );
+          }
+
+          if (identity.email && user.email === identity.email) {
+            user.isEmailVerified = true;
+          }
+          user.isVerified = true;
+          if (!user.avatarUrl && identity.avatarUrl) {
+            user.avatarUrl = identity.avatarUrl;
+          }
+          await userRepository.save(user);
+        } else {
+          user = await userRepository.save(
+            userRepository.create({
+              fullName: identity.fullName,
+              name: identity.fullName,
+              email: identity.emailVerified ? identity.email : null,
+              phone: null,
+              password: null,
+              role: UserRole.USER,
+              isVerified: true,
+              isEmailVerified: identity.emailVerified,
+              isPhoneVerified: false,
+              avatarUrl: identity.avatarUrl,
+              joinedAt: new Date(),
+            }),
+          );
+          await this.storeWalletService.getBalancesWithManager(
+            user.id,
+            manager,
+          );
+        }
+
+        await socialRepository.save(
+          socialRepository.create({
+            userId: user.id,
+            provider,
+            providerUserId: identity.providerUserId,
+            providerEmail: identity.email,
+          }),
+        );
+        return user.id;
+      });
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        const account = await this.socialAccountRepository.findOne({
+          where: {
+            provider,
+            providerUserId: identity.providerUserId,
+          },
+        });
+        if (account) {
+          userId = account.userId;
+        } else {
+          throw new ConflictException(
+            'This provider account conflicts with an existing account.',
+          );
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user)
+      throw new UnauthorizedException('Social account is unavailable.');
+
+    await this.accountModerationStatusService.assertAccountIsActive(user);
+    this.logger.log(
+      `Social login succeeded provider=${provider} userId=${user.id}`,
+    );
+    return this.generateToken(user, dto.deviceId, dto.platform);
+  }
+
+  async linkSocialAccount(
+    userId: string,
+    providerValue: 'google' | 'facebook',
+    dto: LinkSocialAccountDto,
+  ) {
+    const provider = this.toSocialProvider(providerValue);
+    const identity = await this.socialTokenVerifierService.verify(
+      provider,
+      dto.token,
+      dto.tokenType,
+      dto.nonce,
+    );
+
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        const userRepository = manager.getRepository(User);
+        const socialRepository = manager.getRepository(UserSocialAccount);
+        const user = await userRepository.findOne({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
+        const identityOwner = await socialRepository.findOne({
+          where: { provider, providerUserId: identity.providerUserId },
+        });
+        if (identityOwner && identityOwner.userId !== user.id) {
+          throw new ConflictException(
+            'This provider account is already linked to another user.',
+          );
+        }
+
+        const currentProvider = await socialRepository.findOne({
+          where: { userId: user.id, provider },
+        });
+        if (currentProvider) {
+          if (currentProvider.providerUserId !== identity.providerUserId) {
+            throw new ConflictException(
+              `A different ${provider} account is already linked.`,
+            );
+          }
+          return;
+        }
+
+        if (identity.emailVerified && identity.email) {
+          const emailOwner = await userRepository.findOne({
+            where: { email: identity.email },
+          });
+          if (emailOwner && emailOwner.id !== user.id) {
+            throw new ConflictException(
+              'The verified provider email belongs to another account.',
+            );
+          }
+          if (!user.email) user.email = identity.email;
+          if (user.email === identity.email) user.isEmailVerified = true;
+        }
+
+        await userRepository.save(user);
+        await socialRepository.save(
+          socialRepository.create({
+            userId: user.id,
+            provider,
+            providerUserId: identity.providerUserId,
+            providerEmail: identity.email,
+          }),
+        );
+      });
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw new ConflictException(
+          'This provider account conflicts with an existing account.',
+        );
+      }
+      throw error;
+    }
+
+    this.logger.log(
+      `Social account linked provider=${provider} userId=${userId}`,
+    );
+    return { message: `${provider} account linked successfully.` };
   }
 
   async logout(userId: string, sessionId: string, deviceId: string) {
@@ -670,10 +880,9 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
-    const isSamePassword = await bcrypt.compare(
-      resetPasswordDto.newPassword,
-      user.password,
-    );
+    const isSamePassword = user.password
+      ? await bcrypt.compare(resetPasswordDto.newPassword, user.password)
+      : false;
 
     if (isSamePassword) {
       throw new BadRequestException(
@@ -792,8 +1001,24 @@ export class AuthService {
         isPhoneVerified: user.isPhoneVerified,
         profilePhotoFileId: user.profilePhotoFileId,
         hapticsEnabled: user.hapticsEnabled,
+        hasPassword: Boolean(user.password),
       },
     };
+  }
+
+  private toSocialProvider(value: 'google' | 'facebook'): SocialAuthProvider {
+    return value === 'google'
+      ? SocialAuthProvider.GOOGLE
+      : SocialAuthProvider.FACEBOOK;
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const record = error as {
+      code?: string;
+      driverError?: { code?: string };
+    };
+    return record.code === '23505' || record.driverError?.code === '23505';
   }
 
   private getSessionExpiresAt(): Date {

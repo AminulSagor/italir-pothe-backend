@@ -11,14 +11,12 @@ import {
 
 import {
   InfluencerBillingProvider,
+  InfluencerCouponAccessType,
   InfluencerCouponProductDomain,
 } from '../types/influencer-hub.type';
 import { InfluencerCoupon } from './influencer-coupon.entity';
 
 @Entity('influencer_coupon_provider_mappings')
-@Index(['couponId', 'productDomain', 'courseId', 'storePackageId', 'provider'], {
-  unique: true,
-})
 @Index(['productDomain', 'courseId', 'storePackageId', 'provider'])
 export class InfluencerCouponProviderMapping {
   @PrimaryGeneratedColumn('uuid')
@@ -39,11 +37,24 @@ export class InfluencerCouponProviderMapping {
   @Column({ type: 'enum', enum: InfluencerBillingProvider })
   provider: InfluencerBillingProvider;
 
+  @Column({
+    type: 'varchar',
+    length: 30,
+    default: InfluencerCouponAccessType.LIFETIME,
+  })
+  accessType: InfluencerCouponAccessType;
+
+  @Column({ type: 'smallint', nullable: true })
+  durationDays: number | null;
+
   @Column({ type: 'varchar', length: 255 })
   regularProviderProductId: string;
 
   @Column({ type: 'varchar', length: 255 })
   discountedProviderProductId: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  regularProviderBasePlanId: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   providerBasePlanId: string | null;

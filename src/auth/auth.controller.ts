@@ -19,9 +19,11 @@ import {
   CreateAdminDto,
   ForgotPasswordDto,
   LoginDto,
+  LinkSocialAccountDto,
   ResendOtpDto,
   ResetPasswordDto,
   SignupDto,
+  SocialLoginDto,
   VerifyOtpDto,
   VerifyPasswordResetOtpDto,
 } from './dto/auth.dto';
@@ -55,6 +57,46 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Post('social/google')
+  @HttpCode(HttpStatus.OK)
+  socialGoogle(@Body() dto: SocialLoginDto) {
+    return this.authService.socialLogin('google', dto);
+  }
+
+  @Post('social/facebook')
+  @HttpCode(HttpStatus.OK)
+  socialFacebook(@Body() dto: SocialLoginDto) {
+    return this.authService.socialLogin('facebook', dto);
+  }
+
+  @Post('social/google/link')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  linkGoogle(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: LinkSocialAccountDto,
+  ) {
+    return this.authService.linkSocialAccount(
+      this.getAuthenticatedUserId(request),
+      'google',
+      dto,
+    );
+  }
+
+  @Post('social/facebook/link')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  linkFacebook(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: LinkSocialAccountDto,
+  ) {
+    return this.authService.linkSocialAccount(
+      this.getAuthenticatedUserId(request),
+      'facebook',
+      dto,
+    );
+  }
+
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyOtp(
@@ -79,10 +121,7 @@ export class AuthController {
     @Body() forgotPasswordDto: ForgotPasswordDto,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.authService.requestPasswordReset(
-      forgotPasswordDto,
-      request.ip,
-    );
+    return this.authService.requestPasswordReset(forgotPasswordDto, request.ip);
   }
 
   @Post('verify-reset-otp')
@@ -136,5 +175,13 @@ export class AuthController {
       sessionId,
       deviceId,
     };
+  }
+
+  private getAuthenticatedUserId(request: AuthenticatedRequest): string {
+    const userId = request.user?.id ?? request.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('Authenticated user not found');
+    }
+    return userId;
   }
 }

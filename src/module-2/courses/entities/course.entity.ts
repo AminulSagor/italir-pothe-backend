@@ -46,6 +46,9 @@ export class Course {
   @Column({ type: 'varchar', length: 80, nullable: true })
   couponCode: string | null;
 
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  timeLimitedCouponCode: string | null;
+
   @Column({ type: 'uuid', nullable: true })
   finalExamTemplateId: string | null;
 

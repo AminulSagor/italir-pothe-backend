@@ -4,20 +4,23 @@ import {
   GatewayTimeoutException,
   Injectable,
   ServiceUnavailableException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 import {
+  AiTutorLiveEventDto,
   EvaluateAiTutorLevelTestDto,
   SendAiTutorMessageDto,
   StartAiTutorVoiceSessionDto,
   TranscribeAiTutorLevelTestDto,
-} from "./dto/ai-tutor.dto";
-import { AiTutorLearnerProfile } from "./entities/ai-tutor-learner-profile.entity";
-import { StoreWalletService } from "../package-store/services/store-wallet.service";
-import { AiTutorUsageService } from "./ai-tutor-usage.service";
+} from './dto/ai-tutor.dto';
+import { AiTutorLearnerProfile } from './entities/ai-tutor-learner-profile.entity';
+import { StoreWalletService } from '../package-store/services/store-wallet.service';
+import { AiTutorUsageService } from './ai-tutor-usage.service';
+import { AiTutorLiveSessionService } from './ai-tutor-live-session.service';
+import { GeminiLiveService } from './gemini-live.service';
 
 interface AiTutorAuthenticatedUser {
   id: string;
@@ -43,16 +46,16 @@ export interface AiTutorProfilePayload {
 }
 
 const AI_TUTOR_LEVELS = new Set([
-  "A1",
-  "A1+",
-  "A2",
-  "A2+",
-  "B1",
-  "B1+",
-  "B2",
-  "B2+",
-  "C1",
-  "C2",
+  'A1',
+  'A1+',
+  'A2',
+  'A2+',
+  'B1',
+  'B1+',
+  'B2',
+  'B2+',
+  'C1',
+  'C2',
 ]);
 
 @Injectable()
@@ -63,6 +66,8 @@ export class AiTutorService {
     private readonly profileRepository: Repository<AiTutorLearnerProfile>,
     private readonly walletService: StoreWalletService,
     private readonly usageService: AiTutorUsageService,
+    private readonly liveSessionService: AiTutorLiveSessionService,
+    private readonly geminiLiveService: GeminiLiveService,
   ) {}
 
   async startVoiceSession(
@@ -81,66 +86,138 @@ export class AiTutorService {
         dto.guidedLevel,
         dto.guidedMode,
       );
-      const response = await this.requestJsonWithRetry(
-        "/v1/voice/sessions",
-        {
-          userId: user.id,
-          displayName: user.fullName ?? "Italian learner",
-          topic: dto.topic,
-          ttlSeconds: usageSession.allocatedSeconds,
-          learnerProfile,
-          memoryFacts: dto.memoryFacts ?? [],
-          recentMistakeTags: dto.recentMistakeTags ?? [],
-          guidedMode,
-          guidedLevel: dto.guidedLevel,
-        },
-        2,
-      );
-      const body = this.asRecord(response);
-      const providerSessionId = this.readString(body?.sessionId);
-      if (!providerSessionId) {
-        throw new BadGatewayException(
-          "AI tutor returned an invalid voice session",
+      if (dto.voiceTransport !== 'gemini_live') {
+        const response = await this.requestJsonWithRetry(
+          '/v1/voice/sessions',
+          {
+            userId: user.id,
+            displayName: user.fullName ?? 'Italian learner',
+            topic: dto.topic,
+            ttlSeconds: usageSession.allocatedSeconds,
+            learnerProfile,
+            memoryFacts: dto.memoryFacts ?? [],
+            recentMistakeTags: dto.recentMistakeTags ?? [],
+            guidedMode,
+            guidedLevel: dto.guidedLevel,
+          },
+          2,
         );
+        const body = this.asRecord(response);
+        const providerSessionId = this.readString(body?.sessionId);
+        if (!providerSessionId) {
+          throw new BadGatewayException(
+            'AI tutor returned an invalid voice session',
+          );
+        }
+        await this.usageService.activateVoiceSession(
+          usageSession.id,
+          providerSessionId,
+        );
+        return {
+          ...(body ?? {}),
+          allocatedSeconds: usageSession.allocatedSeconds,
+          balances: await this.walletService.getBalances(user.id),
+        };
       }
+      const learningMemory = await this.liveSessionService.getLearningContext(
+        user.id,
+      );
+      await this.liveSessionService.create({
+        usageSessionId: usageSession.id,
+        userId: user.id,
+        topic: dto.topic,
+        mode: guidedMode,
+        guidedLevel: dto.guidedLevel,
+      });
+      const credential = await this.geminiLiveService.createEphemeralCredential(
+        {
+          ttlSeconds: usageSession.allocatedSeconds,
+          systemInstruction: this.buildLiveSystemInstruction({
+            displayName: user.fullName ?? 'Italian learner',
+            topic: dto.topic,
+            guidedMode,
+            guidedLevel: dto.guidedLevel,
+            learnerProfile,
+            learningMemory,
+            memoryFacts: dto.memoryFacts ?? [],
+            recentMistakeTags: dto.recentMistakeTags ?? [],
+          }),
+        },
+      );
 
       await this.usageService.activateVoiceSession(
         usageSession.id,
-        providerSessionId,
+        usageSession.id,
       );
       const balances = await this.walletService.getBalances(user.id);
 
       return {
-        ...(body ?? {}),
+        sessionId: usageSession.id,
+        provider: 'gemini_live',
+        url: credential.socketUrl,
+        socketUrl: credential.socketUrl,
+        room: 'gemini-live',
+        identity: user.id,
+        token: credential.token,
+        model: credential.model,
+        setup: credential.setup,
+        credentialExpiresAt: credential.expiresAt,
+        ttlSeconds: usageSession.allocatedSeconds,
         allocatedSeconds: usageSession.allocatedSeconds,
         balances,
       };
     } catch (error) {
       await this.usageService.cancelVoiceSession(usageSession.id);
+      await this.liveSessionService.markFailed(
+        user.id,
+        usageSession.id,
+        error instanceof Error
+          ? error.message
+          : 'Session initialization failed',
+      );
       throw error;
     }
   }
 
   async heartbeatVoiceSession(userId: string, sessionId: string) {
     const usage = await this.usageService.heartbeat(userId, sessionId);
-    if (usage.shouldEnd) {
+    if (await this.liveSessionService.isGeminiSession(userId, sessionId)) {
+      await this.liveSessionService.updateActiveSeconds(
+        sessionId,
+        usage.usedSeconds,
+      );
+      if (usage.shouldEnd) {
+        await this.liveSessionService.markForFinalSummary(userId, sessionId);
+      }
+    } else if (usage.shouldEnd) {
       try {
-        await this.requestJson("/v1/voice/sessions/end", {
+        await this.requestJson('/v1/voice/sessions/end', {
           userId,
           sessionId,
         });
       } catch {
-        // Billing state remains authoritative even if the voice worker
-        // already stopped or cannot be reached during final cleanup.
+        // Usage/billing remains authoritative if the legacy worker is gone.
       }
     }
     return usage;
   }
 
   async endVoiceSession(userId: string, sessionId: string) {
+    const isGemini = await this.liveSessionService.isGeminiSession(
+      userId,
+      sessionId,
+    );
+    if (isGemini) {
+      const balances = await this.usageService.endVoiceSession(
+        userId,
+        sessionId,
+      );
+      await this.liveSessionService.markForFinalSummary(userId, sessionId);
+      return { balances };
+    }
     let providerResponse: unknown = {};
     try {
-      providerResponse = await this.requestJson("/v1/voice/sessions/end", {
+      providerResponse = await this.requestJson('/v1/voice/sessions/end', {
         userId,
         sessionId,
       });
@@ -149,11 +226,60 @@ export class AiTutorService {
         userId,
         sessionId,
       );
-      return {
-        ...(this.asRecord(providerResponse) ?? {}),
-        balances,
-      };
+      return { ...(this.asRecord(providerResponse) ?? {}), balances };
     }
+  }
+
+  async reconnectVoiceSession(
+    user: AiTutorAuthenticatedUser,
+    sessionId: string,
+    resumptionHandle?: string,
+  ) {
+    const session = await this.liveSessionService.getOwnedActiveSession(
+      user.id,
+      sessionId,
+    );
+    const learnerProfile = await this.findStoredProfile(user.id);
+    const learningMemory = await this.liveSessionService.getLearningContext(
+      user.id,
+    );
+    const credential = await this.geminiLiveService.createEphemeralCredential({
+      ttlSeconds: 3600,
+      resumptionHandle: resumptionHandle || session.resumptionHandle,
+      systemInstruction: this.buildLiveSystemInstruction({
+        displayName: user.fullName ?? 'Italian learner',
+        topic: session.topic ?? undefined,
+        guidedMode: session.mode as 'guided' | 'assisted' | 'free',
+        guidedLevel: session.guidedLevel as 'A1' | 'A2' | 'B1' | undefined,
+        learnerProfile,
+        learningMemory: {
+          ...learningMemory,
+          currentSessionSummary: session.rollingSummary,
+        },
+        memoryFacts: [],
+        recentMistakeTags: [],
+      }),
+    });
+    return {
+      sessionId,
+      provider: 'gemini_live',
+      url: credential.socketUrl,
+      socketUrl: credential.socketUrl,
+      room: 'gemini-live',
+      identity: user.id,
+      token: credential.token,
+      model: credential.model,
+      setup: credential.setup,
+      credentialExpiresAt: credential.expiresAt,
+    };
+  }
+
+  async recordLiveEvents(
+    userId: string,
+    sessionId: string,
+    events: AiTutorLiveEventDto[],
+  ) {
+    return this.liveSessionService.recordEvents(userId, sessionId, events);
   }
 
   async sendMessage(
@@ -164,21 +290,21 @@ export class AiTutorService {
     const availableTextTokens = this.readTextTokenBalance(balancesBefore);
     if (availableTextTokens <= 0) {
       throw new BadRequestException(
-        "No AI text tokens are available. Purchase an AI bundle first.",
+        'No AI text tokens are available. Purchase an AI bundle first.',
       );
     }
 
     const learnerProfile = await this.findStoredProfile(user.id);
     const chatMode =
-      dto.chatMode === "writing_help" ? "writing_help" : "general";
+      dto.chatMode === 'writing_help' ? 'writing_help' : 'general';
     const sourceLanguage =
-      chatMode === "writing_help"
-        ? (dto.sourceLanguage ?? "english")
+      chatMode === 'writing_help'
+        ? (dto.sourceLanguage ?? 'english')
         : undefined;
 
-    const response = await this.requestJson("/v1/chat", {
+    const response = await this.requestJson('/v1/chat', {
       userId: user.id,
-      displayName: user.fullName ?? "Italian learner",
+      displayName: user.fullName ?? 'Italian learner',
       message: dto.message.trim(),
       conversationId: dto.conversationId,
       history: dto.history ?? [],
@@ -198,7 +324,7 @@ export class AiTutorService {
 
     if (!Number.isFinite(totalTokens) || totalTokens <= 0) {
       throw new BadGatewayException(
-        "AI tutor did not return billable token usage",
+        'AI tutor did not return billable token usage',
       );
     }
 
@@ -226,39 +352,39 @@ export class AiTutorService {
     audio: UploadedAudioFile,
   ) {
     if (audio.size > 12 * 1024 * 1024) {
-      throw new BadRequestException("The recorded answer is too large");
+      throw new BadRequestException('The recorded answer is too large');
     }
     if (
       audio.mimetype &&
-      !audio.mimetype.startsWith("audio/") &&
-      audio.mimetype !== "application/octet-stream"
+      !audio.mimetype.startsWith('audio/') &&
+      audio.mimetype !== 'application/octet-stream'
     ) {
       throw new BadRequestException(
-        "The uploaded file must be an audio recording",
+        'The uploaded file must be an audio recording',
       );
     }
 
     const formData = new FormData();
-    formData.append("userId", userId);
-    formData.append("question", dto.question.trim());
+    formData.append('userId', userId);
+    formData.append('question', dto.question.trim());
     formData.append(
-      "audio",
+      'audio',
       new Blob([new Uint8Array(audio.buffer)], {
-        type: audio.mimetype || "audio/mp4",
+        type: audio.mimetype || 'audio/mp4',
       }),
-      audio.originalname || "level-test-answer.m4a",
+      audio.originalname || 'level-test-answer.m4a',
     );
 
-    return this.requestFormData("/v1/level-test/transcribe", formData);
+    return this.requestFormData('/v1/level-test/transcribe', formData);
   }
 
   async evaluateLevelTest(
     user: AiTutorAuthenticatedUser,
     dto: EvaluateAiTutorLevelTestDto,
   ) {
-    const response = await this.requestJson("/v1/level-test/evaluate", {
+    const response = await this.requestJson('/v1/level-test/evaluate', {
       userId: user.id,
-      displayName: user.fullName ?? "Italian learner",
+      displayName: user.fullName ?? 'Italian learner',
       answers: dto.answers,
     });
     const profile = this.parseProfileResponse(response);
@@ -270,21 +396,51 @@ export class AiTutorService {
     };
   }
 
+  private buildLiveSystemInstruction(options: {
+    displayName: string;
+    topic?: string;
+    guidedMode?: 'guided' | 'assisted' | 'free';
+    guidedLevel?: 'A1' | 'A2' | 'B1';
+    learnerProfile: AiTutorProfilePayload | null;
+    learningMemory: Record<string, unknown>;
+    memoryFacts: string[];
+    recentMistakeTags: string[];
+  }): string {
+    const level =
+      options.learnerProfile?.finalLevel ?? options.guidedLevel ?? 'A1';
+    const mode = options.guidedMode ?? 'assisted';
+    return `You are Italir Pothe's realtime Italian speaking tutor for ${options.displayName}.
+Conduct a natural AUDIO conversation primarily in Italian about: ${options.topic ?? 'everyday Italian'}.
+Learning mode: ${mode}. Current CEFR: ${level}.
+Adaptation: A1/A2 means slower, short sentences and simple vocabulary; B1/B2 means moderate natural complexity; C1/C2 means natural speed and richer vocabulary.
+Guided mode: give structure, prompts and examples. Assisted mode: converse and help when needed. Free mode: converse naturally.
+Correct only meaningful errors. When correcting, briefly provide corrected Italian, a short explanation, and one simpler example when useful. Do not interrupt every minor mistake and do not turn the conversation into a lecture.
+Assess speaking, vocabulary and grammar through conversation. Encourage the learner to speak. Never require typed or written answers.
+If the learner starts speaking, stop your current response and listen. Keep spoken replies concise.
+Known learner profile: ${JSON.stringify(options.learnerProfile ?? {})}
+Persistent learning memory: ${JSON.stringify(options.learningMemory)}
+Current client memory: ${JSON.stringify(options.memoryFacts.slice(0, 12))}
+Recent mistake tags: ${JSON.stringify(options.recentMistakeTags.slice(0, 12))}`.slice(
+      0,
+      20_000,
+    );
+  }
+
   private resolveGuidedMode(
-    level?: "A1" | "A2" | "B1",
-    requestedMode?: "guided" | "assisted" | "free",
-  ): "guided" | "assisted" | "free" | undefined {
+    level?: 'A1' | 'A2' | 'B1',
+    requestedMode?: 'guided' | 'assisted' | 'free',
+  ): 'guided' | 'assisted' | 'free' | undefined {
     if (!level) {
       return requestedMode;
     }
 
     const modeByLevel: Record<
-      "A1" | "A2" | "B1",
-      "guided" | "assisted" | "free"
+      'A1' | 'A2' | 'B1',
+      'guided' | 'assisted' | 'free'
     > = {
-      A1: "guided",
-      A2: "assisted",
-      B1: "free",
+      A1: 'guided',
+      A2: 'assisted',
+      B1: 'free',
     };
     const expectedMode = modeByLevel[level];
     if (requestedMode && requestedMode !== expectedMode) {
@@ -330,7 +486,7 @@ export class AiTutorService {
     const profile = this.asRecord(responseBody?.profile);
     if (!profile) {
       throw new BadGatewayException(
-        "AI tutor returned an invalid level profile",
+        'AI tutor returned an invalid level profile',
       );
     }
 
@@ -376,12 +532,12 @@ export class AiTutorService {
   }
 
   private readLevel(value: unknown): string {
-    const level = this.readString(value)?.toUpperCase() ?? "A1";
-    return AI_TUTOR_LEVELS.has(level) ? level : "A1";
+    const level = this.readString(value)?.toUpperCase() ?? 'A1';
+    return AI_TUTOR_LEVELS.has(level) ? level : 'A1';
   }
 
   private readString(value: unknown): string | null {
-    return typeof value === "string" && value.trim() ? value.trim() : null;
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
   private readStringList(value: unknown, limit: number): string[] {
@@ -389,14 +545,14 @@ export class AiTutorService {
       return [];
     }
     return value
-      .filter((item): item is string => typeof item === "string")
+      .filter((item): item is string => typeof item === 'string')
       .map((item) => item.trim())
       .filter(Boolean)
       .slice(0, limit);
   }
 
   private asRecord(value: unknown): Record<string, unknown> | null {
-    return value && typeof value === "object"
+    return value && typeof value === 'object'
       ? (value as Record<string, unknown>)
       : null;
   }
@@ -434,7 +590,7 @@ export class AiTutorService {
     body: Record<string, unknown>,
   ): Promise<unknown> {
     return this.performRequest(path, {
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
   }
@@ -451,23 +607,23 @@ export class AiTutorService {
     },
   ): Promise<unknown> {
     const baseUrl = this.configService
-      .get<string>("PIPECAT_SERVICE_URL")
+      .get<string>('PIPECAT_SERVICE_URL')
       ?.trim()
-      .replace(/\/+$/, "");
+      .replace(/\/+$/, '');
     const internalApiKey = this.configService
-      .get<string>("PIPECAT_INTERNAL_API_KEY")
+      .get<string>('PIPECAT_INTERNAL_API_KEY')
       ?.trim();
 
     if (!baseUrl || !internalApiKey) {
       throw new ServiceUnavailableException(
-        "AI tutor service is not configured",
+        'AI tutor service is not configured',
       );
     }
 
     const timeoutMs = Math.max(
       1000,
       Number(
-        this.configService.get<string>("PIPECAT_REQUEST_TIMEOUT_MS") ?? 30000,
+        this.configService.get<string>('PIPECAT_REQUEST_TIMEOUT_MS') ?? 30000,
       ),
     );
     const abortController = new AbortController();
@@ -475,10 +631,10 @@ export class AiTutorService {
 
     try {
       const response = await fetch(`${baseUrl}${path}`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          Accept: "application/json",
-          "X-Internal-Api-Key": internalApiKey,
+          Accept: 'application/json',
+          'X-Internal-Api-Key': internalApiKey,
           ...options.headers,
         },
         body: options.body,
@@ -502,11 +658,11 @@ export class AiTutorService {
       ) {
         throw error;
       }
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new GatewayTimeoutException("AI tutor service timed out");
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new GatewayTimeoutException('AI tutor service timed out');
       }
       throw new ServiceUnavailableException(
-        "AI tutor service is currently unavailable",
+        'AI tutor service is currently unavailable',
       );
     } finally {
       clearTimeout(timeout);
@@ -529,9 +685,9 @@ export class AiTutorService {
     if (!body) {
       return null;
     }
-    for (const key of ["detail", "message", "error"]) {
+    for (const key of ['detail', 'message', 'error']) {
       const value = body[key];
-      if (typeof value === "string" && value.trim()) {
+      if (typeof value === 'string' && value.trim()) {
         return value.trim();
       }
     }

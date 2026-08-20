@@ -24,6 +24,7 @@ import { UsersService } from '../users/users.service';
 import { ChangeUserPasswordDto } from './dto/change-user-password.dto';
 import { ConfirmAvatarUploadDto } from './dto/confirm-avatar-upload.dto';
 import { DeleteUserAccountDto } from './dto/delete-user-account.dto';
+import { SetUserPasswordDto } from './dto/set-user-password.dto';
 import { PrepareAvatarUploadDto } from './dto/prepare-avatar-upload.dto';
 import { UpdateFullNameDto } from './dto/update-full-name.dto';
 import {
@@ -216,6 +217,12 @@ export class UserSettingsService {
       );
     }
 
+    if (!user.password) {
+      throw new BadRequestException(
+        'No password is set. Use the set password flow.',
+      );
+    }
+
     const currentPasswordMatches = await bcrypt.compare(
       dto.currentPassword,
       user.password,
@@ -240,6 +247,33 @@ export class UserSettingsService {
     await this.userRepository.save(user);
 
     return { message: 'Password changed successfully.' };
+  }
+
+  async setPassword(
+    userId: string,
+    dto: SetUserPasswordDto,
+  ): Promise<UserSettingsMessageResponse> {
+    const user = await this.findUser(userId);
+
+    if (user.password) {
+      throw new BadRequestException(
+        'A password is already set. Use the change password flow.',
+      );
+    }
+    if (!user.isEmailVerified && !user.isPhoneVerified) {
+      throw new ForbiddenException(
+        'Verify an email address or phone number before setting a password.',
+      );
+    }
+    if (dto.newPassword !== dto.confirmNewPassword) {
+      throw new BadRequestException(
+        'New password and confirm password do not match.',
+      );
+    }
+
+    user.password = await bcrypt.hash(dto.newPassword, 10);
+    await this.userRepository.save(user);
+    return { message: 'Password set successfully.' };
   }
 
   async deleteAccount(
@@ -318,6 +352,7 @@ export class UserSettingsService {
       phone: user.phone,
       isEmailVerified: user.isEmailVerified,
       isPhoneVerified: user.isPhoneVerified,
+      hasPassword: Boolean(user.password),
       profilePhotoFileId: user.profilePhotoFileId,
       avatarUrl,
       canChangeEmail: true,

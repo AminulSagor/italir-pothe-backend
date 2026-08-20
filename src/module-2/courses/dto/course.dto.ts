@@ -61,6 +61,14 @@ export class CreateCourseDto {
   couponCode?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  timeLimitedCouponCode?: string;
+
+  @IsOptional()
   @IsUUID()
   finalExamTemplateId?: string;
 
@@ -110,6 +118,14 @@ export class UpdateCourseDto {
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
   couponCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  timeLimitedCouponCode?: string;
 
   @IsOptional()
   @IsUUID()

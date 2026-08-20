@@ -140,6 +140,8 @@ export class AdminCourseCommerceService {
         provider: dto.provider,
         accessType,
         durationDays,
+        productId,
+        basePlanId,
       });
 
       await this.assertProductNotMappedToPackage(
@@ -288,6 +290,8 @@ export class AdminCourseCommerceService {
         provider: current.provider,
         accessType,
         durationDays,
+        productId,
+        basePlanId,
         excludeId: mappingId,
       });
 
@@ -2136,6 +2140,8 @@ export class AdminCourseCommerceService {
     provider: CoursePaymentProvider;
     accessType: CourseAccessType;
     durationDays: number | null;
+    productId: string;
+    basePlanId: string | null;
     excludeId?: string;
   }): Promise<void> {
     if (params.accessType !== CourseAccessType.TIME_LIMITED) return;
@@ -2158,11 +2164,31 @@ export class AdminCourseCommerceService {
         excludeId: params.excludeId,
       });
     }
-    if (await query.getExists()) {
+    const proposedIsCoupon = this.isCouponProviderMapping(
+      params.productId,
+      params.basePlanId,
+    );
+    const duplicates = await query.getMany();
+    if (
+      duplicates.some(
+        (item) =>
+          this.isCouponProviderMapping(item.productId, item.basePlanId) ===
+          proposedIsCoupon,
+      )
+    ) {
       throw new ConflictException(
-        'This course already has the same time-limited duration for this provider.',
+        `This course already has the same ${proposedIsCoupon ? 'discounted' : 'regular'} time-limited duration for this provider.`,
       );
     }
+  }
+
+  private isCouponProviderMapping(
+    productId: string,
+    basePlanId: string | null,
+  ): boolean {
+    return [productId, basePlanId ?? ''].some((value) =>
+      value.trim().toLowerCase().startsWith('coupon_'),
+    );
   }
 
   private async assertProviderProductFamilyMatches(params: {
