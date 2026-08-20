@@ -2134,10 +2134,14 @@ export class CourseCommerceService {
     return productId.trim().toLowerCase().startsWith('coupon_');
   }
 
+  private isCouponProviderBasePlanId(basePlanId: string): boolean {
+    return /^coupon[-_]/i.test(basePlanId.trim());
+  }
+
   private isCouponProviderProduct(providerProduct: CourseProviderProduct) {
     return (
       this.isCouponProviderProductId(providerProduct.productId) ||
-      this.isCouponProviderProductId(providerProduct.basePlanId ?? '')
+      this.isCouponProviderBasePlanId(providerProduct.basePlanId ?? '')
     );
   }
 
@@ -2235,7 +2239,8 @@ export class CourseCommerceService {
       ) {
         return (
           item.productId === selected.productId &&
-          selected.basePlanId === `coupon_${item.basePlanId ?? ''}`
+          (selected.basePlanId === `coupon-${item.basePlanId ?? ''}` ||
+            selected.basePlanId === `coupon_${item.basePlanId ?? ''}`)
         );
       }
 

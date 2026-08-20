@@ -2186,8 +2186,9 @@ export class AdminCourseCommerceService {
     productId: string,
     basePlanId: string | null,
   ): boolean {
-    return [productId, basePlanId ?? ''].some((value) =>
-      value.trim().toLowerCase().startsWith('coupon_'),
+    return (
+      productId.trim().toLowerCase().startsWith('coupon_') ||
+      /^coupon[-_]/i.test(basePlanId?.trim() ?? '')
     );
   }
 

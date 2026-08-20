@@ -445,8 +445,9 @@ export class CoursesService {
   }
 
   private isCouponProviderProduct(item: CourseProviderProduct): boolean {
-    return [item.productId, item.basePlanId ?? ''].some((value) =>
-      value.trim().toLowerCase().startsWith('coupon_'),
+    return (
+      item.productId.trim().toLowerCase().startsWith('coupon_') ||
+      /^coupon[-_]/i.test(item.basePlanId?.trim() ?? '')
     );
   }
 

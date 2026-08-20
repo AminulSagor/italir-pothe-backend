@@ -1419,12 +1419,12 @@ export class InfluencerHubService {
         'Regular provider base plan ID is required for this coupon flow.',
       );
     }
-    if (normalized.toLowerCase().startsWith('coupon_')) {
+    if (/^coupon[-_]/i.test(normalized)) {
       throw new BadRequestException(
-        'Regular provider base plan ID must not start with coupon_.',
+        'Regular provider base plan ID must not start with coupon-.',
       );
     }
-    return `coupon_${normalized}`;
+    return `coupon-${normalized}`;
   }
 
   private normalizeCouponDuration(
@@ -1505,7 +1505,7 @@ export class InfluencerHubService {
           )
       ) {
         throw new BadRequestException(
-          'Google Play time-limited coupons must use the same product ID and a coupon_-prefixed discounted base plan.',
+          'Google Play time-limited coupons must use the same product ID and a "coupon-" prefixed discounted base plan.',
         );
       }
       return;
