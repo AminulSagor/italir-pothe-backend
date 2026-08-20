@@ -165,11 +165,13 @@ export class GeminiLiveService {
       });
       const responseText = await response.text();
       if (!response.ok) {
+        const providerError = this.extractProviderError(responseText);
         this.logger.warn(
           JSON.stringify({
             event: 'gemini_request_failed',
             operation,
             status: response.status,
+            providerError,
           }),
         );
         throw new BadGatewayException(
@@ -201,5 +203,19 @@ export class GeminiLiveService {
 
   private readString(value: unknown): string | null {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  private extractProviderError(responseText: string): string | null {
+    try {
+      const body = this.asRecord(JSON.parse(responseText) as unknown);
+      const error = this.asRecord(body?.error);
+      const code = this.readString(error?.status);
+      const message = this.readString(error?.message);
+      const value = [code, message].filter(Boolean).join(': ');
+
+      return value ? value.slice(0, 500) : null;
+    } catch {
+      return null;
+    }
   }
 }
