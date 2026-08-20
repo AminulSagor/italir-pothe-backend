@@ -42,6 +42,7 @@ export class GeminiLiveService {
     ttlSeconds: number;
     systemInstruction: string;
     resumptionHandle?: string | null;
+    tools?: Record<string, unknown>[];
   }) {
     const now = Date.now();
     const sessionLifetimeSeconds = Math.min(
@@ -79,6 +80,7 @@ export class GeminiLiveService {
       systemInstruction: {
         parts: [{ text: options.systemInstruction }],
       },
+      ...(options.tools?.length ? { tools: options.tools } : {}),
     };
 
     const response = await this.requestJson(
