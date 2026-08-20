@@ -27,7 +27,14 @@ export class GeminiLiveService {
   get summaryModel(): string {
     return (
       this.configService.get<string>('GEMINI_SESSION_SUMMARY_MODEL')?.trim() ||
-      'gemini-2.5-flash'
+      'gemini-3.6-flash'
+    ).replace(/^models\//, '');
+  }
+
+  get levelTestModel(): string {
+    return (
+      this.configService.get<string>('GEMINI_LEVEL_TEST_MODEL')?.trim() ||
+      'gemini-3.6-flash'
     ).replace(/^models\//, '');
   }
 
@@ -128,6 +135,69 @@ export class GeminiLiveService {
       return this.asRecord(parsed) ?? { summary: text };
     } catch {
       return { summary: text };
+    }
+  }
+
+  async evaluateLevelTest(prompt: string): Promise<Record<string, unknown>> {
+    const response = await this.requestJson(
+      `${GEMINI_API_BASE}/models/${encodeURIComponent(this.levelTestModel)}:generateContent`,
+      {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              speakingLevel: { type: 'STRING' },
+              vocabularyLevel: { type: 'STRING' },
+              grammarLevel: { type: 'STRING' },
+              finalLevel: { type: 'STRING' },
+              summary: { type: 'STRING' },
+              strengths: {
+                type: 'ARRAY',
+                items: { type: 'STRING' },
+                maxItems: 4,
+              },
+              focusAreas: {
+                type: 'ARRAY',
+                items: { type: 'STRING' },
+                maxItems: 4,
+              },
+            },
+            required: [
+              'speakingLevel',
+              'vocabularyLevel',
+              'grammarLevel',
+              'finalLevel',
+              'summary',
+              'strengths',
+              'focusAreas',
+            ],
+          },
+        },
+      },
+      'level_test_evaluation',
+    );
+    const root = this.asRecord(response);
+    const candidates = Array.isArray(root?.candidates) ? root.candidates : [];
+    const candidate = this.asRecord(candidates[0]);
+    const content = this.asRecord(candidate?.content);
+    const parts = Array.isArray(content?.parts) ? content.parts : [];
+    const text = this.readString(this.asRecord(parts[0])?.text);
+    if (!text) {
+      throw new BadGatewayException(
+        'Gemini returned an empty level-test evaluation',
+      );
+    }
+    try {
+      const parsed = this.asRecord(JSON.parse(text) as unknown);
+      if (!parsed) throw new Error('Invalid JSON object');
+      return parsed;
+    } catch {
+      throw new BadGatewayException(
+        'Gemini returned an invalid level-test evaluation',
+      );
     }
   }
 
