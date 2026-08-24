@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  createHash,
   createHmac,
   createPublicKey,
   type JsonWebKey as NodeJsonWebKey,
@@ -30,6 +31,9 @@ export class SocialTokenVerifierService {
   private facebookJwksCache:
     | { expiresAt: number; keys: Array<Record<string, unknown>> }
     | undefined;
+  private appleJwksCache:
+    | { expiresAt: number; keys: Array<Record<string, unknown>> }
+    | undefined;
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -38,10 +42,113 @@ export class SocialTokenVerifierService {
     token: string,
     tokenType?: 'classic' | 'limited',
     nonce?: string,
+    displayName?: string,
   ): Promise<VerifiedSocialIdentity> {
-    return provider === SocialAuthProvider.GOOGLE
-      ? this.verifyGoogle(token)
-      : this.verifyFacebook(token, tokenType, nonce);
+    if (provider === SocialAuthProvider.GOOGLE) return this.verifyGoogle(token);
+    if (provider === SocialAuthProvider.FACEBOOK) {
+      return this.verifyFacebook(token, tokenType, nonce);
+    }
+    return this.verifyApple(token, nonce, displayName);
+  }
+
+  private async verifyApple(
+    token: string,
+    expectedNonce?: string,
+    displayName?: string,
+  ): Promise<VerifiedSocialIdentity> {
+    const clientId = this.requiredConfig('APPLE_CLIENT_ID');
+
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3 || !expectedNonce?.trim()) {
+        throw new UnauthorizedException('Invalid Apple identity token.');
+      }
+
+      const header = this.decodeJwtPart<{ alg?: string; kid?: string }>(
+        parts[0],
+      );
+      const payload = this.decodeJwtPart<{
+        iss?: string;
+        aud?: string | string[];
+        sub?: string;
+        exp?: number;
+        iat?: number;
+        nonce?: string;
+        email?: string;
+        email_verified?: boolean | string;
+      }>(parts[1]);
+
+      if (header.alg !== 'RS256' || !header.kid) {
+        throw new UnauthorizedException('Invalid Apple token algorithm.');
+      }
+
+      let jwks = await this.getAppleJwks();
+      let jwk = jwks.find((value) => value.kid === header.kid);
+      if (!jwk) {
+        this.appleJwksCache = undefined;
+        jwks = await this.getAppleJwks();
+        jwk = jwks.find((value) => value.kid === header.kid);
+      }
+      if (!jwk) {
+        throw new UnauthorizedException('Unknown Apple signing key.');
+      }
+
+      const publicKey = createPublicKey({
+        key: jwk as NodeJsonWebKey,
+        format: 'jwk',
+      });
+      const signatureValid = verifySignature(
+        'RSA-SHA256',
+        Buffer.from(`${parts[0]}.${parts[1]}`),
+        publicKey,
+        Buffer.from(parts[2], 'base64url'),
+      );
+      const audienceValid = Array.isArray(payload.aud)
+        ? payload.aud.includes(clientId)
+        : payload.aud === clientId;
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const expectedNonceHash = createHash('sha256')
+        .update(expectedNonce.trim())
+        .digest('hex');
+
+      if (
+        !signatureValid ||
+        payload.iss !== 'https://appleid.apple.com' ||
+        !audienceValid ||
+        !payload.sub ||
+        typeof payload.exp !== 'number' ||
+        payload.exp <= nowSeconds - 60 ||
+        (typeof payload.iat === 'number' && payload.iat > nowSeconds + 60) ||
+        payload.nonce !== expectedNonceHash
+      ) {
+        throw new UnauthorizedException('Invalid or expired Apple token.');
+      }
+
+      const emailVerified =
+        payload.email_verified === true || payload.email_verified === 'true';
+      const email = emailVerified
+        ? this.normalizeEmail(payload.email ?? null)
+        : null;
+      const normalizedName = displayName?.trim().slice(0, 120) || '';
+
+      return {
+        provider: SocialAuthProvider.APPLE,
+        providerUserId: payload.sub,
+        email,
+        emailVerified,
+        fullName: normalizedName || email?.split('@')[0] || 'Apple user',
+        avatarUrl: null,
+      };
+    } catch (error) {
+      if (
+        error instanceof UnauthorizedException ||
+        error instanceof ServiceUnavailableException
+      ) {
+        throw error;
+      }
+      this.logger.warn('Apple sign-in token verification failed.');
+      throw new UnauthorizedException('Invalid or expired Apple token.');
+    }
   }
 
   private async verifyGoogle(idToken: string): Promise<VerifiedSocialIdentity> {
@@ -282,6 +389,26 @@ export class SocialTokenVerifierService {
       );
     }
     this.facebookJwksCache = {
+      keys: response.keys,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+    };
+    return response.keys;
+  }
+
+  private async getAppleJwks(): Promise<Array<Record<string, unknown>>> {
+    if (this.appleJwksCache && this.appleJwksCache.expiresAt > Date.now()) {
+      return this.appleJwksCache.keys;
+    }
+
+    const response = await this.fetchJson<{
+      keys?: Array<Record<string, unknown>>;
+    }>('https://appleid.apple.com/auth/keys');
+    if (!Array.isArray(response.keys) || response.keys.length === 0) {
+      throw new ServiceUnavailableException(
+        'Apple signing keys are temporarily unavailable.',
+      );
+    }
+    this.appleJwksCache = {
       keys: response.keys,
       expiresAt: Date.now() + 60 * 60 * 1000,
     };

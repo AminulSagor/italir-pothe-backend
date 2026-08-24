@@ -69,6 +69,12 @@ export class AuthController {
     return this.authService.socialLogin('facebook', dto);
   }
 
+  @Post('social/apple')
+  @HttpCode(HttpStatus.OK)
+  socialApple(@Body() dto: SocialLoginDto) {
+    return this.authService.socialLogin('apple', dto);
+  }
+
   @Post('social/google/link')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -93,6 +99,20 @@ export class AuthController {
     return this.authService.linkSocialAccount(
       this.getAuthenticatedUserId(request),
       'facebook',
+      dto,
+    );
+  }
+
+  @Post('social/apple/link')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  linkApple(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: LinkSocialAccountDto,
+  ) {
+    return this.authService.linkSocialAccount(
+      this.getAuthenticatedUserId(request),
+      'apple',
       dto,
     );
   }

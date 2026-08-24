@@ -417,13 +417,17 @@ export class AuthService {
     return this.generateToken(user, loginDto.deviceId, loginDto.platform);
   }
 
-  async socialLogin(providerValue: 'google' | 'facebook', dto: SocialLoginDto) {
+  async socialLogin(
+    providerValue: 'google' | 'facebook' | 'apple',
+    dto: SocialLoginDto,
+  ) {
     const provider = this.toSocialProvider(providerValue);
     const identity = await this.socialTokenVerifierService.verify(
       provider,
       dto.token,
       dto.tokenType,
       dto.nonce,
+      dto.displayName,
     );
 
     let userId: string;
@@ -531,7 +535,7 @@ export class AuthService {
 
   async linkSocialAccount(
     userId: string,
-    providerValue: 'google' | 'facebook',
+    providerValue: 'google' | 'facebook' | 'apple',
     dto: LinkSocialAccountDto,
   ) {
     const provider = this.toSocialProvider(providerValue);
@@ -1006,10 +1010,12 @@ export class AuthService {
     };
   }
 
-  private toSocialProvider(value: 'google' | 'facebook'): SocialAuthProvider {
-    return value === 'google'
-      ? SocialAuthProvider.GOOGLE
-      : SocialAuthProvider.FACEBOOK;
+  private toSocialProvider(
+    value: 'google' | 'facebook' | 'apple',
+  ): SocialAuthProvider {
+    if (value === 'google') return SocialAuthProvider.GOOGLE;
+    if (value === 'facebook') return SocialAuthProvider.FACEBOOK;
+    return SocialAuthProvider.APPLE;
   }
 
   private isUniqueViolation(error: unknown): boolean {

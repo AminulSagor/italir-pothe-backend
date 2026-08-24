@@ -220,6 +220,31 @@ export class UserDeviceService {
     await this.userDeviceRepository.save(devices);
   }
 
+  async deactivateByVoipToken(voipToken: string): Promise<void> {
+    const normalizedToken = voipToken.trim();
+
+    if (!normalizedToken) {
+      return;
+    }
+
+    const devices = await this.userDeviceRepository.find({
+      where: {
+        voipToken: normalizedToken,
+      },
+    });
+
+    if (devices.length === 0) {
+      return;
+    }
+
+    for (const device of devices) {
+      device.voipToken = null;
+      this.deactivateWhenNoTokensRemain(device);
+    }
+
+    await this.userDeviceRepository.save(devices);
+  }
+
   private async deactivateOtherUsersForDevice(
     userId: string,
     deviceId: string,

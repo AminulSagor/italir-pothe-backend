@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, OnModuleDestroy } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+} from '@nestjs/common';
 
 import { UserBlocksService } from '../../user-blocks/user-blocks.service';
 import { InitiateCallDto } from '../dto/initiate-call.dto';
@@ -8,7 +13,9 @@ import { CallRealtimeService } from './call-realtime.service';
 import { CallService } from './call.service';
 import { UserDeviceService } from 'src/devices/services/user-device.service';
 import { FirebaseAdminService } from 'src/firebase/services/firebase-admin.service';
+import { DevicePlatform } from 'src/devices/enums/device.enums';
 import { CallStatus } from '../enums/call.enums';
+import { AppleVoipPushService } from './apple-voip-push.service';
 
 interface PendingIncomingAck {
   receiverId: string;
@@ -18,6 +25,7 @@ interface PendingIncomingAck {
 
 @Injectable()
 export class CallOrchestratorService implements OnModuleDestroy {
+  private readonly logger = new Logger(CallOrchestratorService.name);
   private readonly incomingAckTimeoutMs = 2000;
   private readonly ringingTimeoutMs = 60_000;
 
@@ -34,6 +42,7 @@ export class CallOrchestratorService implements OnModuleDestroy {
     private readonly callAgoraTokenService: CallAgoraTokenService,
     private readonly userDeviceService: UserDeviceService,
     private readonly firebaseAdminService: FirebaseAdminService,
+    private readonly appleVoipPushService: AppleVoipPushService,
   ) {}
 
   async initiate(callerId: string, dto: InitiateCallDto) {
@@ -94,45 +103,80 @@ export class CallOrchestratorService implements OnModuleDestroy {
         const latestCall = await this.callService.findCallById(call.id);
 
         if (latestCall?.status === CallStatus.RINGING) {
-          const devices =
-            await this.userDeviceService.findActiveFcmDevicesByUsers([
-              receiver.id,
-            ]);
-
-          const tokens = devices
+          const devices = await this.userDeviceService.getActiveDevicesByUserId(
+            receiver.id,
+          );
+          const voipTokens = devices
+            .filter(
+              (device) =>
+                device.platform === DevicePlatform.IOS &&
+                Boolean(device.voipToken?.trim()),
+            )
+            .map((device) => device.voipToken!.trim());
+          const fcmTokens = devices
+            .filter(
+              (device) =>
+                device.platform !== DevicePlatform.IOS || !device.voipToken,
+            )
             .map((device) => device.fcmToken)
             .filter(
               (token): token is string =>
                 typeof token === 'string' && token.trim().length > 0,
             );
 
-          console.log('[CallPush] preparing incoming call push', {
+          this.logger.log('Preparing incoming call push', {
             callId: call.id,
             receiverId: receiver.id,
-            tokensCount: tokens.length,
+            fcmTokensCount: fcmTokens.length,
+            voipTokensCount: voipTokens.length,
           });
 
-          if (tokens.length > 0) {
-            await this.firebaseAdminService.sendDataToTokens({
-              tokens,
-              data: {
-                type: 'incoming_call',
-                callId: call.id,
-                conversationId: call.directConversationId,
-                callType: call.callType,
-                callerId: caller.id,
-                callerName: caller.fullName,
-                callerAvatarUrl: caller.avatarUrl ?? '',
-              },
-            });
+          const pushData = {
+            callId: call.id,
+            conversationId: call.directConversationId,
+            callType: call.callType,
+            callerId: caller.id,
+            callerName: caller.fullName,
+            callerAvatarUrl: caller.avatarUrl ?? '',
+          };
 
-            console.log('[CallPush] incoming call push sent', {
+          const [, voipResults] = await Promise.all([
+            fcmTokens.length > 0
+              ? this.firebaseAdminService.sendDataToTokens({
+                  tokens: fcmTokens,
+                  data: {
+                    type: 'incoming_call',
+                    ...pushData,
+                  },
+                })
+              : Promise.resolve(),
+            this.appleVoipPushService.sendIncomingCall(voipTokens, pushData),
+          ]);
+
+          const invalidVoipTokens = voipResults.filter((result) =>
+            ['BadDeviceToken', 'DeviceTokenNotForTopic', 'Unregistered'].includes(
+              result.reason ?? '',
+            ),
+          );
+
+          await Promise.all(
+            invalidVoipTokens.map((result) =>
+              this.userDeviceService.deactivateByVoipToken(result.token),
+            ),
+          );
+
+          const failedVoipCount = voipResults.filter(
+            (result) => !result.success,
+          ).length;
+          if (failedVoipCount > 0) {
+            this.logger.warn('Some APNs VoIP pushes failed', {
               callId: call.id,
-              receiverId: receiver.id,
+              failedCount: failedVoipCount,
+              totalCount: voipResults.length,
             });
           }
         } else {
-          console.log('[CallPush] skipped because call is not ringing', {
+          this.logger.log('Incoming call push skipped because call is not ringing', {
             callId: call.id,
             status: latestCall?.status ?? null,
           });

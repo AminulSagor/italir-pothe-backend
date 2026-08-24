@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
@@ -9,6 +10,11 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+
+export enum QuizSessionStartMode {
+  RESUME = 'resume',
+  START_OVER = 'start_over',
+}
 
 export class QuizMatchingAnswerDto {
   @IsUUID()
@@ -48,6 +54,10 @@ export class CheckQuizAnswerDto {
 }
 
 export class StartQuizSessionDto {
+  @IsOptional()
+  @IsEnum(QuizSessionStartMode)
+  mode?: QuizSessionStartMode;
+
   @IsOptional()
   @IsDateString()
   clientActivityDate?: string;

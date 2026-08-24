@@ -14,6 +14,7 @@ import { User } from '../../users/entities/user.entity';
 export enum SocialAuthProvider {
   GOOGLE = 'google',
   FACEBOOK = 'facebook',
+  APPLE = 'apple',
 }
 
 @Entity('user_social_accounts')

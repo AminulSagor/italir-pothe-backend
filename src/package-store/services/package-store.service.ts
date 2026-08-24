@@ -1186,6 +1186,28 @@ export class PackageStoreService {
   // Quote
   // =========================================================
 
+  private isNativeAppStorePromotionalOffer(
+    provider: StorePaymentProvider,
+    providerProduct: StorePackageProviderProduct,
+    resolution: InfluencerCheckoutCouponResolution,
+  ): boolean {
+    if (!resolution.providerOfferId?.trim()) {
+      return false;
+    }
+
+    if (
+      provider !== StorePaymentProvider.APP_STORE ||
+      providerProduct.productType !== StoreProviderProductType.SUBSCRIPTION ||
+      resolution.discountedProviderProductId !== providerProduct.productId
+    ) {
+      throw new BadRequestException(
+        'App Store promotional offers require the same auto-renewable subscription product ID as the regular product.',
+      );
+    }
+
+    return true;
+  }
+
   async getQuote(
     userId: string,
     packageId: string,
@@ -1210,13 +1232,18 @@ export class PackageStoreService {
           productId: storePackage.id,
           provider: query.provider as unknown as InfluencerBillingProvider,
           regularProviderProductId: providerProduct.productId,
+          providerOfferId:
+            providerProduct.productType ===
+            StoreProviderProductType.SUBSCRIPTION
+              ? providerProduct.offerId
+              : null,
           basePriceEur: storePackage.commerce.priceEur,
         });
 
-      const discountedProviderProduct = this.requireActiveProviderProduct(
-        storePackage,
+      const nativeAppStoreOffer = this.isNativeAppStorePromotionalOffer(
         query.provider,
-        couponResolution.discountedProviderProductId,
+        providerProduct,
+        couponResolution,
       );
 
       quote = await this.buildStoreQuoteFromInfluencerResolution(
@@ -1224,7 +1251,19 @@ export class PackageStoreService {
         currency,
       );
 
-      storeProduct = this.mapProviderProduct(discountedProviderProduct);
+      if (nativeAppStoreOffer) {
+        storeProduct = {
+          ...this.mapProviderProduct(providerProduct),
+          offerId: couponResolution.providerOfferId,
+        };
+      } else {
+        const discountedProviderProduct = this.requireActiveProviderProduct(
+          storePackage,
+          query.provider,
+          couponResolution.discountedProviderProductId,
+        );
+        storeProduct = this.mapProviderProduct(discountedProviderProduct);
+      }
     } else {
       quote = await this.calculateStoreQuote(storePackage, currency);
     }
@@ -1330,7 +1369,10 @@ export class PackageStoreService {
     let providerProduct = regularProviderProduct;
     let checkoutProductId = dto.productId.trim();
     let checkoutBasePlanId = regularProviderProduct.basePlanId;
-    let checkoutOfferId = regularProviderProduct.offerId;
+    let checkoutOfferId =
+      dto.paymentProvider === StorePaymentProvider.APP_STORE
+        ? null
+        : regularProviderProduct.offerId;
     let couponResolution: InfluencerCheckoutCouponResolution | null = null;
     let quote: StoreQuote;
 
@@ -1342,19 +1384,35 @@ export class PackageStoreService {
           productId: storePackage.id,
           provider: dto.paymentProvider as unknown as InfluencerBillingProvider,
           regularProviderProductId: regularProviderProduct.productId,
+          providerOfferId:
+            regularProviderProduct.productType ===
+            StoreProviderProductType.SUBSCRIPTION
+              ? regularProviderProduct.offerId
+              : null,
           basePriceEur: storePackage.commerce.priceEur,
         });
 
-      checkoutProductId = couponResolution.discountedProviderProductId;
-
-      providerProduct = this.requireActiveProviderProduct(
-        storePackage,
+      const nativeAppStoreOffer = this.isNativeAppStorePromotionalOffer(
         dto.paymentProvider,
-        checkoutProductId,
+        regularProviderProduct,
+        couponResolution,
       );
 
-      checkoutBasePlanId = providerProduct.basePlanId;
-      checkoutOfferId = providerProduct.offerId;
+      if (nativeAppStoreOffer) {
+        checkoutProductId = regularProviderProduct.productId;
+        providerProduct = regularProviderProduct;
+        checkoutBasePlanId = null;
+        checkoutOfferId = couponResolution.providerOfferId;
+      } else {
+        checkoutProductId = couponResolution.discountedProviderProductId;
+        providerProduct = this.requireActiveProviderProduct(
+          storePackage,
+          dto.paymentProvider,
+          checkoutProductId,
+        );
+        checkoutBasePlanId = providerProduct.basePlanId;
+        checkoutOfferId = providerProduct.offerId;
+      }
 
       if (dto.productId.trim() !== checkoutProductId) {
         throw new BadRequestException(
@@ -1375,7 +1433,10 @@ export class PackageStoreService {
 
       checkoutProductId = providerProduct.productId;
       checkoutBasePlanId = providerProduct.basePlanId;
-      checkoutOfferId = providerProduct.offerId;
+      checkoutOfferId =
+        dto.paymentProvider === StorePaymentProvider.APP_STORE
+          ? null
+          : providerProduct.offerId;
 
       quote = await this.calculateStoreQuote(storePackage, selectedCurrency);
     }
@@ -1632,6 +1693,18 @@ export class PackageStoreService {
     const developmentVerification =
       this.isDevelopmentVerificationForProvider(provider);
 
+    const promotionalOffer =
+      provider === StorePaymentProvider.APP_STORE &&
+      currentOrder.providerSnapshot.productType ===
+        StoreProviderProductType.SUBSCRIPTION &&
+      currentOrder.providerSnapshot.offerId
+        ? this.appStoreBillingService.createPromotionalOfferSignature({
+            productId: currentOrder.providerSnapshot.productId,
+            offerId: currentOrder.providerSnapshot.offerId,
+            appAccountToken: currentOrder.id,
+          })
+        : null;
+
     const paymentMethod = {
       provider,
       enabled: true,
@@ -1642,6 +1715,7 @@ export class PackageStoreService {
       productType: currentOrder.providerSnapshot.productType,
       basePlanId: currentOrder.providerSnapshot.basePlanId,
       offerId: currentOrder.providerSnapshot.offerId,
+      promotionalOffer,
 
       developmentVerification,
       label,
@@ -1675,6 +1749,7 @@ export class PackageStoreService {
           productType: currentOrder.providerSnapshot.productType,
           basePlanId: currentOrder.providerSnapshot.basePlanId,
           offerId: currentOrder.providerSnapshot.offerId,
+          promotionalOffer,
 
           developmentVerification,
           unavailableReason: '',
@@ -2049,6 +2124,8 @@ export class PackageStoreService {
       expectedAppAccountToken: order.id,
 
       expectedType,
+
+      expectedOfferId: order.providerSnapshot.offerId,
     });
 
     const tokenHash = this.appStoreBillingService.hash(

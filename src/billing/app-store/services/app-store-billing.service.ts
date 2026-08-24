@@ -12,11 +12,12 @@ import {
   Environment,
   JWSRenewalInfoDecodedPayload,
   JWSTransactionDecodedPayload,
+  OfferType,
   SignedDataVerifier,
   Type,
 } from '@apple/app-store-server-library';
 
-import { createHash } from 'node:crypto';
+import { createHash, createSign, randomUUID } from 'node:crypto';
 
 import type {
   VerifiedAppStoreNotification,
@@ -119,6 +120,46 @@ export class AppStoreBillingService implements OnModuleInit {
     return createHash('sha256').update(value.trim()).digest('hex');
   }
 
+  createPromotionalOfferSignature(params: {
+    productId: string;
+    offerId: string;
+    appAccountToken: string;
+  }) {
+    const bundleId = this.required('APP_STORE_BUNDLE_ID');
+    const keyId = this.required('APP_STORE_KEY_ID');
+    const privateKey = this.required('APP_STORE_PRIVATE_KEY').replace(
+      /\\n/g,
+      '\n',
+    );
+    const productId = params.productId.trim();
+    const offerId = params.offerId.trim();
+    const appAccountToken = params.appAccountToken.trim().toLowerCase();
+
+    if (!productId || !offerId || !appAccountToken) {
+      throw new BadRequestException(
+        'App Store promotional offer signing data is incomplete.',
+      );
+    }
+
+    const nonce = randomUUID().toLowerCase();
+    const timestamp = Date.now();
+    const payload = [
+      bundleId,
+      keyId,
+      productId,
+      offerId,
+      appAccountToken,
+      nonce,
+      timestamp.toString(),
+    ].join('\u2063');
+    const signer = createSign('SHA256');
+    signer.update(payload, 'utf8');
+    signer.end();
+    const signature = signer.sign(privateKey).toString('base64');
+
+    return { offerId, keyId, nonce, timestamp, signature };
+  }
+
   async verifyTransaction(params: {
     signedTransactionInfo: string;
 
@@ -129,6 +170,8 @@ export class AppStoreBillingService implements OnModuleInit {
     expectedAppAccountToken: string;
 
     expectedType: Type;
+
+    expectedOfferId?: string | null;
   }): Promise<VerifiedAppStoreTransaction> {
     this.assertRealVerificationEnabled();
 
@@ -152,6 +195,8 @@ export class AppStoreBillingService implements OnModuleInit {
       expectedAppAccountToken: params.expectedAppAccountToken,
 
       expectedType: params.expectedType,
+
+      expectedOfferId: params.expectedOfferId,
     });
 
     const client = this.clientForEnvironment(submitted.environment);
@@ -183,6 +228,8 @@ export class AppStoreBillingService implements OnModuleInit {
       expectedAppAccountToken: params.expectedAppAccountToken,
 
       expectedType: params.expectedType,
+
+      expectedOfferId: params.expectedOfferId,
     });
 
     if (
@@ -449,6 +496,8 @@ export class AppStoreBillingService implements OnModuleInit {
     expectedAppAccountToken: string;
 
     expectedType: Type;
+
+    expectedOfferId?: string | null;
   }): void {
     const transaction = params.transaction;
 
@@ -479,6 +528,16 @@ export class AppStoreBillingService implements OnModuleInit {
     if (transaction.type !== params.expectedType) {
       throw new BadRequestException(
         `App Store product type must be ${params.expectedType}.`,
+      );
+    }
+
+    if (
+      params.expectedOfferId?.trim() &&
+      (transaction.offerIdentifier !== params.expectedOfferId.trim() ||
+        transaction.offerType !== OfferType.PROMOTIONAL_OFFER)
+    ) {
+      throw new BadRequestException(
+        'App Store promotional offer does not match the validated coupon.',
       );
     }
 

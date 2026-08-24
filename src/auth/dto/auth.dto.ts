@@ -110,6 +110,12 @@ export class SocialLoginDto {
   @IsString()
   @MaxLength(120)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   deviceId?: string;
 
   @IsOptional()

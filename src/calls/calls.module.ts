@@ -13,6 +13,7 @@ import { CallsController } from './controllers/calls.controller';
 import { Call } from './entities/call.entity';
 import { CallsGateway } from './gateways/calls.gateway';
 import { CallAgoraTokenService } from './services/call-agora-token.service';
+import { AppleVoipPushService } from './services/apple-voip-push.service';
 import { CallOrchestratorService } from './services/call-orchestrator.service';
 import { CallRealtimeService } from './services/call-realtime.service';
 import { CallService } from './services/call.service';
@@ -44,6 +45,7 @@ import { AuthModule } from 'src/auth/auth.module';
 
   providers: [
     CallsGateway,
+    AppleVoipPushService,
     CallService,
     CallOrchestratorService,
     CallAgoraTokenService,

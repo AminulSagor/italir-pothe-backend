@@ -219,26 +219,6 @@ export class ProgressService {
     }
 
     if (!lesson) {
-      const latestCourse = await this.courseProgressRepository.findOne({
-        where: {
-          userId,
-          completedLessons: MoreThan(0),
-        },
-        order: {
-          lastActivityAt: 'DESC',
-          updatedAt: 'DESC',
-        },
-      });
-
-      if (latestCourse?.courseId) {
-        lesson = await this.findFirstIncompletePublishedLesson(
-          userId,
-          latestCourse.courseId,
-        );
-      }
-    }
-
-    if (!lesson) {
       return null;
     }
 
@@ -358,34 +338,6 @@ export class ProgressService {
         courseStatus: CourseStatus.PUBLISHED,
       })
       .andWhere('chapter.isPublished = true')
-      .getOne();
-  }
-
-  private async findFirstIncompletePublishedLesson(
-    userId: string,
-    courseId: string,
-  ) {
-    return this.lessonRepository
-      .createQueryBuilder('lesson')
-      .innerJoinAndSelect('lesson.course', 'course')
-      .innerJoinAndSelect('lesson.chapter', 'chapter')
-      .leftJoin(
-        UserLessonProgress,
-        'userProgress',
-        'userProgress.lessonId = lesson.id AND userProgress.userId = :userId',
-        { userId },
-      )
-      .where('lesson.status = :lessonStatus', {
-        lessonStatus: LessonStatus.PUBLISHED,
-      })
-      .andWhere('course.status = :courseStatus', {
-        courseStatus: CourseStatus.PUBLISHED,
-      })
-      .andWhere('chapter.isPublished = true')
-      .andWhere('(userProgress.id IS NULL OR userProgress.isCompleted = false)')
-      .andWhere('lesson.courseId = :courseId', { courseId })
-      .orderBy('chapter.sortOrder', 'ASC')
-      .addOrderBy('lesson.sortOrder', 'ASC')
       .getOne();
   }
 

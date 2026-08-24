@@ -12,6 +12,7 @@ import { Not, Repository } from 'typeorm';
 import {
   CheckQuizAnswerDto,
   CompleteQuizSessionDto,
+  QuizSessionStartMode,
   StartQuizSessionDto,
 } from '../dto/quiz-session.dto';
 import { QuizAcceptedAnswer } from '../entities/quiz-accepted-answer.entity';
@@ -141,7 +142,7 @@ export class QuizSessionsService {
       throw new BadRequestException('This quiz has no active questions');
     }
 
-    const existingSession = await this.sessionRepository.findOne({
+    const existingSessions = await this.sessionRepository.find({
       where: {
         userId: user.id,
         quizId: quiz.id,
@@ -152,8 +153,9 @@ export class QuizSessionsService {
         updatedAt: 'DESC',
       },
     });
+    const existingSession = existingSessions[0];
 
-    if (existingSession) {
+    if (existingSession && dto.mode !== QuizSessionStartMode.START_OVER) {
       if (existingSession.totalQuestions !== questions.length) {
         existingSession.totalQuestions = questions.length;
         await this.sessionRepository.save(existingSession);
@@ -162,7 +164,7 @@ export class QuizSessionsService {
       return this.findSessionById(existingSession.id, user);
     }
 
-    const session = this.sessionRepository.create({
+    const sessionData = {
       userId: user.id,
       quizId: quiz.id,
       lessonId,
@@ -174,14 +176,33 @@ export class QuizSessionsService {
       startedAt:
         this.parseClientActivityDate(dto.clientActivityDate) ?? new Date(),
       submittedAt: null,
-    });
+    };
 
-    const savedSession = await this.sessionRepository.save(session);
+    const savedSession =
+      dto.mode === QuizSessionStartMode.START_OVER
+        ? await this.sessionRepository.manager.transaction(async (manager) => {
+            const sessionRepository = manager.getRepository(QuizSession);
+            await sessionRepository.update(
+              {
+                userId: user.id,
+                quizId: quiz.id,
+                lessonId,
+                status: QuizSessionStatus.IN_PROGRESS,
+              },
+              { status: QuizSessionStatus.CANCELLED },
+            );
+            return sessionRepository.save(
+              sessionRepository.create(sessionData),
+            );
+          })
+        : await this.sessionRepository.save(
+            this.sessionRepository.create(sessionData),
+          );
 
     return this.findSessionById(savedSession.id, user);
   }
 
-  async getLessonQuizAvailability(lessonId: string) {
+  async getLessonQuizAvailability(lessonId: string, user: QuizRequestUser) {
     const quiz = await this.quizRepository.findOne({
       where: {
         lessonId,
@@ -202,10 +223,39 @@ export class QuizSessionsService {
         title: null,
         description: null,
         totalQuestions: 0,
+        quizCompleted: false,
+        hasInProgressSession: false,
+        answeredQuestions: 0,
       };
     }
 
     const questions = await this.findPublishedQuizQuestions(quiz);
+    const [completedSession, inProgressSession] = await Promise.all([
+      this.sessionRepository.findOne({
+        where: {
+          userId: user.id,
+          quizId: quiz.id,
+          lessonId,
+          status: QuizSessionStatus.SUBMITTED,
+        },
+        select: { id: true },
+      }),
+      this.sessionRepository.findOne({
+        where: {
+          userId: user.id,
+          quizId: quiz.id,
+          lessonId,
+          status: QuizSessionStatus.IN_PROGRESS,
+        },
+        select: { id: true },
+        order: { updatedAt: 'DESC' },
+      }),
+    ]);
+    const answeredQuestions = inProgressSession
+      ? await this.answerRepository.count({
+          where: { sessionId: inProgressSession.id },
+        })
+      : 0;
 
     return {
       lessonId,
@@ -214,6 +264,9 @@ export class QuizSessionsService {
       title: quiz.title,
       description: quiz.description,
       totalQuestions: questions.length,
+      quizCompleted: completedSession != null,
+      hasInProgressSession: inProgressSession != null,
+      answeredQuestions,
       unlockRequirementEnabled: quiz.unlockRequirementEnabled,
 
       unlockVideoWatchPercent: quiz.unlockVideoWatchPercent,

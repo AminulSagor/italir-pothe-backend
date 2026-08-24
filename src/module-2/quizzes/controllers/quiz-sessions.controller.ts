@@ -23,8 +23,15 @@ export class QuizSessionsController {
   constructor(private readonly quizSessionsService: QuizSessionsService) {}
 
   @Get('lessons/:lessonId/availability')
-  async getLessonQuizAvailability(@Param('lessonId') lessonId: string) {
-    return this.quizSessionsService.getLessonQuizAvailability(lessonId);
+  @UseGuards(JwtAuthGuard)
+  async getLessonQuizAvailability(
+    @Param('lessonId') lessonId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.quizSessionsService.getLessonQuizAvailability(
+      lessonId,
+      this.getCurrentUser(request),
+    );
   }
 
   @Post('lessons/:lessonId/start')
