@@ -409,6 +409,38 @@ export class CallsGateway
     }
   }
 
+  @SubscribeMessage('call:heartbeat')
+  async heartbeatCall(
+    @ConnectedSocket()
+    client: Socket,
+
+    @MessageBody()
+    payload: CallIdPayload,
+  ) {
+    const userId = client.data.userId as string | undefined;
+
+    if (!userId) {
+      return this.unauthorizedResponse();
+    }
+
+    if (!this.isValidCallId(payload?.callId)) {
+      return this.invalidCallIdResponse();
+    }
+
+    try {
+      const data = await this.callOrchestratorService.heartbeat(
+        userId,
+        payload.callId,
+      );
+      return {
+        ok: true,
+        data,
+      };
+    } catch (error) {
+      return this.errorResponse(error);
+    }
+  }
+
   private extractToken(client: Socket): string | null {
     const rawToken =
       client.handshake.auth?.token ?? client.handshake.query?.token;

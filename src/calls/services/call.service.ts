@@ -33,6 +33,8 @@ export interface TimeoutRingingCallResult {
 @Injectable()
 export class CallService implements OnModuleInit {
   private static readonly RINGING_TIMEOUT_MS = 60_000;
+  private static readonly ACTIVE_HEARTBEAT_TIMEOUT_MS = 90_000;
+  private static readonly LEGACY_ACTIVE_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 
   constructor(
     @InjectRepository(Call)
@@ -56,6 +58,10 @@ export class CallService implements OnModuleInit {
     await this.dataSource.query(`
       ALTER TABLE "calls"
       ADD COLUMN IF NOT EXISTS "endedAt" timestamptz NULL
+    `);
+    await this.dataSource.query(`
+      ALTER TABLE "calls"
+      ADD COLUMN IF NOT EXISTS "lastHeartbeatAt" timestamptz NULL
     `);
   }
 
@@ -127,7 +133,10 @@ export class CallService implements OnModuleInit {
      * Prevent an abandoned ringing call from
      * blocking both users forever.
      */
-    await this.expireStaleRingingCalls();
+    await Promise.all([
+      this.expireStaleRingingCalls(),
+      this.expireStaleActiveCalls(),
+    ]);
 
     if (params.dto.clientCallId) {
       const existingCall = await this.callRepository.findOne({
@@ -334,9 +343,35 @@ export class CallService implements OnModuleInit {
   }
 
   async getParticipantCall(callId: string, userId: string): Promise<Call> {
+    await this.expireStaleActiveCalls(callId);
     const call = await this.findCallOrFail(callId);
     this.assertCallParticipant(call, userId);
     return call;
+  }
+
+  async heartbeatActiveCall(callId: string, userId: string): Promise<Call> {
+    const call = await this.findCallOrFail(callId);
+    this.assertCallParticipant(call, userId);
+
+    if (call.status !== CallStatus.ACTIVE) {
+      return call;
+    }
+
+    const heartbeatAt = new Date();
+    const result = await this.callRepository
+      .createQueryBuilder()
+      .update(Call)
+      .set({ lastHeartbeatAt: heartbeatAt })
+      .where('"id" = :callId', { callId })
+      .andWhere('"status" = :status', { status: CallStatus.ACTIVE })
+      .execute();
+
+    if ((result.affected ?? 0) > 0) {
+      call.lastHeartbeatAt = heartbeatAt;
+      return call;
+    }
+
+    return this.findCallOrFail(callId);
   }
 
   async deleteCall(callId: string): Promise<void> {
@@ -393,6 +428,42 @@ export class CallService implements OnModuleInit {
         staleBefore,
       })
       .execute();
+  }
+
+  async expireStaleActiveCalls(callId?: string): Promise<Call[]> {
+    const staleBefore = new Date(
+      Date.now() - CallService.ACTIVE_HEARTBEAT_TIMEOUT_MS,
+    );
+    const legacyStaleBefore = new Date(
+      Date.now() - CallService.LEGACY_ACTIVE_TIMEOUT_MS,
+    );
+
+    const query = this.callRepository
+      .createQueryBuilder()
+      .update(Call)
+      .set({
+        status: CallStatus.FAILED,
+        endedAt: () => 'CURRENT_TIMESTAMP',
+      })
+      .where('"status" = :status', { status: CallStatus.ACTIVE })
+      .andWhere(
+        `(
+          ("lastHeartbeatAt" IS NOT NULL AND "lastHeartbeatAt" < :staleBefore)
+          OR
+          (
+            "lastHeartbeatAt" IS NULL
+            AND COALESCE("answeredAt", "updatedAt") < :legacyStaleBefore
+          )
+        )`,
+        { staleBefore, legacyStaleBefore },
+      );
+
+    if (callId) {
+      query.andWhere('"id" = :callId', { callId });
+    }
+
+    const result = await query.returning('*').execute();
+    return (result.raw ?? []) as Call[];
   }
 
   private async assertUsersAreNotBusy(

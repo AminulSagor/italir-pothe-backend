@@ -79,7 +79,6 @@ export class AdminCoursesService {
 
   async createCourse(dto: CreateCourseDto) {
     this.validatePricing(dto.isFree ?? true, dto.price);
-    this.validateCouponCodes(dto.couponCode, dto.timeLimitedCouponCode);
 
     const slug = this.createSlug(dto.slug || dto.title);
     await this.ensureCourseSlugIsAvailable(slug);
@@ -260,12 +259,6 @@ export class AdminCoursesService {
       dto.price !== undefined ? dto.price : Number(course.price ?? 0);
 
     this.validatePricing(nextIsFree, nextPrice);
-    this.validateCouponCodes(
-      dto.couponCode !== undefined ? dto.couponCode : course.couponCode,
-      dto.timeLimitedCouponCode !== undefined
-        ? dto.timeLimitedCouponCode
-        : course.timeLimitedCouponCode,
-    );
 
     if (dto.title !== undefined) {
       course.title = dto.title;
@@ -1077,20 +1070,6 @@ export class AdminCoursesService {
 
     if (price === undefined || price === null || price <= 0) {
       throw new BadRequestException('Paid course must have a valid price.');
-    }
-  }
-
-  private validateCouponCodes(
-    lifetimeCouponCode?: string | null,
-    timeLimitedCouponCode?: string | null,
-  ): void {
-    const lifetime = lifetimeCouponCode?.trim().toUpperCase() || null;
-    const timeLimited = timeLimitedCouponCode?.trim().toUpperCase() || null;
-
-    if (lifetime && timeLimited && lifetime === timeLimited) {
-      throw new BadRequestException(
-        'Lifetime and time-limited access must use different coupon codes.',
-      );
     }
   }
 

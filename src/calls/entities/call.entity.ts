@@ -95,6 +95,9 @@ export class Call {
   @Column({ type: 'timestamptz', nullable: true })
   endedAt: Date | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  lastHeartbeatAt: Date | null;
+
   @CreateDateColumn({
     type: 'timestamptz',
   })

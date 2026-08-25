@@ -4,6 +4,7 @@ import {
   Logger,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 
 import { UserBlocksService } from '../../user-blocks/user-blocks.service';
 import { InitiateCallDto } from '../dto/initiate-call.dto';
@@ -477,6 +478,55 @@ export class CallOrchestratorService implements OnModuleDestroy {
     };
   }
 
+  async heartbeat(userId: string, callId: string) {
+    const call = await this.callService.heartbeatActiveCall(callId, userId);
+    return {
+      call: this.presentCall(call),
+    };
+  }
+
+  @Cron('*/30 * * * * *', {
+    name: 'expire-stale-active-calls',
+  })
+  async expireStaleActiveCalls(): Promise<void> {
+    const calls = await this.callService.expireStaleActiveCalls();
+    if (calls.length === 0) {
+      return;
+    }
+
+    this.logger.warn(`Expired ${calls.length} stale active call(s)`);
+    await Promise.all(
+      calls.map(async (call) => {
+        const payload = {
+          call: this.presentCall(call),
+          reason: 'heartbeat_timeout',
+        };
+        this.callRealtimeService.emitToUser(
+          call.callerId,
+          'call:ended',
+          payload,
+        );
+        this.callRealtimeService.emitToUser(
+          call.receiverId,
+          'call:ended',
+          payload,
+        );
+        await Promise.all([
+          this.sendCallTerminationPush({
+            userId: call.callerId,
+            callId: call.id,
+            type: 'call_ended',
+          }),
+          this.sendCallTerminationPush({
+            userId: call.receiverId,
+            callId: call.id,
+            type: 'call_ended',
+          }),
+        ]);
+      }),
+    );
+  }
+
   private waitForIncomingAcknowledgement({
     callId,
     receiverId,
@@ -549,6 +599,7 @@ export class CallOrchestratorService implements OnModuleDestroy {
 
       createdAt: call.createdAt,
       updatedAt: call.updatedAt,
+      lastHeartbeatAt: call.lastHeartbeatAt,
     };
   }
 
