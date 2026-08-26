@@ -13,6 +13,7 @@ import {
   InfluencerBillingProvider,
   InfluencerCouponAccessType,
   InfluencerCouponProductDomain,
+  AppStoreCouponOfferType,
 } from '../types/influencer-hub.type';
 import { InfluencerCoupon } from './influencer-coupon.entity';
 
@@ -61,6 +62,9 @@ export class InfluencerCouponProviderMapping {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   providerOfferId: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  appStoreOfferType: AppStoreCouponOfferType | null;
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;

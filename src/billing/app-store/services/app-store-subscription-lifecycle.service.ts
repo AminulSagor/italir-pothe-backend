@@ -153,6 +153,29 @@ export class AppStoreSubscriptionLifecycleService {
     });
   }
 
+  async restoreVerifiedSubscription(params: {
+    userId: string;
+    initialOrderId: string | null;
+    transaction: JWSTransactionDecodedPayload;
+    renewalInfo: JWSRenewalInfoDecodedPayload | null;
+    appleStatus: number | null;
+  }): Promise<AppStoreSubscriptionSyncResult> {
+    this.assertAutoRenewableTransaction(params.transaction);
+
+    return this.syncSubscription({
+      transaction: params.transaction,
+      renewalInfo: params.renewalInfo,
+      notificationType: NotificationTypeV2.DID_RENEW,
+      subtype: null,
+      appleStatus: params.appleStatus,
+      eventTime:
+        this.dateFromMillis(params.transaction.signedDate) ?? new Date(),
+      notificationEventId: null,
+      initialOrderId: params.initialOrderId,
+      expectedUserId: params.userId,
+    });
+  }
+
   private async syncSubscription(params: {
     transaction: JWSTransactionDecodedPayload;
 

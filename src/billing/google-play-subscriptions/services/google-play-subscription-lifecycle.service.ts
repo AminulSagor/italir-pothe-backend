@@ -490,9 +490,6 @@ export class GooglePlaySubscriptionLifecycleService {
       .where('subscription.userId = :userId', {
         userId,
       })
-      .andWhere('subscription.provider = :provider', {
-        provider: StorePaymentProvider.GOOGLE_PLAY,
-      })
       .andWhere('subscription.entitlementActive = :active', {
         active: true,
       })

@@ -48,6 +48,11 @@ export enum InfluencerCouponAccessType {
   TIME_LIMITED = 'time_limited',
 }
 
+export enum AppStoreCouponOfferType {
+  PROMOTIONAL_OFFER = 'promotional_offer',
+  OFFER_CODE = 'offer_code',
+}
+
 export enum InfluencerOrderDomain {
   COURSE = 'course',
   STORE_PACKAGE = 'store_package',
@@ -106,6 +111,7 @@ export interface InfluencerCheckoutCouponResolution {
   regularProviderBasePlanId: string | null;
   providerBasePlanId: string | null;
   providerOfferId: string | null;
+  appStoreOfferType: AppStoreCouponOfferType | null;
   basePriceEur: string;
   discountAmountEur: string;
   payableAmountEur: string;

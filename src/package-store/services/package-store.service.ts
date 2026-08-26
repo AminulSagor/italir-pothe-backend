@@ -27,6 +27,7 @@ import {
   CreateStoreProviderProductDto,
   UpdateStoreProviderProductDto,
   VerifyStoreAppStorePurchaseDto,
+  RestoreStoreAppStoreSubscriptionDto,
   VerifyStoreGooglePlayPurchaseDto,
   CreateStoreOrderDto,
   CreateStorePackageDto,
@@ -86,10 +87,11 @@ import {
 } from 'src/billing/types/provider-refund.type';
 import { GooglePlaySubscriptionLifecycleService } from 'src/billing/google-play-subscriptions/services/google-play-subscription-lifecycle.service';
 import { AppStoreBillingService } from 'src/billing/app-store/services/app-store-billing.service';
-import { Environment, Type } from '@apple/app-store-server-library';
+import { Environment, OfferType, Type } from '@apple/app-store-server-library';
 import { AppStoreSubscriptionLifecycleService } from 'src/billing/app-store/services/app-store-subscription-lifecycle.service';
 import { InfluencerHubService } from 'src/influencer-hub/services/influencer-hub.service';
 import {
+  AppStoreCouponOfferType,
   InfluencerBillingProvider,
   InfluencerCouponProductDomain,
   InfluencerOrderDomain,
@@ -1373,6 +1375,7 @@ export class PackageStoreService {
       dto.paymentProvider === StorePaymentProvider.APP_STORE
         ? null
         : regularProviderProduct.offerId;
+    let checkoutOfferType: AppStoreCouponOfferType | null = null;
     let couponResolution: InfluencerCheckoutCouponResolution | null = null;
     let quote: StoreQuote;
 
@@ -1403,6 +1406,7 @@ export class PackageStoreService {
         providerProduct = regularProviderProduct;
         checkoutBasePlanId = null;
         checkoutOfferId = couponResolution.providerOfferId;
+        checkoutOfferType = couponResolution.appStoreOfferType;
       } else {
         checkoutProductId = couponResolution.discountedProviderProductId;
         providerProduct = this.requireActiveProviderProduct(
@@ -1501,6 +1505,7 @@ export class PackageStoreService {
           productType: providerProduct.productType,
           basePlanId: checkoutBasePlanId,
           offerId: checkoutOfferId,
+          offerType: checkoutOfferType,
         }),
       );
 
@@ -1672,6 +1677,15 @@ export class PackageStoreService {
     return parsed;
   }
 
+  private isUuid(value: string | null | undefined): value is string {
+    return Boolean(
+      value &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value,
+      ),
+    );
+  }
+
   async getCheckout(userId: string, orderId: string) {
     const order = await this.getOwnedOrderGraph(userId, orderId);
 
@@ -1697,7 +1711,9 @@ export class PackageStoreService {
       provider === StorePaymentProvider.APP_STORE &&
       currentOrder.providerSnapshot.productType ===
         StoreProviderProductType.SUBSCRIPTION &&
-      currentOrder.providerSnapshot.offerId
+      currentOrder.providerSnapshot.offerId &&
+      currentOrder.providerSnapshot.offerType !==
+        AppStoreCouponOfferType.OFFER_CODE
         ? this.appStoreBillingService.createPromotionalOfferSignature({
             productId: currentOrder.providerSnapshot.productId,
             offerId: currentOrder.providerSnapshot.offerId,
@@ -1715,6 +1731,7 @@ export class PackageStoreService {
       productType: currentOrder.providerSnapshot.productType,
       basePlanId: currentOrder.providerSnapshot.basePlanId,
       offerId: currentOrder.providerSnapshot.offerId,
+      offerType: currentOrder.providerSnapshot.offerType,
       promotionalOffer,
 
       developmentVerification,
@@ -1749,6 +1766,7 @@ export class PackageStoreService {
           productType: currentOrder.providerSnapshot.productType,
           basePlanId: currentOrder.providerSnapshot.basePlanId,
           offerId: currentOrder.providerSnapshot.offerId,
+          offerType: currentOrder.providerSnapshot.offerType,
           promotionalOffer,
 
           developmentVerification,
@@ -2126,6 +2144,11 @@ export class PackageStoreService {
       expectedType,
 
       expectedOfferId: order.providerSnapshot.offerId,
+      expectedOfferType:
+        order.providerSnapshot.offerType ===
+        AppStoreCouponOfferType.PROMOTIONAL_OFFER
+          ? OfferType.PROMOTIONAL_OFFER
+          : null,
     });
 
     const tokenHash = this.appStoreBillingService.hash(
@@ -2140,7 +2163,7 @@ export class PackageStoreService {
       providerTransactionId: verified.transactionId,
 
       environment:
-        verified.environment === Environment.PRODUCTION
+        String(verified.environment) === String(Environment.PRODUCTION)
           ? StoreProviderEnvironment.PRODUCTION
           : StoreProviderEnvironment.SANDBOX,
 
@@ -2205,6 +2228,167 @@ export class PackageStoreService {
          */
         finishTransactionOnDevice: true,
       },
+    };
+  }
+
+  async restoreAppStoreSubscription(params: {
+    userId: string;
+    dto: RestoreStoreAppStoreSubscriptionDto;
+  }) {
+    if (!this.appStoreBillingService.isRealVerificationEnabled()) {
+      throw new ServiceUnavailableException(
+        'Secure App Store restore requires real App Store verification.',
+      );
+    }
+
+    const verified =
+      await this.appStoreBillingService.verifyRestoredSubscription({
+        signedTransactionInfo: params.dto.signedTransactionInfo,
+        expectedTransactionId: params.dto.transactionId,
+        expectedProductId: params.dto.productId,
+      });
+    const existing =
+      await this.appStoreSubscriptionLifecycleService.findByOriginalTransactionId(
+        verified.originalTransactionId,
+      );
+
+    let initialOrder: StoreOrder;
+    let completion: ReturnType<PackageStoreService['buildCompletionResponse']>;
+
+    if (existing) {
+      if (existing.userId !== params.userId) {
+        throw new ConflictException(
+          'This App Store subscription is linked to another account.',
+        );
+      }
+      initialOrder = await this.getOwnedOrderGraph(
+        params.userId,
+        existing.initialOrderId,
+      );
+      completion = this.buildCompletionResponse(
+        initialOrder,
+        await this.walletService.getBalances(params.userId),
+      );
+    } else {
+      const linkedOrderId =
+        params.dto.pendingOrderId?.trim() ||
+        (this.isUuid(verified.appAccountToken)
+          ? verified.appAccountToken
+          : null);
+
+      if (!linkedOrderId) {
+        throw new ConflictException(
+          'This subscription cannot be securely linked to the signed-in account.',
+        );
+      }
+
+      initialOrder = await this.getOwnedOrderGraph(
+        params.userId,
+        linkedOrderId,
+      );
+
+      if (
+        initialOrder.providerSnapshot.provider !==
+          StorePaymentProvider.APP_STORE ||
+        initialOrder.providerSnapshot.productType !==
+          StoreProviderProductType.SUBSCRIPTION ||
+        initialOrder.providerSnapshot.productId !== verified.productId
+      ) {
+        throw new BadRequestException(
+          'The restored subscription does not match this App Store order.',
+        );
+      }
+
+      const isOfferCodeRecovery =
+        params.dto.pendingOrderId?.trim() === initialOrder.id;
+      if (isOfferCodeRecovery) {
+        if (
+          initialOrder.providerSnapshot.offerType !==
+            AppStoreCouponOfferType.OFFER_CODE ||
+          !initialOrder.providerSnapshot.offerId ||
+          verified.decoded.offerType !== OfferType.OFFER_CODE ||
+          verified.decoded.offerIdentifier !==
+            initialOrder.providerSnapshot.offerId
+        ) {
+          throw new BadRequestException(
+            'The redeemed App Store offer code does not match the validated coupon.',
+          );
+        }
+
+        await this.markProviderTransactionVerified({
+          order: initialOrder,
+          tokenHash: this.appStoreBillingService.hash(
+            verified.originalTransactionId,
+          ),
+          providerTransactionId: verified.transactionId,
+          environment:
+            String(verified.environment) === String(Environment.PRODUCTION)
+              ? StoreProviderEnvironment.PRODUCTION
+              : StoreProviderEnvironment.SANDBOX,
+          payload: {
+            source: 'app_store_offer_code_restore',
+            ...verified.sanitizedPayload,
+          },
+        });
+        completion = await this.completeOrder({
+          userId: params.userId,
+          orderId: initialOrder.id,
+          provider: StorePaymentProvider.APP_STORE,
+          providerReference: verified.transactionId,
+        });
+      } else {
+        if (initialOrder.status !== StoreOrderStatus.COMPLETED) {
+          throw new ConflictException(
+            'The App Store order is not completed and cannot be restored.',
+          );
+        }
+        completion = this.buildCompletionResponse(
+          initialOrder,
+          await this.walletService.getBalances(params.userId),
+        );
+      }
+    }
+
+    const current =
+      await this.appStoreBillingService.getCurrentSubscriptionState({
+        originalTransactionId: verified.originalTransactionId,
+        environment: verified.environment,
+      });
+
+    if (
+      current.transaction.originalTransactionId !==
+        verified.originalTransactionId ||
+      current.transaction.productId !== initialOrder.providerSnapshot.productId
+    ) {
+      throw new ConflictException(
+        'The current App Store subscription state does not match the restored order.',
+      );
+    }
+
+    const subscriptionLifecycle =
+      await this.appStoreSubscriptionLifecycleService.restoreVerifiedSubscription(
+        {
+          userId: params.userId,
+          initialOrderId: existing ? null : initialOrder.id,
+          transaction: current.transaction,
+          renewalInfo: current.renewalInfo,
+          appleStatus: current.status,
+        },
+      );
+
+    this.logger.log(
+      `Restored App Store subscription for user ${params.userId} and product ${verified.productId}.`,
+    );
+
+    return {
+      ...completion,
+      restored: true,
+      appStoreProcessing: {
+        type: 'auto_renewable_subscription',
+        verified: true,
+        finishTransactionOnDevice: true,
+      },
+      subscriptionLifecycle,
     };
   }
 
@@ -4262,6 +4446,7 @@ export class PackageStoreService {
         productType: order.providerSnapshot.productType,
         basePlanId: order.providerSnapshot.basePlanId,
         offerId: order.providerSnapshot.offerId,
+        offerType: order.providerSnapshot.offerType,
       },
 
       verification: {

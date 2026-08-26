@@ -517,6 +517,12 @@ export class VerifyStoreAppStorePurchaseDto {
   signedTransactionInfo: string;
 }
 
+export class RestoreStoreAppStoreSubscriptionDto extends VerifyStoreAppStorePurchaseDto {
+  @IsOptional()
+  @IsUUID('4')
+  pendingOrderId?: string;
+}
+
 export class StoreOrderHistoryQueryDto {
   @IsOptional()
   @Type(() => Number)

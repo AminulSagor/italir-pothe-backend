@@ -64,6 +64,9 @@ export class StoreOrderProviderSnapshot {
   })
   offerId: string | null;
 
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  offerType: string | null;
+
   @CreateDateColumn({
     type: 'timestamptz',
   })

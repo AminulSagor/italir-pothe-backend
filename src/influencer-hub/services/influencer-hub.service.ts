@@ -26,6 +26,7 @@ import { InfluencerOrderAttribution } from '../entities/influencer-order-attribu
 import { InfluencerPartner } from '../entities/influencer-partner.entity';
 import { InfluencerSocialHandle } from '../entities/influencer-social-handle.entity';
 import {
+  AppStoreCouponOfferType,
   InfluencerAttributionStatus,
   InfluencerBillingProvider,
   InfluencerCheckoutCouponResolution,
@@ -987,6 +988,9 @@ export class InfluencerHubService {
                     )
                   : null,
               providerOfferId: nativeAppStoreOfferId,
+              appStoreOfferType: nativeAppStoreOfferId
+                ? AppStoreCouponOfferType.PROMOTIONAL_OFFER
+                : null,
               isActive: true,
             }),
           );
@@ -1078,6 +1082,9 @@ export class InfluencerHubService {
                   )
                 : null,
             providerOfferId: nativeAppStoreOfferId,
+            appStoreOfferType: nativeAppStoreOfferId
+              ? AppStoreCouponOfferType.PROMOTIONAL_OFFER
+              : null,
             isActive: true,
           }),
         );
@@ -1103,6 +1110,8 @@ export class InfluencerHubService {
           mapping.regularProviderProductId !== regularProviderProductId ||
           mapping.discountedProviderProductId !== regularProviderProductId ||
           mapping.providerOfferId !== providerOfferId ||
+          mapping.appStoreOfferType !==
+            AppStoreCouponOfferType.PROMOTIONAL_OFFER ||
           mapping.providerBasePlanId !== null;
 
         if (mappingNeedsRepair) {
@@ -1110,6 +1119,7 @@ export class InfluencerHubService {
           mapping.discountedProviderProductId = regularProviderProductId;
           mapping.providerBasePlanId = null;
           mapping.providerOfferId = providerOfferId;
+          mapping.appStoreOfferType = AppStoreCouponOfferType.PROMOTIONAL_OFFER;
           mapping.isActive = true;
           await this.mappingRepository.save(mapping);
         }
@@ -1150,6 +1160,7 @@ export class InfluencerHubService {
           mapping.discountedProviderProductId = regularProviderProductId;
           mapping.providerBasePlanId = expectedProviderBasePlanId;
           mapping.providerOfferId = null;
+          mapping.appStoreOfferType = null;
           mapping.isActive = true;
           await this.mappingRepository.save(mapping);
         }
@@ -1275,6 +1286,7 @@ export class InfluencerHubService {
       regularProviderBasePlanId: params.mapping.regularProviderBasePlanId,
       providerBasePlanId: params.mapping.providerBasePlanId,
       providerOfferId: params.mapping.providerOfferId,
+      appStoreOfferType: params.mapping.appStoreOfferType,
       basePriceEur: this.formatMoney(baseMinor),
       discountAmountEur: this.formatMoney(discountMinor),
       payableAmountEur: this.formatMoney(payableMinor),
@@ -1402,6 +1414,12 @@ export class InfluencerHubService {
       regularProviderBasePlanId: item.regularProviderBasePlanId?.trim() || null,
       providerBasePlanId: item.providerBasePlanId?.trim() || null,
       providerOfferId: item.providerOfferId?.trim() || null,
+      appStoreOfferType:
+        item.provider === InfluencerBillingProvider.APP_STORE &&
+        item.providerOfferId?.trim()
+          ? (item.appStoreOfferType ??
+            AppStoreCouponOfferType.PROMOTIONAL_OFFER)
+          : null,
       isActive: item.isActive ?? true,
     };
 
@@ -1545,6 +1563,7 @@ export class InfluencerHubService {
     regularProviderBasePlanId: string | null;
     providerBasePlanId: string | null;
     providerOfferId?: string | null;
+    appStoreOfferType?: AppStoreCouponOfferType | null;
   }) {
     if (params.productDomain === InfluencerCouponProductDomain.STORE_PACKAGE) {
       if (
@@ -1612,8 +1631,14 @@ export class InfluencerHubService {
     regularProviderBasePlanId: string | null;
     providerBasePlanId: string | null;
     providerOfferId?: string | null;
+    appStoreOfferType?: AppStoreCouponOfferType | null;
   }): boolean {
     if (!params.providerOfferId?.trim()) {
+      if (params.appStoreOfferType) {
+        throw new BadRequestException(
+          'An App Store offer type requires an Offer ID.',
+        );
+      }
       return false;
     }
 
@@ -1625,6 +1650,12 @@ export class InfluencerHubService {
     ) {
       throw new BadRequestException(
         'App Store promotional offers must use the same subscription product ID, an Offer ID, and no base plan IDs.',
+      );
+    }
+
+    if (!params.appStoreOfferType) {
+      throw new BadRequestException(
+        'App Store coupon mappings require an offer type.',
       );
     }
 
@@ -1685,6 +1716,7 @@ export class InfluencerHubService {
             regularProviderBasePlanId: mapping.regularProviderBasePlanId,
             providerBasePlanId: mapping.providerBasePlanId,
             providerOfferId: mapping.providerOfferId,
+            appStoreOfferType: mapping.appStoreOfferType,
             isActive: mapping.isActive,
           }),
         ),
@@ -1714,6 +1746,7 @@ export class InfluencerHubService {
         regularBasePlanId: resolution.regularProviderBasePlanId,
         basePlanId: resolution.providerBasePlanId,
         offerId: resolution.providerOfferId,
+        offerType: resolution.appStoreOfferType,
       },
       startsAt: resolution.startsAt,
       expiresAt: resolution.expiresAt,

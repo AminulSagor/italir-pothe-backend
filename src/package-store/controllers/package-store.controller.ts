@@ -23,6 +23,7 @@ import {
   StorePackageQuoteQueryDto,
   StoreProviderQueryDto,
   VerifyStoreAppStorePurchaseDto,
+  RestoreStoreAppStoreSubscriptionDto,
   VerifyStoreGooglePlayPurchaseDto,
 } from '../dto/package-store.dto';
 import { PackageStoreService } from '../services/package-store.service';
@@ -157,6 +158,17 @@ export class PackageStoreController {
     return this.packageStoreService.verifyAppStorePurchase({
       userId: this.getUserId(request),
       orderId,
+      dto,
+    });
+  }
+
+  @Post('app-store/restore')
+  async restoreAppStoreSubscription(
+    @Body() dto: RestoreStoreAppStoreSubscriptionDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.packageStoreService.restoreAppStoreSubscription({
+      userId: this.getUserId(request),
       dto,
     });
   }

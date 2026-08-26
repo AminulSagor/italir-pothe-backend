@@ -20,6 +20,7 @@ import {
 } from 'class-validator';
 
 import {
+  AppStoreCouponOfferType,
   InfluencerBillingProvider,
   InfluencerCouponAccessType,
   InfluencerCouponOwnerType,
@@ -130,6 +131,10 @@ export class InfluencerProviderMappingDto {
   @IsString()
   @MaxLength(255)
   providerOfferId?: string | null;
+
+  @IsOptional()
+  @IsEnum(AppStoreCouponOfferType)
+  appStoreOfferType?: AppStoreCouponOfferType | null;
 
   @IsOptional()
   @IsBoolean()

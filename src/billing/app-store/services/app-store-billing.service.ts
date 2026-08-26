@@ -167,11 +167,13 @@ export class AppStoreBillingService implements OnModuleInit {
 
     expectedProductId: string;
 
-    expectedAppAccountToken: string;
+    expectedAppAccountToken?: string | null;
 
     expectedType: Type;
 
     expectedOfferId?: string | null;
+
+    expectedOfferType?: OfferType | null;
   }): Promise<VerifiedAppStoreTransaction> {
     this.assertRealVerificationEnabled();
 
@@ -197,6 +199,8 @@ export class AppStoreBillingService implements OnModuleInit {
       expectedType: params.expectedType,
 
       expectedOfferId: params.expectedOfferId,
+
+      expectedOfferType: params.expectedOfferType,
     });
 
     const client = this.clientForEnvironment(submitted.environment);
@@ -230,6 +234,8 @@ export class AppStoreBillingService implements OnModuleInit {
       expectedType: params.expectedType,
 
       expectedOfferId: params.expectedOfferId,
+
+      expectedOfferType: params.expectedOfferType,
     });
 
     if (
@@ -298,6 +304,70 @@ export class AppStoreBillingService implements OnModuleInit {
 
       sanitizedPayload: this.sanitizeTransaction(authoritative),
     };
+  }
+
+  async verifyRestoredSubscription(params: {
+    signedTransactionInfo: string;
+    expectedTransactionId: string;
+    expectedProductId: string;
+    expectedOfferId?: string | null;
+    expectedOfferType?: OfferType | null;
+  }): Promise<VerifiedAppStoreTransaction> {
+    return this.verifyTransaction({
+      signedTransactionInfo: params.signedTransactionInfo,
+      expectedTransactionId: params.expectedTransactionId,
+      expectedProductId: params.expectedProductId,
+      expectedAppAccountToken: null,
+      expectedType: Type.AUTO_RENEWABLE_SUBSCRIPTION,
+      expectedOfferId: params.expectedOfferId,
+      expectedOfferType: params.expectedOfferType,
+    });
+  }
+
+  async getCurrentSubscriptionState(params: {
+    originalTransactionId: string;
+    environment: Environment | string;
+  }) {
+    this.assertRealVerificationEnabled();
+
+    const environment =
+      String(params.environment) === String(Environment.PRODUCTION)
+        ? Environment.PRODUCTION
+        : Environment.SANDBOX;
+    const client = this.clientForEnvironment(environment);
+    const verifier = this.verifierForEnvironment(environment);
+    const response = await client.getAllSubscriptionStatuses(
+      params.originalTransactionId.trim(),
+    );
+
+    for (const group of response.data ?? []) {
+      for (const item of group.lastTransactions ?? []) {
+        if (
+          item.originalTransactionId !== params.originalTransactionId.trim() ||
+          !item.signedTransactionInfo
+        ) {
+          continue;
+        }
+
+        const transaction = await verifier.verifyAndDecodeTransaction(
+          item.signedTransactionInfo,
+        );
+        this.assertBundleAndEnvironment(transaction, environment);
+        const renewalInfo = item.signedRenewalInfo
+          ? await verifier.verifyAndDecodeRenewalInfo(item.signedRenewalInfo)
+          : null;
+
+        return {
+          transaction,
+          renewalInfo,
+          status: typeof item.status === 'number' ? item.status : null,
+        };
+      }
+    }
+
+    throw new ServiceUnavailableException(
+      'App Store returned no current subscription status for this transaction.',
+    );
   }
 
   async verifyNotification(
@@ -493,11 +563,13 @@ export class AppStoreBillingService implements OnModuleInit {
 
     expectedProductId: string;
 
-    expectedAppAccountToken: string;
+    expectedAppAccountToken?: string | null;
 
     expectedType: Type;
 
     expectedOfferId?: string | null;
+
+    expectedOfferType?: OfferType | null;
   }): void {
     const transaction = params.transaction;
 
@@ -534,17 +606,19 @@ export class AppStoreBillingService implements OnModuleInit {
     if (
       params.expectedOfferId?.trim() &&
       (transaction.offerIdentifier !== params.expectedOfferId.trim() ||
-        transaction.offerType !== OfferType.PROMOTIONAL_OFFER)
+        transaction.offerType !==
+          (params.expectedOfferType ?? OfferType.PROMOTIONAL_OFFER))
     ) {
       throw new BadRequestException(
-        'App Store promotional offer does not match the validated coupon.',
+        'App Store offer does not match the validated coupon.',
       );
     }
 
     if (
-      !transaction.appAccountToken ||
-      transaction.appAccountToken.toLowerCase() !==
-        params.expectedAppAccountToken.trim().toLowerCase()
+      params.expectedAppAccountToken?.trim() &&
+      (!transaction.appAccountToken ||
+        transaction.appAccountToken.toLowerCase() !==
+          params.expectedAppAccountToken.trim().toLowerCase())
     ) {
       throw new BadRequestException(
         'App Store appAccountToken does not match the backend order ID.',
