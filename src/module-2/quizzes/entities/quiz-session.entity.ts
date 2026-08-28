@@ -22,6 +22,14 @@ export enum QuizSessionStatus {
 }
 
 @Entity('quiz_sessions')
+@Index(
+  'UQ_quiz_sessions_active_user_quiz_lesson',
+  ['userId', 'quizId', 'lessonId'],
+  {
+    unique: true,
+    where: `"status" = 'in_progress'`,
+  },
+)
 export class QuizSession {
   @PrimaryGeneratedColumn('uuid')
   id: string;

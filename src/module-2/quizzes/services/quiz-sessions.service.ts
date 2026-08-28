@@ -7,7 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { EntityManager, In, Not, Repository } from 'typeorm';
 
 import {
   CheckQuizAnswerDto,
@@ -60,6 +60,11 @@ interface QuizRequestUser {
 interface QuestionGradeResult {
   isCorrect: boolean;
   correctAnswer: QuizCorrectAnswerResponse;
+}
+
+interface InProgressSessionCandidate {
+  id: string;
+  answeredQuestions: number;
 }
 
 @Injectable()
@@ -142,28 +147,6 @@ export class QuizSessionsService {
       throw new BadRequestException('This quiz has no active questions');
     }
 
-    const existingSessions = await this.sessionRepository.find({
-      where: {
-        userId: user.id,
-        quizId: quiz.id,
-        lessonId,
-        status: QuizSessionStatus.IN_PROGRESS,
-      },
-      order: {
-        updatedAt: 'DESC',
-      },
-    });
-    const existingSession = existingSessions[0];
-
-    if (existingSession && dto.mode !== QuizSessionStartMode.START_OVER) {
-      if (existingSession.totalQuestions !== questions.length) {
-        existingSession.totalQuestions = questions.length;
-        await this.sessionRepository.save(existingSession);
-      }
-
-      return this.findSessionById(existingSession.id, user);
-    }
-
     const sessionData = {
       userId: user.id,
       quizId: quiz.id,
@@ -178,28 +161,58 @@ export class QuizSessionsService {
       submittedAt: null,
     };
 
-    const savedSession =
-      dto.mode === QuizSessionStartMode.START_OVER
-        ? await this.sessionRepository.manager.transaction(async (manager) => {
-            const sessionRepository = manager.getRepository(QuizSession);
+    const sessionId = await this.sessionRepository.manager.transaction(
+      async (manager) => {
+        await manager.query(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          [`lesson-quiz-session:${user.id}:${quiz.id}:${lessonId}`],
+        );
+
+        const sessionRepository = manager.getRepository(QuizSession);
+        const candidates = await this.findInProgressSessionCandidates(
+          manager,
+          user.id,
+          quiz.id,
+          lessonId,
+        );
+
+        if (dto.mode === QuizSessionStartMode.START_OVER) {
+          if (candidates.length > 0) {
             await sessionRepository.update(
-              {
-                userId: user.id,
-                quizId: quiz.id,
-                lessonId,
-                status: QuizSessionStatus.IN_PROGRESS,
-              },
+              { id: In(candidates.map((candidate) => candidate.id)) },
               { status: QuizSessionStatus.CANCELLED },
             );
-            return sessionRepository.save(
-              sessionRepository.create(sessionData),
-            );
-          })
-        : await this.sessionRepository.save(
-            this.sessionRepository.create(sessionData),
+          }
+
+          const restartedSession = await sessionRepository.save(
+            sessionRepository.create(sessionData),
+          );
+          return restartedSession.id;
+        }
+
+        if (candidates.length > 0) {
+          const canonicalSessionId = await this.consolidateInProgressSessions(
+            manager,
+            candidates,
+            user.id,
+            quiz.id,
+            lessonId,
           );
 
-    return this.findSessionById(savedSession.id, user);
+          await sessionRepository.update(canonicalSessionId, {
+            totalQuestions: questions.length,
+          });
+          return canonicalSessionId;
+        }
+
+        const newSession = await sessionRepository.save(
+          sessionRepository.create(sessionData),
+        );
+        return newSession.id;
+      },
+    );
+
+    return this.findSessionById(sessionId, user);
   }
 
   async getLessonQuizAvailability(lessonId: string, user: QuizRequestUser) {
@@ -230,7 +243,7 @@ export class QuizSessionsService {
     }
 
     const questions = await this.findPublishedQuizQuestions(quiz);
-    const [completedSession, inProgressSession] = await Promise.all([
+    const [completedSession, inProgressCandidates] = await Promise.all([
       this.sessionRepository.findOne({
         where: {
           userId: user.id,
@@ -240,22 +253,15 @@ export class QuizSessionsService {
         },
         select: { id: true },
       }),
-      this.sessionRepository.findOne({
-        where: {
-          userId: user.id,
-          quizId: quiz.id,
-          lessonId,
-          status: QuizSessionStatus.IN_PROGRESS,
-        },
-        select: { id: true },
-        order: { updatedAt: 'DESC' },
-      }),
+      this.findInProgressSessionCandidates(
+        this.sessionRepository.manager,
+        user.id,
+        quiz.id,
+        lessonId,
+      ),
     ]);
-    const answeredQuestions = inProgressSession
-      ? await this.answerRepository.count({
-          where: { sessionId: inProgressSession.id },
-        })
-      : 0;
+    const inProgressSession = inProgressCandidates[0];
+    const answeredQuestions = inProgressSession?.answeredQuestions ?? 0;
 
     return {
       lessonId,
@@ -292,68 +298,93 @@ export class QuizSessionsService {
     dto: CheckQuizAnswerDto,
     user: QuizRequestUser,
   ): Promise<CheckQuizAnswerResponse> {
-    const session = await this.getSessionForUser(sessionId, user.id);
+    return this.answerRepository.manager.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [`quiz-answer:${sessionId}:${dto.questionId}`],
+      );
 
-    if (session.status !== QuizSessionStatus.IN_PROGRESS) {
-      throw new BadRequestException('This quiz session is already submitted');
-    }
+      const session = await manager.getRepository(QuizSession).findOne({
+        where: { id: sessionId },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    const question = await this.findQuestionForSession(
-      dto.questionId,
-      session.quizId,
-    );
+      if (!session) {
+        throw new NotFoundException('Quiz session not found');
+      }
+      if (session.userId !== user.id) {
+        throw new UnauthorizedException(
+          'Quiz session does not belong to this user',
+        );
+      }
+      if (session.status !== QuizSessionStatus.IN_PROGRESS) {
+        throw new BadRequestException('This quiz session is already submitted');
+      }
 
-    const existingAnswer = await this.answerRepository.findOne({
-      where: {
+      const question = await manager.getRepository(QuizQuestion).findOne({
+        where: {
+          id: dto.questionId,
+          quizId: session.quizId,
+          status: QuizQuestionStatus.ACTIVE,
+        },
+        relations: ['options', 'pairs', 'sequenceItems', 'acceptedAnswers'],
+      });
+
+      if (!question) {
+        throw new NotFoundException('Quiz question not found');
+      }
+      this.sortQuestionRelations(question);
+
+      const gradeResult = this.gradeQuestion(question, dto);
+      const answerRepository = manager.getRepository(QuizAttemptAnswer);
+      const existingAnswer = await answerRepository.findOne({
+        where: { sessionId: session.id, questionId: question.id },
+      });
+
+      /* A retried request after a lost response is idempotent. */
+      const isCorrect = existingAnswer?.isCorrect ?? gradeResult.isCorrect;
+
+      if (!existingAnswer) {
+        const attemptAnswer = answerRepository.create({
+          sessionId: session.id,
+          questionId: question.id,
+          questionType: question.questionType,
+          isCorrect: gradeResult.isCorrect,
+          pointsEarned: gradeResult.isCorrect ? question.points : 0,
+          timeSpentSeconds: dto.timeSpentSeconds ?? null,
+          writtenAnswer: dto.writtenAnswer?.trim() || null,
+          selectedOptionId: dto.selectedOptionId ?? null,
+        });
+
+        const savedAnswer = await answerRepository.save(attemptAnswer);
+        const answerItems = this.buildAnswerItems(savedAnswer.id, question, dto);
+        if (answerItems.length > 0) {
+          await manager.getRepository(QuizAttemptAnswerItem).save(answerItems);
+        }
+
+        // Keep session recency aligned with confirmed answer activity.
+        session.updatedAt = new Date();
+        await manager.getRepository(QuizSession).save(session);
+      }
+
+      const fillBlankCorrectAnswer =
+        question.questionType === QuizQuestionFormat.FILL_IN_THE_BLANKS
+          ? ((question.options ?? []).find((option) => option.isCorrect)
+              ?.optionText ?? null)
+          : null;
+
+      return {
         sessionId: session.id,
         questionId: question.id,
-      },
+        isCorrect,
+        correctAnswer: gradeResult.correctAnswer,
+        meaning:
+          fillBlankCorrectAnswer ??
+          question.translationText ??
+          question.helperText,
+        explanation: question.helperText,
+      };
     });
-
-    if (existingAnswer) {
-      throw new BadRequestException('This question has already been answered');
-    }
-
-    const gradeResult = this.gradeQuestion(question, dto);
-
-    const attemptAnswer = this.answerRepository.create({
-      sessionId: session.id,
-      questionId: question.id,
-      questionType: question.questionType,
-      isCorrect: gradeResult.isCorrect,
-      pointsEarned: gradeResult.isCorrect ? question.points : 0,
-      timeSpentSeconds: dto.timeSpentSeconds ?? null,
-      writtenAnswer: dto.writtenAnswer?.trim() || null,
-      selectedOptionId: dto.selectedOptionId ?? null,
-    });
-
-    const savedAnswer = await this.answerRepository.save(attemptAnswer);
-    const answerItems = this.buildAnswerItems(savedAnswer.id, question, dto);
-
-    if (answerItems.length > 0) {
-      await this.answerItemRepository.save(answerItems);
-    }
-
-    const fillBlankCorrectAnswer =
-      question.questionType === QuizQuestionFormat.FILL_IN_THE_BLANKS
-        ? ((question.options ?? []).find((option) => option.isCorrect)
-            ?.optionText ?? null)
-        : null;
-
-    return {
-      sessionId: session.id,
-      questionId: question.id,
-      isCorrect: gradeResult.isCorrect,
-      correctAnswer: gradeResult.correctAnswer,
-
-      // For fill-gap questions, show the actual correct option.
-      meaning:
-        fillBlankCorrectAnswer ??
-        question.translationText ??
-        question.helperText,
-
-      explanation: question.helperText,
-    };
   }
 
   async completeSession(
@@ -1048,6 +1079,91 @@ export class QuizSessionsService {
     });
 
     return questions.map((question) => this.sortQuestionRelations(question));
+  }
+
+  private async findInProgressSessionCandidates(
+    manager: EntityManager,
+    userId: string,
+    quizId: string,
+    lessonId: string,
+  ): Promise<InProgressSessionCandidate[]> {
+    const rows = await manager
+      .getRepository(QuizSession)
+      .createQueryBuilder('session')
+      .leftJoin('session.answers', 'answer')
+      .select('session.id', 'id')
+      .addSelect(
+        'COUNT(DISTINCT answer."questionId")',
+        'answeredQuestions',
+      )
+      .where('session."userId" = :userId', { userId })
+      .andWhere('session."quizId" = :quizId', { quizId })
+      .andWhere('session."lessonId" = :lessonId', { lessonId })
+      .andWhere('session.status = :status', {
+        status: QuizSessionStatus.IN_PROGRESS,
+      })
+      .groupBy('session.id')
+      .orderBy('COUNT(DISTINCT answer."questionId")', 'DESC')
+      .addOrderBy('session."updatedAt"', 'DESC')
+      .addOrderBy('session."createdAt"', 'DESC')
+      .addOrderBy('session.id', 'ASC')
+      .getRawMany<{ id: string; answeredQuestions: string | number }>();
+
+    return rows.map((row) => ({
+      id: row.id,
+      answeredQuestions: Number(row.answeredQuestions) || 0,
+    }));
+  }
+
+  private async consolidateInProgressSessions(
+    manager: EntityManager,
+    candidates: InProgressSessionCandidate[],
+    userId: string,
+    quizId: string,
+    lessonId: string,
+  ): Promise<string> {
+    const canonicalSessionId = candidates[0].id;
+    const duplicateSessionIds = candidates
+      .slice(1)
+      .map((candidate) => candidate.id);
+
+    if (duplicateSessionIds.length === 0) {
+      return canonicalSessionId;
+    }
+
+    for (const duplicateSessionId of duplicateSessionIds) {
+      /*
+       * Preserve every confirmed answer that is not already represented in
+       * the canonical session. Conflicting historical rows remain attached to
+       * the cancelled session so this repair never deletes user data.
+       */
+      await manager.query(
+        `
+          UPDATE "quiz_attempt_answers" AS source
+          SET "sessionId" = $1,
+              "updatedAt" = NOW()
+          WHERE source."sessionId" = $2
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "quiz_attempt_answers" AS target
+              WHERE target."sessionId" = $1
+                AND target."questionId" = source."questionId"
+            )
+        `,
+        [canonicalSessionId, duplicateSessionId],
+      );
+    }
+
+    await manager.getRepository(QuizSession).update(
+      { id: In(duplicateSessionIds) },
+      { status: QuizSessionStatus.CANCELLED },
+    );
+
+    this.logger.warn(
+      `Repaired ${duplicateSessionIds.length} duplicate in-progress quiz session(s) for user=${userId}, quiz=${quizId}, lesson=${lessonId}`,
+    );
+
+    return canonicalSessionId;
   }
 
   private async findQuestionForSession(
