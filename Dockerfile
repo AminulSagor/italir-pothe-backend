@@ -2,12 +2,14 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-# Install Python + Puppeteer/Chrome requirements
+# Install Python, video transcoding binaries, and Puppeteer/Chrome requirements.
+# Debian's ffmpeg package provides both /usr/bin/ffmpeg and /usr/bin/ffprobe.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     python3 \
     python3-venv \
     ca-certificates \
+    ffmpeg \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 

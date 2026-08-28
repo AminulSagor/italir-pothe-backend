@@ -157,11 +157,13 @@ export class VideoTranscodeWorkerService
     );
   }
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     if (!this.enabled) {
       this.logger.warn('Video transcoding is disabled.');
       return;
     }
+
+    await this.validateTranscodingBinaries();
 
     void this.runLoop();
   }
@@ -733,6 +735,41 @@ export class VideoTranscodeWorkerService
         reject(new Error(`${command} exited with code ${exitCode}: ${stderr}`));
       });
     });
+  }
+
+  private async validateTranscodingBinaries(): Promise<void> {
+    await this.validateBinary('ffmpeg', 'FFMPEG_PATH', this.ffmpegPath);
+    await this.validateBinary('ffprobe', 'FFPROBE_PATH', this.ffprobePath);
+  }
+
+  private async validateBinary(
+    binaryName: string,
+    environmentName: string,
+    binaryPath: string,
+  ): Promise<void> {
+    try {
+      const result = await this.runProcess(binaryPath, ['-version']);
+      const versionLine = (result.stdout || result.stderr)
+        .split(/\r?\n/, 1)[0]
+        ?.trim();
+
+      this.logger.log(
+        `${binaryName} available at "${binaryPath}"${
+          versionLine ? ` (${versionLine})` : ''
+        }.`,
+      );
+    } catch (error) {
+      const message = this.getErrorMessage(error);
+
+      this.logger.error(
+        `${binaryName} is unavailable at "${binaryPath}". Install it or set ${environmentName} to an executable path. ${message}`,
+      );
+
+      throw new Error(
+        `Video worker cannot start because ${binaryName} is unavailable.`,
+        { cause: error },
+      );
+    }
   }
 
   private appendLimited(current: string, addition: string): string {

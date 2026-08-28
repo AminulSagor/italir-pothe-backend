@@ -493,7 +493,7 @@ export class FilesService {
   async getVideoPlaybackAccess(fileId: string) {
     const file = await this.findActiveFileById(fileId);
 
-    const mediaAsset = await this.mediaAssetRepository.findOne({
+    let mediaAsset = await this.mediaAssetRepository.findOne({
       where: {
         fileId: file.id,
         mediaType: MediaType.VIDEO,
@@ -503,6 +503,10 @@ export class FilesService {
 
     if (!mediaAsset) {
       throw new NotFoundException('Video media asset was not found.');
+    }
+
+    if (mediaAsset.transcodeStatus === VideoTranscodeStatus.FAILED) {
+      mediaAsset = await this.requeueFailedVideoTranscode(mediaAsset);
     }
 
     if (
@@ -553,6 +557,71 @@ export class FilesService {
 
       cloudFrontAccess,
     };
+  }
+
+  /**
+   * A failed playback check is also the retry signal used by the current app.
+   * Reset the exhausted job atomically so concurrent taps cannot create
+   * duplicate work. The worker remains responsible for all transcoding.
+   */
+  private async requeueFailedVideoTranscode(
+    mediaAsset: MediaAsset,
+  ): Promise<MediaAsset> {
+    return this.dataSource.transaction(async (manager) => {
+      const mediaAssetRepository = manager.getRepository(MediaAsset);
+      const videoJobRepository = manager.getRepository(VideoTranscodeJob);
+
+      const lockedAsset = await mediaAssetRepository
+        .createQueryBuilder('mediaAsset')
+        .setLock('pessimistic_write')
+        .where('mediaAsset.id = :mediaAssetId', {
+          mediaAssetId: mediaAsset.id,
+        })
+        .getOne();
+
+      if (!lockedAsset) {
+        throw new NotFoundException('Video media asset was not found.');
+      }
+
+      if (lockedAsset.transcodeStatus !== VideoTranscodeStatus.FAILED) {
+        return lockedAsset;
+      }
+
+      const updateResult = await videoJobRepository.update(
+        {
+          mediaAssetId: lockedAsset.id,
+          status: VideoTranscodeJobStatus.FAILED,
+        },
+        {
+          status: VideoTranscodeJobStatus.PENDING,
+          attempts: 0,
+          availableAt: new Date(),
+          lockedAt: null,
+          lockedBy: null,
+          lastError: null,
+          completedAt: null,
+        },
+      );
+
+      if (updateResult.affected !== 1) {
+        this.logger.warn(
+          `Failed video asset ${lockedAsset.id} has no terminal transcode job to requeue.`,
+        );
+        return lockedAsset;
+      }
+
+      lockedAsset.transcodeStatus = VideoTranscodeStatus.PENDING;
+      lockedAsset.transcodeError = null;
+      lockedAsset.transcodedAt = null;
+
+      const requeuedAsset = await mediaAssetRepository.save(lockedAsset);
+
+      this.logger.log(
+        `Requeued failed video transcode for media asset ${lockedAsset.id}.`,
+      );
+
+      return requeuedAsset;
+    });
   }
 
   async createSignedReadUrl(fileId: string) {
