@@ -64,17 +64,24 @@ import { ResumeStudioModule } from './resume-studio/resume-studio.module';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get<string>('DB_HOST'),
-        port: Number(configService.get<string>('DB_PORT') ?? 5432),
-        username: configService.get<string>('DB_USER'),
-        password: configService.get<string>('DB_PASSWORD'),
-        database: configService.get<string>('DB_NAME'),
-        autoLoadEntities: true,
-        synchronize: configService.get<string>('TYPEORM_SYNC') === 'true',
-        migrationsRun: false,
-      }),
+      useFactory: (configService: ConfigService) => {
+        // Schema changes are migration-owned in production. Synchronization
+        // must never attempt to create constraints before data repair runs.
+        const isProduction = configService.get<string>('NODE_ENV') === 'production';
+        return {
+          type: 'postgres' as const,
+          host: configService.get<string>('DB_HOST'),
+          port: Number(configService.get<string>('DB_PORT') ?? 5432),
+          username: configService.get<string>('DB_USER'),
+          password: configService.get<string>('DB_PASSWORD'),
+          database: configService.get<string>('DB_NAME'),
+          autoLoadEntities: true,
+          synchronize:
+            !isProduction && configService.get<string>('TYPEORM_SYNC') === 'true',
+          migrations: [__dirname + '/database/migrations/*.js'],
+          migrationsRun: isProduction,
+        };
+      },
     }),
     ContactModule,
     UsersModule,
