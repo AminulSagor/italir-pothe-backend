@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThan, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
@@ -37,6 +37,22 @@ export class ProgressService {
     private readonly streakService: StreakService,
     private readonly leaderboardXpService: LeaderboardXpService,
   ) {}
+
+  async recordLessonOpened(params: {
+    user: ProgressUser;
+    courseId: string;
+    lessonId: string;
+  }) {
+    const progress = await this.getOrCreateLessonProgress(
+      params.user.id,
+      params.courseId,
+      params.lessonId,
+    );
+
+    progress.updatedAt = new Date();
+
+    return this.lessonProgressRepository.save(progress);
+  }
 
   async recordVideoProgress(params: {
     user: ProgressUser;
@@ -195,18 +211,7 @@ export class ProgressService {
 
   async getCurrentChapter(userId: string) {
     const activeProgress = await this.lessonProgressRepository.findOne({
-      where: [
-        {
-          userId,
-          isCompleted: false,
-          videoWatchPercent: MoreThan(0),
-        },
-        {
-          userId,
-          isCompleted: false,
-          isTheoryRead: true,
-        },
-      ],
+      where: { userId },
       order: {
         updatedAt: 'DESC',
       },

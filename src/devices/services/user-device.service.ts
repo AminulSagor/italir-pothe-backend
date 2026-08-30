@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Injectable,
-  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -28,8 +27,6 @@ interface StartAuthSessionResult {
 
 @Injectable()
 export class UserDeviceService {
-  private readonly logger = new Logger(UserDeviceService.name);
-
   constructor(
     @InjectRepository(UserDevice)
     private readonly userDeviceRepository: Repository<UserDevice>,
@@ -93,9 +90,7 @@ export class UserDeviceService {
         deactivatedAt: null,
       });
 
-      const savedDevice = await this.userDeviceRepository.save(device);
-      this.logPushRegistration(savedDevice, true);
-      return savedDevice;
+      return this.userDeviceRepository.save(device);
     }
 
     device.platform = dto.platform;
@@ -122,22 +117,7 @@ export class UserDeviceService {
     device.lastActiveAt = new Date();
     device.deactivatedAt = null;
 
-    const savedDevice = await this.userDeviceRepository.save(device);
-    this.logPushRegistration(savedDevice, false);
-    return savedDevice;
-  }
-
-  private logPushRegistration(device: UserDevice, created: boolean): void {
-    this.logger.log('Device push registration stored', {
-      userId: device.userId,
-      deviceIdSuffix: device.deviceId.slice(-8),
-      created,
-      platform: device.platform,
-      hasFcmToken: Boolean(device.fcmToken?.trim()),
-      hasVoipToken: Boolean(device.voipToken?.trim()),
-      voipTokenLength: device.voipToken?.trim().length ?? 0,
-      isActive: device.isActive,
-    });
+    return this.userDeviceRepository.save(device);
   }
 
   async deactivateDevice(

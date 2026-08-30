@@ -132,9 +132,6 @@ export class CallsGateway
         socketId: client.id,
       });
 
-      this.logger.log(
-        `Call socket connected user=${user.id} socket=${client.id}`,
-      );
     } catch (error) {
       this.logger.warn(
         `Call socket authentication failed: ${
@@ -160,13 +157,7 @@ export class CallsGateway
     /*
      * Keep your existing call realtime cleanup.
      */
-    const userId = this.callRealtimeService.unregister(client.id);
-
-    if (userId) {
-      this.logger.log(
-        `Call socket disconnected user=${userId} socket=${client.id}`,
-      );
-    }
+    this.callRealtimeService.unregister(client.id);
   }
 
   @SubscribeMessage('call:initiate')
@@ -218,10 +209,6 @@ export class CallsGateway
 
       await this.callOrchestratorService.acknowledgeIncoming(userId, callId);
 
-      this.logger.log(
-        `Incoming call acknowledged call=${callId} receiver=${userId}`,
-      );
-
       return {
         ok: true,
         data: {
@@ -258,8 +245,6 @@ export class CallsGateway
         payload.callId,
       );
 
-      this.logger.log(`Call answered call=${payload.callId} user=${userId}`);
-
       return {
         ok: true,
         data,
@@ -292,8 +277,6 @@ export class CallsGateway
         userId,
         payload.callId,
       );
-
-      this.logger.log(`Call rejected call=${payload.callId} user=${userId}`);
 
       return {
         ok: true,
@@ -328,8 +311,6 @@ export class CallsGateway
         payload.callId,
       );
 
-      this.logger.log(`Call cancelled call=${payload.callId} user=${userId}`);
-
       return {
         ok: true,
         data,
@@ -363,8 +344,6 @@ export class CallsGateway
         payload.callId,
       );
 
-      this.logger.log(`Call timed out call=${payload.callId} user=${userId}`);
-
       return {
         ok: true,
         data,
@@ -397,8 +376,6 @@ export class CallsGateway
         userId,
         payload.callId,
       );
-
-      this.logger.log(`Call ended call=${payload.callId} user=${userId}`);
 
       return {
         ok: true,

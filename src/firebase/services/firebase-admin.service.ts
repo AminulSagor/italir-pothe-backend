@@ -203,7 +203,9 @@ export class FirebaseAdminService {
       },
       apns: {
         headers: {
-          'apns-priority': '10',
+          'apns-push-type': 'background',
+          'apns-priority': '5',
+          'apns-expiration': '0',
         },
         payload: {
           aps: {

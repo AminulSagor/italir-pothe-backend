@@ -15,6 +15,7 @@ import {
   MarkLessonCompletedDto,
   MarkTheoryReadDto,
   RecordAudioTrackListenedDto,
+  RecordLessonOpenedDto,
   RecordLessonVideoProgressDto,
 } from '../dto/progress.dto';
 import { ProgressService } from '../services/progress.service';
@@ -23,6 +24,18 @@ import { ProgressService } from '../services/progress.service';
 @UseGuards(JwtAuthGuard)
 export class ProgressController {
   constructor(private readonly progressService: ProgressService) {}
+
+  @Post('lessons/opened')
+  async recordLessonOpened(
+    @Body() dto: RecordLessonOpenedDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.progressService.recordLessonOpened({
+      user: this.getCurrentUser(request),
+      courseId: dto.courseId,
+      lessonId: dto.lessonId,
+    });
+  }
 
   @Post('lessons/video-progress')
   async recordVideoProgress(
@@ -78,7 +91,6 @@ export class ProgressController {
       clientActivityDate: dto.clientActivityDate,
     });
   }
-
 
   @Get('current-chapter')
   async getCurrentChapter(@Req() request: AuthenticatedRequest) {

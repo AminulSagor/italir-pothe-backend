@@ -90,14 +90,6 @@ export class CallOrchestratorService implements OnModuleDestroy {
         },
       );
 
-      this.logger.log('Incoming call socket dispatch completed', {
-        callId: call.id,
-        callerId: caller.id,
-        receiverId: receiver.id,
-        socketDelivered,
-        ackTimeoutMs: this.incomingAckTimeoutMs,
-      });
-
       if (!socketDelivered) {
         /*
          * Resolve immediately because there is no connected
@@ -144,32 +136,12 @@ export class CallOrchestratorService implements OnModuleDestroy {
   }): Promise<void> {
     try {
       const foregroundAcknowledged = await params.ackPromise;
-      this.logger.log('Incoming call acknowledgement window completed', {
-        callId: params.call.id,
-        receiverId: params.receiverId,
-        foregroundAcknowledged,
-      });
-
       if (foregroundAcknowledged) {
-        this.logger.log(
-          'Incoming call push skipped because a receiver acknowledged the socket event',
-          {
-            callId: params.call.id,
-            receiverId: params.receiverId,
-          },
-        );
         return;
       }
 
       const latestCall = await this.callService.findCallById(params.call.id);
       if (latestCall?.status !== CallStatus.RINGING) {
-        this.logger.log(
-          'Incoming call push skipped because call is not ringing',
-          {
-            callId: params.call.id,
-            status: latestCall?.status ?? null,
-          },
-        );
         return;
       }
 
@@ -194,24 +166,10 @@ export class CallOrchestratorService implements OnModuleDestroy {
             typeof token === 'string' && token.trim().length > 0,
         );
 
-      this.logger.log('Preparing incoming call push', {
-        callId: params.call.id,
-        receiverId: params.receiverId,
-        activeDeviceCount: devices.length,
-        fcmTokensCount: fcmTokens.length,
-        voipTokensCount: voipTokens.length,
-        devices: devices.map((device) => ({
-          deviceIdSuffix: device.deviceId.slice(-8),
-          platform: device.platform,
-          appState: device.appState,
-          hasFcmToken: Boolean(device.fcmToken?.trim()),
-          hasVoipToken: Boolean(device.voipToken?.trim()),
-          voipTokenLength: device.voipToken?.trim().length ?? 0,
-          updatedAt: device.updatedAt,
-        })),
-      });
-
-      if (voipTokens.length === 0) {
+      if (
+        voipTokens.length === 0 &&
+        devices.some((device) => device.platform === DevicePlatform.IOS)
+      ) {
         this.logger.warn('No active iOS VoIP token found for incoming call', {
           callId: params.call.id,
           receiverId: params.receiverId,
@@ -257,15 +215,6 @@ export class CallOrchestratorService implements OnModuleDestroy {
         (result) => !result.success,
       ).length;
 
-      this.logger.log('Incoming call push dispatch completed', {
-        callId: params.call.id,
-        receiverId: params.receiverId,
-        voipResults: voipResults.map((result) => ({
-          success: result.success,
-          status: result.status,
-          reason: result.reason,
-        })),
-      });
       if (failedVoipCount > 0) {
         this.logger.warn('Some APNs VoIP pushes failed', {
           callId: params.call.id,
@@ -448,10 +397,11 @@ export class CallOrchestratorService implements OnModuleDestroy {
         await this.notifyMissedCall(result.call);
       }
     } catch (error) {
-      console.error('[CallTimeout] Unable to expire ringing call', {
-        callId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.error(
+        `Unable to expire ringing call ${callId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 

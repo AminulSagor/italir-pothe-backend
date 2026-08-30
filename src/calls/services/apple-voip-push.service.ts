@@ -111,7 +111,6 @@ export class AppleVoipPushService {
 
     const topic = `${configuration.bundleId}.voip`;
     const primaryResults = await this.sendBatch({
-      callId: call.callId,
       endpoint: primaryEndpoint,
       tokens: uniqueTokens,
       payload,
@@ -131,7 +130,6 @@ export class AppleVoipPushService {
     );
 
     const fallbackResults = await this.sendBatch({
-      callId: call.callId,
       endpoint: fallbackEndpoint,
       tokens: environmentMismatchTokens,
       payload,
@@ -148,7 +146,6 @@ export class AppleVoipPushService {
   }
 
   private async sendBatch(params: {
-    callId: string;
     endpoint: string;
     tokens: string[];
     payload: string;
@@ -175,22 +172,6 @@ export class AppleVoipPushService {
           }),
         ),
       );
-
-      this.logger.log('APNs VoIP push batch completed', {
-        callId: params.callId,
-        environment: params.endpoint.includes('sandbox')
-          ? 'sandbox'
-          : 'production',
-        successCount: results.filter((result) => result.success).length,
-        failureReasons: results
-          .filter((result) => !result.success)
-          .map((result) => result.reason ?? `HTTP_${result.status}`),
-        results: results.map((result) => ({
-          success: result.success,
-          status: result.status,
-          reason: result.reason,
-        })),
-      });
       return results;
     } finally {
       client.close();

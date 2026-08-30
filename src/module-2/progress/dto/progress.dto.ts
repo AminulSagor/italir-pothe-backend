@@ -29,6 +29,14 @@ export class RecordLessonVideoProgressDto {
   clientActivityDate?: string;
 }
 
+export class RecordLessonOpenedDto {
+  @IsUUID()
+  courseId: string;
+
+  @IsUUID()
+  lessonId: string;
+}
+
 export class MarkTheoryReadDto {
   @IsUUID()
   courseId: string;
