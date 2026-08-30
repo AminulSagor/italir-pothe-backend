@@ -90,6 +90,14 @@ export class CallOrchestratorService implements OnModuleDestroy {
         },
       );
 
+      this.logger.log('Incoming call socket dispatch completed', {
+        callId: call.id,
+        callerId: caller.id,
+        receiverId: receiver.id,
+        socketDelivered,
+        ackTimeoutMs: this.incomingAckTimeoutMs,
+      });
+
       if (!socketDelivered) {
         /*
          * Resolve immediately because there is no connected
@@ -135,7 +143,21 @@ export class CallOrchestratorService implements OnModuleDestroy {
     receiverId: string;
   }): Promise<void> {
     try {
-      if (await params.ackPromise) {
+      const foregroundAcknowledged = await params.ackPromise;
+      this.logger.log('Incoming call acknowledgement window completed', {
+        callId: params.call.id,
+        receiverId: params.receiverId,
+        foregroundAcknowledged,
+      });
+
+      if (foregroundAcknowledged) {
+        this.logger.log(
+          'Incoming call push skipped because a receiver acknowledged the socket event',
+          {
+            callId: params.call.id,
+            receiverId: params.receiverId,
+          },
+        );
         return;
       }
 
@@ -175,9 +197,27 @@ export class CallOrchestratorService implements OnModuleDestroy {
       this.logger.log('Preparing incoming call push', {
         callId: params.call.id,
         receiverId: params.receiverId,
+        activeDeviceCount: devices.length,
         fcmTokensCount: fcmTokens.length,
         voipTokensCount: voipTokens.length,
+        devices: devices.map((device) => ({
+          deviceIdSuffix: device.deviceId.slice(-8),
+          platform: device.platform,
+          appState: device.appState,
+          hasFcmToken: Boolean(device.fcmToken?.trim()),
+          hasVoipToken: Boolean(device.voipToken?.trim()),
+          voipTokenLength: device.voipToken?.trim().length ?? 0,
+          updatedAt: device.updatedAt,
+        })),
       });
+
+      if (voipTokens.length === 0) {
+        this.logger.warn('No active iOS VoIP token found for incoming call', {
+          callId: params.call.id,
+          receiverId: params.receiverId,
+          activeDeviceCount: devices.length,
+        });
+      }
 
       const pushData = {
         callId: params.call.id,
@@ -216,6 +256,16 @@ export class CallOrchestratorService implements OnModuleDestroy {
       const failedVoipCount = voipResults.filter(
         (result) => !result.success,
       ).length;
+
+      this.logger.log('Incoming call push dispatch completed', {
+        callId: params.call.id,
+        receiverId: params.receiverId,
+        voipResults: voipResults.map((result) => ({
+          success: result.success,
+          status: result.status,
+          reason: result.reason,
+        })),
+      });
       if (failedVoipCount > 0) {
         this.logger.warn('Some APNs VoIP pushes failed', {
           callId: params.call.id,

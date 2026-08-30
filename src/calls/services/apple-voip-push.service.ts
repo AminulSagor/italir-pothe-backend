@@ -70,14 +70,12 @@ export class AppleVoipPushService {
       }));
     }
 
-    const endpoint = configuration.useSandbox
+    const primaryEndpoint = configuration.useSandbox
       ? 'https://api.sandbox.push.apple.com'
       : 'https://api.push.apple.com';
-    const client = connect(endpoint);
-
-    client.on('error', (error) => {
-      this.logger.error(`APNs HTTP/2 session failed: ${error.message}`);
-    });
+    const fallbackEndpoint = configuration.useSandbox
+      ? 'https://api.push.apple.com'
+      : 'https://api.sandbox.push.apple.com';
 
     const payload = JSON.stringify({
       aps: {
@@ -111,18 +109,89 @@ export class AppleVoipPushService {
       },
     });
 
+    const topic = `${configuration.bundleId}.voip`;
+    const primaryResults = await this.sendBatch({
+      callId: call.callId,
+      endpoint: primaryEndpoint,
+      tokens: uniqueTokens,
+      payload,
+      authorization,
+      topic,
+    });
+    const environmentMismatchTokens = primaryResults
+      .filter((result) => result.reason === 'BadDeviceToken')
+      .map((result) => result.token);
+
+    if (environmentMismatchTokens.length === 0) {
+      return primaryResults;
+    }
+
+    this.logger.warn(
+      `Retrying ${environmentMismatchTokens.length} VoIP push(es) against the opposite APNs environment`,
+    );
+
+    const fallbackResults = await this.sendBatch({
+      callId: call.callId,
+      endpoint: fallbackEndpoint,
+      tokens: environmentMismatchTokens,
+      payload,
+      authorization,
+      topic,
+    });
+    const fallbackByToken = new Map(
+      fallbackResults.map((result) => [result.token, result]),
+    );
+
+    return primaryResults.map(
+      (result) => fallbackByToken.get(result.token) ?? result,
+    );
+  }
+
+  private async sendBatch(params: {
+    callId: string;
+    endpoint: string;
+    tokens: string[];
+    payload: string;
+    authorization: string;
+    topic: string;
+  }): Promise<AppleVoipPushResult[]> {
+    const client = connect(params.endpoint);
+
+    client.on('error', (error: Error) => {
+      this.logger.error(
+        `APNs HTTP/2 session failed endpoint=${params.endpoint}: ${error.message}`,
+      );
+    });
+
     try {
-      return await Promise.all(
-        uniqueTokens.map((token) =>
+      const results = await Promise.all(
+        params.tokens.map((token) =>
           this.sendRequest({
             client,
             token,
-            payload,
-            authorization,
-            topic: `${configuration.bundleId}.voip`,
+            payload: params.payload,
+            authorization: params.authorization,
+            topic: params.topic,
           }),
         ),
       );
+
+      this.logger.log('APNs VoIP push batch completed', {
+        callId: params.callId,
+        environment: params.endpoint.includes('sandbox')
+          ? 'sandbox'
+          : 'production',
+        successCount: results.filter((result) => result.success).length,
+        failureReasons: results
+          .filter((result) => !result.success)
+          .map((result) => result.reason ?? `HTTP_${result.status}`),
+        results: results.map((result) => ({
+          success: result.success,
+          status: result.status,
+          reason: result.reason,
+        })),
+      });
+      return results;
     } finally {
       client.close();
     }
@@ -175,7 +244,7 @@ export class AppleVoipPushService {
       request.on('data', (chunk: string) => {
         responseBody += chunk;
       });
-      request.on('error', (error) => {
+      request.on('error', (error: Error) => {
         finish({
           token: params.token,
           success: false,
@@ -188,8 +257,14 @@ export class AppleVoipPushService {
 
         if (responseBody) {
           try {
-            const parsed = JSON.parse(responseBody) as { reason?: string };
-            reason = parsed.reason ?? null;
+            const parsed: unknown = JSON.parse(responseBody);
+            reason =
+              typeof parsed === 'object' &&
+              parsed !== null &&
+              'reason' in parsed &&
+              typeof parsed.reason === 'string'
+                ? parsed.reason
+                : null;
           } catch {
             reason = 'APNS_INVALID_RESPONSE';
           }
