@@ -32,9 +32,9 @@ export class AppleVoipPushService {
     tokens: string[],
     call: IncomingCallPush,
   ): Promise<AppleVoipPushResult[]> {
-    const uniqueTokens = [...new Set(tokens.map((token) => token.trim()))].filter(
-      Boolean,
-    );
+    const uniqueTokens = [
+      ...new Set(tokens.map((token) => token.trim())),
+    ].filter(Boolean);
 
     if (uniqueTokens.length === 0) {
       return [];
@@ -104,7 +104,8 @@ export class AppleVoipPushService {
         supportsVideo: call.callType === CallType.VIDEO,
         maximumCallGroups: 1,
         maximumCallsPerCallGroup: 1,
-        audioSessionMode: 'default',
+        audioSessionMode:
+          call.callType === CallType.VIDEO ? 'videoChat' : 'voiceChat',
         audioSessionActive: true,
         ringtonePath: 'system_ringtone_default',
       },

@@ -69,7 +69,7 @@ export class CallOrchestratorService implements OnModuleDestroy {
     this.scheduleRingingTimeout(call);
 
     let socketDelivered = false;
-    let foregroundAcknowledged = false;
+    const foregroundAcknowledged = false;
 
     if (created) {
       /*
@@ -98,111 +98,137 @@ export class CallOrchestratorService implements OnModuleDestroy {
         this.resolveIncomingAcknowledgement(call.id, false);
       }
 
-      foregroundAcknowledged = await ackPromise;
-
-      if (!foregroundAcknowledged) {
-        const latestCall = await this.callService.findCallById(call.id);
-
-        if (latestCall?.status === CallStatus.RINGING) {
-          const devices = await this.userDeviceService.getActiveDevicesByUserId(
-            receiver.id,
-          );
-          const voipTokens = devices
-            .filter(
-              (device) =>
-                device.platform === DevicePlatform.IOS &&
-                Boolean(device.voipToken?.trim()),
-            )
-            .map((device) => device.voipToken!.trim());
-          const fcmTokens = devices
-            .filter(
-              (device) =>
-                device.platform !== DevicePlatform.IOS || !device.voipToken,
-            )
-            .map((device) => device.fcmToken)
-            .filter(
-              (token): token is string =>
-                typeof token === 'string' && token.trim().length > 0,
-            );
-
-          this.logger.log('Preparing incoming call push', {
-            callId: call.id,
-            receiverId: receiver.id,
-            fcmTokensCount: fcmTokens.length,
-            voipTokensCount: voipTokens.length,
-          });
-
-          const pushData = {
-            callId: call.id,
-            conversationId: call.directConversationId,
-            callType: call.callType,
-            callerId: caller.id,
-            callerName: caller.fullName,
-            callerAvatarUrl: caller.avatarUrl ?? '',
-          };
-
-          const [, voipResults] = await Promise.all([
-            fcmTokens.length > 0
-              ? this.firebaseAdminService.sendDataToTokens({
-                  tokens: fcmTokens,
-                  data: {
-                    type: 'incoming_call',
-                    ...pushData,
-                  },
-                })
-              : Promise.resolve(),
-            this.appleVoipPushService.sendIncomingCall(voipTokens, pushData),
-          ]);
-
-          const invalidVoipTokens = voipResults.filter((result) =>
-            ['BadDeviceToken', 'DeviceTokenNotForTopic', 'Unregistered'].includes(
-              result.reason ?? '',
-            ),
-          );
-
-          await Promise.all(
-            invalidVoipTokens.map((result) =>
-              this.userDeviceService.deactivateByVoipToken(result.token),
-            ),
-          );
-
-          const failedVoipCount = voipResults.filter(
-            (result) => !result.success,
-          ).length;
-          if (failedVoipCount > 0) {
-            this.logger.warn('Some APNs VoIP pushes failed', {
-              callId: call.id,
-              failedCount: failedVoipCount,
-              totalCount: voipResults.length,
-            });
-          }
-        } else {
-          this.logger.log('Incoming call push skipped because call is not ringing', {
-            callId: call.id,
-            status: latestCall?.status ?? null,
-          });
-        }
-      }
+      // Return the call ID to the caller immediately. The ACK/push fallback
+      // continues independently so a first-frame hangup can cancel the call
+      // instead of waiting several seconds for APNs.
+      void this.dispatchIncomingPushAfterAcknowledgement({
+        ackPromise,
+        call,
+        callerId: caller.id,
+        callerName: caller.fullName,
+        callerAvatarUrl: caller.avatarUrl ?? '',
+        receiverId: receiver.id,
+      });
     }
 
-    // The receiver can answer or reject while initiate() is waiting for the
-    // foreground ACK. Return the authoritative status instead of the stale
-    // ringing entity so the caller can close immediately on a fast rejection.
-    const latestCall = (await this.callService.findCallById(call.id)) ?? call;
-
     const media = this.callAgoraTokenService.buildPublisherToken({
-      channelName: latestCall.agoraChannelName,
-      uid: latestCall.callerAgoraUid,
+      channelName: call.agoraChannelName,
+      uid: call.callerAgoraUid,
     });
 
     return {
-      call: this.presentCall(latestCall),
+      call: this.presentCall(call),
       receiver: this.presentUser(receiver),
       media,
       created,
       socketDelivered,
       foregroundAcknowledged,
     };
+  }
+
+  private async dispatchIncomingPushAfterAcknowledgement(params: {
+    ackPromise: Promise<boolean>;
+    call: Call;
+    callerId: string;
+    callerName: string;
+    callerAvatarUrl: string;
+    receiverId: string;
+  }): Promise<void> {
+    try {
+      if (await params.ackPromise) {
+        return;
+      }
+
+      const latestCall = await this.callService.findCallById(params.call.id);
+      if (latestCall?.status !== CallStatus.RINGING) {
+        this.logger.log(
+          'Incoming call push skipped because call is not ringing',
+          {
+            callId: params.call.id,
+            status: latestCall?.status ?? null,
+          },
+        );
+        return;
+      }
+
+      const devices = await this.userDeviceService.getActiveDevicesByUserId(
+        params.receiverId,
+      );
+      const voipTokens = devices
+        .filter(
+          (device) =>
+            device.platform === DevicePlatform.IOS &&
+            Boolean(device.voipToken?.trim()),
+        )
+        .map((device) => device.voipToken!.trim());
+      const fcmTokens = devices
+        .filter(
+          (device) =>
+            device.platform !== DevicePlatform.IOS || !device.voipToken,
+        )
+        .map((device) => device.fcmToken)
+        .filter(
+          (token): token is string =>
+            typeof token === 'string' && token.trim().length > 0,
+        );
+
+      this.logger.log('Preparing incoming call push', {
+        callId: params.call.id,
+        receiverId: params.receiverId,
+        fcmTokensCount: fcmTokens.length,
+        voipTokensCount: voipTokens.length,
+      });
+
+      const pushData = {
+        callId: params.call.id,
+        conversationId: params.call.directConversationId,
+        callType: params.call.callType,
+        callerId: params.callerId,
+        callerName: params.callerName,
+        callerAvatarUrl: params.callerAvatarUrl,
+      };
+
+      const [, voipResults] = await Promise.all([
+        fcmTokens.length > 0
+          ? this.firebaseAdminService.sendDataToTokens({
+              tokens: fcmTokens,
+              data: {
+                type: 'incoming_call',
+                ...pushData,
+              },
+            })
+          : Promise.resolve(),
+        this.appleVoipPushService.sendIncomingCall(voipTokens, pushData),
+      ]);
+
+      const invalidVoipTokens = voipResults.filter((result) =>
+        ['BadDeviceToken', 'DeviceTokenNotForTopic', 'Unregistered'].includes(
+          result.reason ?? '',
+        ),
+      );
+
+      await Promise.all(
+        invalidVoipTokens.map((result) =>
+          this.userDeviceService.deactivateByVoipToken(result.token),
+        ),
+      );
+
+      const failedVoipCount = voipResults.filter(
+        (result) => !result.success,
+      ).length;
+      if (failedVoipCount > 0) {
+        this.logger.warn('Some APNs VoIP pushes failed', {
+          callId: params.call.id,
+          failedCount: failedVoipCount,
+          totalCount: voipResults.length,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Unable to dispatch incoming call push', {
+        callId: params.call.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   async getCall(userId: string, callId: string) {
