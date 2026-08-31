@@ -51,6 +51,7 @@ import { UserReportsModule } from './user-reports/user-reports.module';
 import { AiContentReportsModule } from './ai-content-reports/ai-content-reports.module';
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 import { ResumeStudioModule } from './resume-studio/resume-studio.module';
+import { AppUpdateModule } from './app-update/app-update.module';
 
 @Module({
   imports: [
@@ -67,7 +68,8 @@ import { ResumeStudioModule } from './resume-studio/resume-studio.module';
       useFactory: (configService: ConfigService) => {
         // Schema changes are migration-owned in production. Synchronization
         // must never attempt to create constraints before data repair runs.
-        const isProduction = configService.get<string>('NODE_ENV') === 'production';
+        const isProduction =
+          configService.get<string>('NODE_ENV') === 'production';
         return {
           type: 'postgres' as const,
           host: configService.get<string>('DB_HOST'),
@@ -77,7 +79,8 @@ import { ResumeStudioModule } from './resume-studio/resume-studio.module';
           database: configService.get<string>('DB_NAME'),
           autoLoadEntities: true,
           synchronize:
-            !isProduction && configService.get<string>('TYPEORM_SYNC') === 'true',
+            !isProduction &&
+            configService.get<string>('TYPEORM_SYNC') === 'true',
           migrations: [__dirname + '/database/migrations/*.js'],
           migrationsRun: isProduction,
         };
@@ -130,6 +133,7 @@ import { ResumeStudioModule } from './resume-studio/resume-studio.module';
     AppStoreNotificationsModule,
     HomeModule,
     ResumeStudioModule,
+    AppUpdateModule,
   ],
   controllers: [AppController],
   providers: [AppService],
