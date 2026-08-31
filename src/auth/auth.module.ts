@@ -20,6 +20,7 @@ import { AccountModerationStatusService } from '../moderation/account-moderation
 import { SessionSocketRegistryService } from './session-socket-registry.service';
 import { UserSocialAccount } from './entities/user-social-account.entity';
 import { SocialTokenVerifierService } from './social-token-verifier.service';
+import { AppleSignInTokenModule } from './apple-sign-in-token.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SocialTokenVerifierService } from './social-token-verifier.service';
 
     // Provides UserDeviceService for login-session validation.
     DevicesModule,
+    AppleSignInTokenModule,
 
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -47,6 +47,10 @@ import {
   UserSocialAccount,
 } from './entities/user-social-account.entity';
 import { SocialTokenVerifierService } from './social-token-verifier.service';
+import {
+  AppleSignInTokenService,
+  EncryptedAppleRefreshToken,
+} from './apple-sign-in-token.service';
 
 @Injectable()
 export class AuthService {
@@ -81,6 +85,7 @@ export class AuthService {
 
     private readonly sessionSocketRegistry: SessionSocketRegistryService,
     private readonly socialTokenVerifierService: SocialTokenVerifierService,
+    private readonly appleSignInTokenService: AppleSignInTokenService,
   ) {}
 
   private normalizeIdentifier(identifier: string): string {
@@ -429,6 +434,12 @@ export class AuthService {
       dto.nonce,
       dto.displayName,
     );
+    const appleRefreshToken =
+      provider === SocialAuthProvider.APPLE
+        ? await this.appleSignInTokenService.exchangeAndEncryptAuthorizationCode(
+            dto.authorizationCode,
+          )
+        : null;
 
     let userId: string;
     try {
@@ -442,7 +453,13 @@ export class AuthService {
           },
         });
 
-        if (existingIdentity) return existingIdentity.userId;
+        if (existingIdentity) {
+          if (appleRefreshToken) {
+            this.assignAppleRefreshToken(existingIdentity, appleRefreshToken);
+            await socialRepository.save(existingIdentity);
+          }
+          return existingIdentity.userId;
+        }
 
         let user =
           identity.emailVerified && identity.email
@@ -498,6 +515,7 @@ export class AuthService {
             provider,
             providerUserId: identity.providerUserId,
             providerEmail: identity.email,
+            ...this.appleRefreshTokenColumns(appleRefreshToken),
           }),
         );
         return user.id;
@@ -511,6 +529,10 @@ export class AuthService {
           },
         });
         if (account) {
+          if (appleRefreshToken) {
+            this.assignAppleRefreshToken(account, appleRefreshToken);
+            await this.socialAccountRepository.save(account);
+          }
           userId = account.userId;
         } else {
           throw new ConflictException(
@@ -545,6 +567,12 @@ export class AuthService {
       dto.tokenType,
       dto.nonce,
     );
+    const appleRefreshToken =
+      provider === SocialAuthProvider.APPLE
+        ? await this.appleSignInTokenService.exchangeAndEncryptAuthorizationCode(
+            dto.authorizationCode,
+          )
+        : null;
 
     try {
       await this.dataSource.transaction(async (manager) => {
@@ -571,6 +599,10 @@ export class AuthService {
               `A different ${provider} account is already linked.`,
             );
           }
+          if (appleRefreshToken) {
+            this.assignAppleRefreshToken(currentProvider, appleRefreshToken);
+            await socialRepository.save(currentProvider);
+          }
           return;
         }
 
@@ -594,6 +626,7 @@ export class AuthService {
             provider,
             providerUserId: identity.providerUserId,
             providerEmail: identity.email,
+            ...this.appleRefreshTokenColumns(appleRefreshToken),
           }),
         );
       });
@@ -1016,6 +1049,26 @@ export class AuthService {
     if (value === 'google') return SocialAuthProvider.GOOGLE;
     if (value === 'facebook') return SocialAuthProvider.FACEBOOK;
     return SocialAuthProvider.APPLE;
+  }
+
+  private appleRefreshTokenColumns(
+    encrypted: EncryptedAppleRefreshToken | null,
+  ): Partial<UserSocialAccount> {
+    if (!encrypted) return {};
+    return {
+      appleRefreshTokenCiphertext: encrypted.ciphertext,
+      appleRefreshTokenIv: encrypted.iv,
+      appleRefreshTokenAuthTag: encrypted.authTag,
+    };
+  }
+
+  private assignAppleRefreshToken(
+    account: UserSocialAccount,
+    encrypted: EncryptedAppleRefreshToken,
+  ): void {
+    account.appleRefreshTokenCiphertext = encrypted.ciphertext;
+    account.appleRefreshTokenIv = encrypted.iv;
+    account.appleRefreshTokenAuthTag = encrypted.authTag;
   }
 
   private isUniqueViolation(error: unknown): boolean {

@@ -44,6 +44,15 @@ export class UserSocialAccount {
   @Column({ type: 'varchar', length: 255, nullable: true })
   providerEmail: string | null;
 
+  @Column({ type: 'text', nullable: true, select: false })
+  appleRefreshTokenCiphertext: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true, select: false })
+  appleRefreshTokenIv: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true, select: false })
+  appleRefreshTokenAuthTag: string | null;
+
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;

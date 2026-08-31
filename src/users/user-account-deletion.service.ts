@@ -6,6 +6,12 @@ import {
 import { createHash } from 'crypto';
 import { DataSource } from 'typeorm';
 
+import { AppleSignInTokenService } from '../auth/apple-sign-in-token.service';
+import {
+  SocialAuthProvider,
+  UserSocialAccount,
+} from '../auth/entities/user-social-account.entity';
+
 import {
   DeletedUserAudit,
   UserDeletionSource,
@@ -22,9 +28,14 @@ interface DeleteAccountParams {
 
 @Injectable()
 export class UserAccountDeletionService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly appleSignInTokenService: AppleSignInTokenService,
+  ) {}
 
   async deleteAccount(params: DeleteAccountParams) {
+    await this.revokeAppleAuthorization(params.targetUserId);
+
     return this.dataSource.transaction(async (manager) => {
       const userRepository = manager.getRepository(User);
 
@@ -172,6 +183,40 @@ export class UserAccountDeletionService {
 
         relatedRecordsPreserved: true,
       };
+    });
+  }
+
+  private async revokeAppleAuthorization(userId: string): Promise<void> {
+    const appleAccount = await this.dataSource
+      .getRepository(UserSocialAccount)
+      .createQueryBuilder('socialAccount')
+      .addSelect([
+        'socialAccount.appleRefreshTokenCiphertext',
+        'socialAccount.appleRefreshTokenIv',
+        'socialAccount.appleRefreshTokenAuthTag',
+      ])
+      .where('socialAccount.userId = :userId', { userId })
+      .andWhere('socialAccount.provider = :provider', {
+        provider: SocialAuthProvider.APPLE,
+      })
+      .getOne();
+
+    if (!appleAccount) return;
+
+    const ciphertext = appleAccount.appleRefreshTokenCiphertext?.trim() ?? '';
+    const iv = appleAccount.appleRefreshTokenIv?.trim() ?? '';
+    const authTag = appleAccount.appleRefreshTokenAuthTag?.trim() ?? '';
+
+    if (!ciphertext || !iv || !authTag) {
+      throw new BadRequestException(
+        'Sign in with Apple again before deleting this account so Apple authorization can be revoked.',
+      );
+    }
+
+    await this.appleSignInTokenService.revokeEncryptedRefreshToken({
+      ciphertext,
+      iv,
+      authTag,
     });
   }
 

@@ -20,6 +20,7 @@ import { AdminUserDirectoryService } from './admin-user-directory.service';
 import { AdminUserDirectoryController } from './admin-user-directory.controller';
 import { DeletedUserAudit } from './entities/deleted-user-audit.entity';
 import { UserAccountDeletionService } from './user-account-deletion.service';
+import { AppleSignInTokenModule } from '../auth/apple-sign-in-token.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { UserAccountDeletionService } from './user-account-deletion.service';
     FilesModule,
     LearningActivityModule,
     MailModule,
+    AppleSignInTokenModule,
   ],
   providers: [
     UsersService,

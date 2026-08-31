@@ -114,6 +114,11 @@ export class SocialLoginDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(4096)
+  authorizationCode?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(120)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   deviceId?: string;
@@ -136,6 +141,11 @@ export class LinkSocialAccountDto {
   @IsString()
   @MaxLength(255)
   nonce?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  authorizationCode?: string;
 }
 
 export class VerifyOtpDto {
