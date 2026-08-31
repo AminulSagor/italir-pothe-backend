@@ -511,6 +511,29 @@ export class CallOrchestratorService implements OnModuleDestroy {
     };
   }
 
+  async renewMediaToken(userId: string, callId: string) {
+    const call = await this.callService.getParticipantCall(callId, userId);
+
+    if (call.status !== CallStatus.ACTIVE) {
+      throw new ConflictException({
+        code: 'CALL_NOT_ACTIVE',
+        message: 'Media credentials can only be renewed for an active call',
+      });
+    }
+
+    const uid =
+      call.callerId === userId ? call.callerAgoraUid : call.receiverAgoraUid;
+    const media = this.callAgoraTokenService.buildPublisherToken({
+      channelName: call.agoraChannelName,
+      uid,
+    });
+
+    return {
+      call: this.presentCall(call),
+      media,
+    };
+  }
+
   @Cron('*/30 * * * * *', {
     name: 'expire-stale-active-calls',
   })

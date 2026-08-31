@@ -107,6 +107,17 @@ export class CallsController {
     );
   }
 
+  @Post(':callId/media-token')
+  renewMediaToken(
+    @Req() request: AuthenticatedRequest,
+    @Param('callId') callId: string,
+  ) {
+    return this.callOrchestratorService.renewMediaToken(
+      this.requireUserId(request),
+      callId,
+    );
+  }
+
   private requireUserId(request: AuthenticatedRequest): string {
     const userId = request.user?.id ?? request.user?.sub;
 
