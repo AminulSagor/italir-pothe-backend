@@ -30,6 +30,9 @@ import { DeviceController } from 'src/devices/controllers/user-device.controller
 import { UserDevice } from 'src/devices/entities/user-device.entity';
 import { UserDeviceService } from 'src/devices/services/user-device.service';
 import { AuthModule } from 'src/auth/auth.module';
+import { MessageKeywordScannerService } from './moderation/message-keyword-scanner.service';
+import { MessageModerationLlmService } from './moderation/message-moderation-llm.service';
+import { MessageModerationService } from './moderation/message-moderation.service';
 
 @Module({
   imports: [
@@ -67,6 +70,9 @@ import { AuthModule } from 'src/auth/auth.module';
   controllers: [ChatController, DeviceController],
   providers: [
     ChatService,
+    MessageKeywordScannerService,
+    MessageModerationLlmService,
+    MessageModerationService,
 
     UserDeviceService,
     ChatGateway,

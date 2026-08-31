@@ -7,121 +7,157 @@ import { MessageAttachment } from './entities/message-attachment.entity';
 import { Conversation } from './entities/conversation.entity';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { MessageDeliveryJob } from './entities/message-delivery-job.entity';
+import { MessageModerationService } from './moderation/message-moderation.service';
+import { MessageModerationBlockedException } from './moderation/message-moderation.exception';
 
 @Injectable()
 export class ChatService {
-	private readonly logger = new Logger(ChatService.name);
+  private readonly logger = new Logger(ChatService.name);
 
-	constructor(
-		@InjectRepository(Message)
-		private readonly messageRepo: Repository<Message>,
+  constructor(
+    @InjectRepository(Message)
+    private readonly messageRepo: Repository<Message>,
 
-		@InjectRepository(MessageAttachment)
-		private readonly attachmentRepo: Repository<MessageAttachment>,
+    @InjectRepository(MessageAttachment)
+    private readonly attachmentRepo: Repository<MessageAttachment>,
 
-		@InjectRepository(Conversation)
-		private readonly conversationRepo: Repository<Conversation>,
+    @InjectRepository(Conversation)
+    private readonly conversationRepo: Repository<Conversation>,
 
-		@InjectRepository(ConversationParticipant)
-		private readonly participantRepo: Repository<ConversationParticipant>,
+    @InjectRepository(ConversationParticipant)
+    private readonly participantRepo: Repository<ConversationParticipant>,
 
-		@InjectRepository(MessageDeliveryJob)
-		private readonly deliveryJobRepo: Repository<MessageDeliveryJob>,
-	) {}
+    @InjectRepository(MessageDeliveryJob)
+    private readonly deliveryJobRepo: Repository<MessageDeliveryJob>,
 
-	async getNextSequenceNo(conversationId: string): Promise<number> {
-		const last = await this.messageRepo.findOne({
-			where: { conversationId },
-			order: { sequenceNo: 'DESC' },
-			select: ['sequenceNo'],
-		});
+    private readonly moderationService: MessageModerationService,
+  ) {}
 
-		return (last?.sequenceNo ?? 0) + 1;
-	}
+  async getNextSequenceNo(conversationId: string): Promise<number> {
+    const last = await this.messageRepo.findOne({
+      where: { conversationId },
+      order: { sequenceNo: 'DESC' },
+      select: ['sequenceNo'],
+    });
 
-	async createMessage(data: {
-		conversationId: string;
-		senderId?: string | null;
-		clientMessageId?: string | null;
-		content?: string | null;
-		messageType?: any;
-		attachments?: Array<{ fileUrl: string; fileName?: string; mimeType?: string; fileSizeBytes?: string; attachmentType?: any }>;
-	}) {
-		if (data.clientMessageId && data.senderId) {
-			const existing = await this.messageRepo.findOne({
-				where: {
-					senderId: data.senderId,
-					clientMessageId: data.clientMessageId,
-				},
-			});
-			if (existing) {
-				this.logger.log(`Message with clientMessageId ${data.clientMessageId} already exists: ${existing.id}`);
-				return existing;
-			}
-		}
+    return (last?.sequenceNo ?? 0) + 1;
+  }
 
-		const sequenceNo = await this.getNextSequenceNo(data.conversationId);
+  async createMessage(data: {
+    conversationId: string;
+    senderId?: string | null;
+    clientMessageId?: string | null;
+    content?: string | null;
+    messageType?: any;
+    attachments?: Array<{
+      fileUrl: string;
+      fileName?: string;
+      mimeType?: string;
+      fileSizeBytes?: string;
+      attachmentType?: any;
+    }>;
+  }): Promise<Message> {
+    if (data.clientMessageId && data.senderId) {
+      const existing = await this.messageRepo.findOne({
+        where: {
+          senderId: data.senderId,
+          clientMessageId: data.clientMessageId,
+        },
+      });
+      if (existing) {
+        this.logger.log(
+          `Message with clientMessageId ${data.clientMessageId} already exists: ${existing.id}`,
+        );
+        return existing;
+      }
+    }
 
-		const message = this.messageRepo.create({
-			conversationId: data.conversationId,
-			senderId: data.senderId ?? null,
-			clientMessageId: data.clientMessageId ?? null,
-			sequenceNo,
-			content: data.content ?? null,
-			messageType: data.messageType ?? MessageType.TEXT,
-		});
+    const moderation = await this.moderationService.moderate(data.content);
+    if (moderation.action === 'block') {
+      this.logger.warn(
+        `Blocked outgoing message sender=${data.senderId ?? 'system'} ` +
+          `conversation=${data.conversationId} categories=${moderation.categories.join(',')}`,
+      );
+      throw new MessageModerationBlockedException();
+    }
 
-		const saved = await this.messageRepo.save(message);
+    const sequenceNo = await this.getNextSequenceNo(data.conversationId);
 
-		if (data.attachments && data.attachments.length) {
-			const atts = data.attachments.map((a) =>
-				this.attachmentRepo.create({
-					messageId: saved.id,
-					attachmentType: a.attachmentType,
-					fileUrl: a.fileUrl,
-					fileName: a.fileName ?? null,
-					mimeType: a.mimeType ?? null,
-					fileSizeBytes: a.fileSizeBytes ?? null,
-				}),
-			);
+    const message = this.messageRepo.create({
+      conversationId: data.conversationId,
+      senderId: data.senderId ?? null,
+      clientMessageId: data.clientMessageId ?? null,
+      sequenceNo,
+      content: data.content ?? null,
+      messageType: data.messageType ?? MessageType.TEXT,
+    });
 
-			await this.attachmentRepo.save(atts);
-		}
+    const saved = await this.messageRepo.save(message);
 
-		// update conversation last message
-		await this.conversationRepo.update(data.conversationId, {
-			lastMessageId: saved.id,
-			lastMessageAt: new Date(),
-		});
+    if (moderation.action === 'warn') {
+      this.logger.warn(
+        `Allowed outgoing message with moderation warning sender=${data.senderId ?? 'system'} ` +
+          `conversation=${data.conversationId} categories=${moderation.categories.join(',')}`,
+      );
+      saved.moderationWarning = {
+        code: 'MESSAGE_ALLOWED_WITH_WARNING',
+        message:
+          'Your message was sent, but it may be hurtful or inappropriate. Please communicate respectfully.',
+        categories: moderation.categories,
+      };
+    }
 
-		return saved;
-	}
+    if (data.attachments && data.attachments.length) {
+      const atts = data.attachments.map((a) =>
+        this.attachmentRepo.create({
+          messageId: saved.id,
+          attachmentType: a.attachmentType,
+          fileUrl: a.fileUrl,
+          fileName: a.fileName ?? null,
+          mimeType: a.mimeType ?? null,
+          fileSizeBytes: a.fileSizeBytes ?? null,
+        }),
+      );
 
-	async getConversationParticipantIds(conversationId: string): Promise<string[]> {
-		const participants = await this.participantRepo.find({
-			where: { conversationId },
-			select: ['userId'],
-		});
+      await this.attachmentRepo.save(atts);
+    }
 
-		return participants.map((p) => p.userId);
-	}
+    // update conversation last message
+    await this.conversationRepo.update(data.conversationId, {
+      lastMessageId: saved.id,
+      lastMessageAt: new Date(),
+    });
 
-	async createDeliveryJobs(params: {
-		messageId: string;
-		conversationId: string;
-		receiverIds: string[];
-		deliveryType?: any;
-	}) {
-		const jobs = params.receiverIds.map((rid) =>
-			this.deliveryJobRepo.create({
-				messageId: params.messageId,
-				conversationId: params.conversationId,
-				receiverId: rid,
-				deliveryType: params.deliveryType,
-				status: undefined,
-			}),
-		);
+    return saved;
+  }
 
-		return this.deliveryJobRepo.save(jobs);
-	}
+  async getConversationParticipantIds(
+    conversationId: string,
+  ): Promise<string[]> {
+    const participants = await this.participantRepo.find({
+      where: { conversationId },
+      select: ['userId'],
+    });
+
+    return participants.map((p) => p.userId);
+  }
+
+  async createDeliveryJobs(params: {
+    messageId: string;
+    conversationId: string;
+    receiverIds: string[];
+    deliveryType?: any;
+  }) {
+    const jobs = params.receiverIds.map((rid) =>
+      this.deliveryJobRepo.create({
+        messageId: params.messageId,
+        conversationId: params.conversationId,
+        receiverId: rid,
+        deliveryType: params.deliveryType,
+        status: undefined,
+      }),
+    );
+
+    return this.deliveryJobRepo.save(jobs);
+  }
 }

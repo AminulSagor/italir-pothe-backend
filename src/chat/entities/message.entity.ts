@@ -11,6 +11,7 @@ import {
 import { User } from '../../users/entities/user.entity';
 import { MessageType } from '../enums/chat.enums';
 import { Conversation } from './conversation.entity';
+import type { MessageModerationWarning } from '../moderation/message-moderation.types';
 
 @Entity('messages')
 @Index(
@@ -26,6 +27,9 @@ import { Conversation } from './conversation.entity';
 @Index('IDX_messages_conversation_createdAt', ['conversationId', 'createdAt'])
 @Index('IDX_messages_senderId', ['senderId'])
 export class Message {
+  /** Runtime-only sender warning; never persisted in the messages table. */
+  moderationWarning?: MessageModerationWarning;
+
   @PrimaryGeneratedColumn('uuid')
   id: string;
 

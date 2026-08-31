@@ -18,6 +18,7 @@ import { ChatService } from './chat.service';
 import { ConversationParticipant } from './entities/conversation-participant.entity';
 import { Conversation } from './entities/conversation.entity';
 import { DirectConversation } from './entities/direct-conversation.entity';
+import { Message } from './entities/message.entity';
 import {
   NotificationPriority,
   NotificationType,
@@ -25,6 +26,7 @@ import {
 import { NotificationsService } from '../notifications/services/notifications.service';
 import { UserDeviceService } from 'src/devices/services/user-device.service';
 import { SessionSocketRegistryService } from 'src/auth/session-socket-registry.service';
+import { MessageModerationBlockedException } from './moderation/message-moderation.exception';
 
 interface SocketJwtPayload {
   sub?: string;
@@ -377,14 +379,33 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     }
 
-    const savedMessage = await this.chatService.createMessage({
-      conversationId: payload.conversationId,
-      senderId: user.id,
-      clientMessageId: payload.clientMessageId ?? null,
-      content: payload.content ?? null,
-      messageType: payload.messageType,
-      attachments: payload.attachments as any,
-    });
+    let savedMessage: Message;
+    try {
+      savedMessage = await this.chatService.createMessage({
+        conversationId: payload.conversationId,
+        senderId: user.id,
+        clientMessageId: payload.clientMessageId ?? null,
+        content: payload.content ?? null,
+        messageType: payload.messageType,
+        attachments: payload.attachments as any,
+      });
+    } catch (error) {
+      if (error instanceof MessageModerationBlockedException) {
+        const response = error.getResponse();
+        const details =
+          typeof response === 'object' && response !== null
+            ? (response as Record<string, unknown>)
+            : {};
+        return {
+          error:
+            typeof details.message === 'string'
+              ? details.message
+              : 'This message could not be sent. Please revise it and try again.',
+          code: 'MESSAGE_BLOCKED_BY_MODERATION',
+        };
+      }
+      throw error;
+    }
 
     const room = this.conversationRoom(payload.conversationId);
 
@@ -504,6 +525,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return {
       ok: true,
       messageId: savedMessage.id,
+      moderationWarning: savedMessage.moderationWarning ?? null,
     };
   }
 
