@@ -10,7 +10,6 @@ import {
   RewardShippingAddressDto,
   UserRewardHistoryQueryDto,
 } from '../dto/leaderboard.dto';
-import { LeaderboardRewardContent } from '../entities/leaderboard-reward-content.entity';
 import { LeaderboardRewardFulfillment } from '../entities/leaderboard-reward-fulfillment.entity';
 import { LeaderboardRewardShippingAddress } from '../entities/leaderboard-reward-shipping-address.entity';
 import { LeaderboardReward } from '../entities/leaderboard-reward.entity';
@@ -224,19 +223,22 @@ export class LeaderboardRewardService {
     }
 
     const now = new Date();
+    const isFirstOpen = !reward.openedAt;
 
     if (!reward.seenAt) {
       reward.seenAt = now;
     }
 
-    if (!reward.openedAt) {
+    if (isFirstOpen) {
       reward.openedAt = now;
     }
 
     if (this.isPhysicalReward(reward.rewardType)) {
-      reward.status = reward.requestShippingAddress
-        ? LeaderboardRewardStatus.ADDRESS_PENDING
-        : LeaderboardRewardStatus.PROCESSING;
+      if (isFirstOpen) {
+        reward.status = reward.requestShippingAddress
+          ? LeaderboardRewardStatus.ADDRESS_PENDING
+          : LeaderboardRewardStatus.PROCESSING;
+      }
 
       await this.rewardRepository.save(reward);
 
@@ -247,7 +249,9 @@ export class LeaderboardRewardService {
       };
     }
 
-    reward.status = LeaderboardRewardStatus.OPENED;
+    if (isFirstOpen) {
+      reward.status = LeaderboardRewardStatus.OPENED;
+    }
 
     await this.rewardRepository.save(reward);
 
@@ -611,7 +615,7 @@ export class LeaderboardRewardService {
   private getUserStatusLabel(status: LeaderboardRewardStatus) {
     switch (status) {
       case LeaderboardRewardStatus.CLAIMED:
-        return 'CLAIMED';
+        return 'RECEIVED';
 
       case LeaderboardRewardStatus.ISSUED:
         return 'ISSUED';

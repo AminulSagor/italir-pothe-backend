@@ -32,6 +32,7 @@ import { LeagueConfigService } from './league-config.service';
 import { LeaderboardProfileService } from './leaderboard-profile.service';
 import { LeaderboardRewardNotificationService } from './leaderboard-reward-notification.service';
 import { LeaderboardRewardNotification } from '../entities/leaderboard-reward-notification.entity';
+import { LeaderboardRewardApplicationService } from './leaderboard-reward-application.service';
 
 @Injectable()
 export class AdminLeaderboardRewardService {
@@ -61,6 +62,7 @@ export class AdminLeaderboardRewardService {
     private readonly profileService: LeaderboardProfileService,
     private readonly leagueConfigService: LeagueConfigService,
     private readonly notificationService: LeaderboardRewardNotificationService,
+    private readonly applicationService: LeaderboardRewardApplicationService,
   ) {}
 
   async getRewardConfiguration(userId: string) {
@@ -141,6 +143,8 @@ export class AdminLeaderboardRewardService {
       ? (params.dto.requestShippingAddress ?? true)
       : false;
 
+    const grantedAt = new Date();
+
     const created = await this.dataSource.transaction(async (manager) => {
       const rewardRepository = manager.getRepository(LeaderboardReward);
 
@@ -158,15 +162,19 @@ export class AdminLeaderboardRewardService {
         rewardType: params.dto.rewardType,
         title: params.dto.title.trim(),
         subtitle: params.dto.subtitle?.trim() ?? null,
-        status: sendPushNotification
-          ? LeaderboardRewardStatus.NOTIFIED
-          : LeaderboardRewardStatus.PENDING,
+        // Rewards are granted by the admin immediately. Keeping openedAt set
+        // also prevents older app versions from presenting a claim chest.
+        status: isPhysical
+          ? requestShippingAddress
+            ? LeaderboardRewardStatus.ADDRESS_PENDING
+            : LeaderboardRewardStatus.PROCESSING
+          : LeaderboardRewardStatus.OPENED,
         issuedByUserId: params.adminUserId,
         sendPushNotification,
         playConfettiAnimation,
         requestShippingAddress,
         seenAt: null,
-        openedAt: null,
+        openedAt: grantedAt,
       });
 
       reward = await rewardRepository.save(reward);
@@ -196,7 +204,7 @@ export class AdminLeaderboardRewardService {
         rewardId: reward.id,
         addressRequestedAt: requestShippingAddress ? new Date() : null,
         addressReceivedAt: null,
-        processingAt: null,
+        processingAt: isPhysical && !requestShippingAddress ? grantedAt : null,
         dispatchedAt: null,
         deliveredAt: null,
         lastNotificationAt: sendPushNotification ? new Date() : null,
@@ -219,6 +227,13 @@ export class AdminLeaderboardRewardService {
       };
     });
 
+    const application = isPhysical
+      ? null
+      : await this.applicationService.applyReward({
+          rewardId: created.reward.id,
+          userId: created.reward.userId,
+        });
+
     let giftNotification: LeaderboardRewardNotification | null = null;
     let addressNotification: LeaderboardRewardNotification | null = null;
 
@@ -230,7 +245,7 @@ export class AdminLeaderboardRewardService {
         title: 'Admin Giveaway Winner!',
         body:
           params.dto.congratulatoryNote?.trim() ||
-          `Congratulations! You received ${created.reward.title}.`,
+          `Congratulations! ${created.reward.title} was added to your account.`,
       });
     }
 
@@ -240,12 +255,12 @@ export class AdminLeaderboardRewardService {
         userId: created.reward.userId,
         type: LeaderboardRewardNotificationType.ADDRESS_REQUEST,
         title: 'Shipping address required',
-        body: 'Open your reward and provide your Italian shipping address.',
+        body: 'Provide your Italian shipping address for your new reward.',
       });
     }
 
     return {
-      message: 'Leaderboard reward created successfully.',
+      message: 'Leaderboard reward granted successfully.',
       notificationMessage: sendPushNotification
         ? 'Gift notification queued successfully.'
         : null,
@@ -256,7 +271,7 @@ export class AdminLeaderboardRewardService {
         rewardType: created.reward.rewardType,
         title: created.reward.title,
         subtitle: created.reward.subtitle,
-        status: created.reward.status,
+        status: application?.status ?? created.reward.status,
         sendPushNotification,
         playConfettiAnimation,
         requestShippingAddress,
@@ -264,6 +279,7 @@ export class AdminLeaderboardRewardService {
       },
       content: created.content,
       value: created.value,
+      application,
       notifications: {
         gift: giftNotification,
         addressRequest: addressNotification,

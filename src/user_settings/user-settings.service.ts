@@ -328,18 +328,12 @@ export class UserSettingsService {
 
     let avatarUrl = user.avatarUrl;
 
-    if (!avatarUrl && user.profilePhotoFileId) {
+    if (user.profilePhotoFileId) {
       try {
-        const file = await this.filesService.findActiveFileById(
+        const signed = await this.filesService.createSignedReadUrl(
           user.profilePhotoFileId,
         );
-
-        if (file.visibility === FileVisibility.PUBLIC) {
-          avatarUrl = this.s3Service.createPublicUrl(file.storageKey);
-        } else {
-          const signed = await this.filesService.createSignedReadUrl(file.id);
-          avatarUrl = signed.signedReadUrl;
-        }
+        avatarUrl = signed.signedReadUrl;
       } catch {
         avatarUrl = null;
       }

@@ -634,6 +634,7 @@ export class FilesService {
     const normalizedMimeType = file.mimeType.trim().toLowerCase();
     const normalizedFilePurpose = String(file.filePurpose).toLowerCase();
     const shouldUseCloudFront =
+      normalizedMimeType.startsWith('image/') ||
       (normalizedMimeType === 'application/pdf' &&
         normalizedFilePurpose.endsWith('_pdf')) ||
       (normalizedMimeType.startsWith('audio/') &&
