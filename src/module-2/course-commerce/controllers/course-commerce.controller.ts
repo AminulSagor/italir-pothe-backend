@@ -79,6 +79,17 @@ export class CourseCommerceController {
     });
   }
 
+  @Post('course-commerce/app-store/restore')
+  async restoreAppStorePurchase(
+    @Body() dto: VerifyCourseAppStorePurchaseDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.courseCommerceService.restoreAppStorePurchase({
+      userId: this.getUserId(request),
+      dto,
+    });
+  }
+
   @Get(['course-commerce/orders/:orderId', 'course-purchases/orders/:orderId'])
   async findOrderById(
     @Param('orderId', new ParseUUIDPipe({ version: '4' }))

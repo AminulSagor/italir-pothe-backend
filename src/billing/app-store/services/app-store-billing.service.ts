@@ -169,7 +169,7 @@ export class AppStoreBillingService implements OnModuleInit {
 
     expectedAppAccountToken?: string | null;
 
-    expectedType: Type;
+    expectedType: Type | null;
 
     expectedOfferId?: string | null;
 
@@ -565,7 +565,7 @@ export class AppStoreBillingService implements OnModuleInit {
 
     expectedAppAccountToken?: string | null;
 
-    expectedType: Type;
+    expectedType: Type | null;
 
     expectedOfferId?: string | null;
 
@@ -597,7 +597,7 @@ export class AppStoreBillingService implements OnModuleInit {
       );
     }
 
-    if (transaction.type !== params.expectedType) {
+    if (params.expectedType && transaction.type !== params.expectedType) {
       throw new BadRequestException(
         `App Store product type must be ${params.expectedType}.`,
       );

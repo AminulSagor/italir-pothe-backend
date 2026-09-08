@@ -585,9 +585,7 @@ export class CourseCommerceService {
         .update(order.userId)
         .digest('hex');
 
-      if (
-        order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED
-      ) {
+      if (order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED) {
         currentStep = 'GOOGLE_SUBSCRIPTION_VERIFY';
         const verifiedSubscription =
           await this.googlePlayBillingService.verifySubscription({
@@ -1062,6 +1060,82 @@ export class CourseCommerceService {
 
       providerReference: verified.transactionId,
 
+      verifiedExpiresAt:
+        order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED
+          ? verified.expiresDate
+          : null,
+    });
+  }
+
+  async restoreAppStorePurchase(params: {
+    userId: string;
+    dto: VerifyCourseAppStorePurchaseDto;
+  }) {
+    /*
+     * A restore has no newly-created order. Verify Apple's signed transaction
+     * first, then use its original appAccountToken to resolve the order that
+     * originally created the StoreKit transaction.
+     */
+    const verified = await this.appStoreBillingService.verifyTransaction({
+      signedTransactionInfo: params.dto.signedTransactionInfo,
+      expectedTransactionId: params.dto.transactionId,
+      expectedProductId: params.dto.productId,
+      expectedAppAccountToken: null,
+      expectedType: null,
+    });
+
+    const originalOrderId = verified.appAccountToken?.trim().toLowerCase();
+    if (
+      !originalOrderId ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        originalOrderId,
+      )
+    ) {
+      throw new BadRequestException(
+        'The App Store transaction is not linked to a valid course order.',
+      );
+    }
+
+    const order = await this.getOwnedOrder(params.userId, originalOrderId);
+    this.assertConfirmableProvider(order, CoursePaymentProvider.APP_STORE);
+
+    if (order.providerSnapshot.productId !== verified.productId) {
+      throw new BadRequestException(
+        'The App Store transaction does not match the original course order.',
+      );
+    }
+
+    const expectedType =
+      order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED
+        ? Type.NON_RENEWING_SUBSCRIPTION
+        : Type.NON_CONSUMABLE;
+    if (verified.type !== expectedType) {
+      throw new BadRequestException(
+        `App Store product type must be ${expectedType}.`,
+      );
+    }
+
+    const tokenHash = this.appStoreBillingService.hash(
+      verified.originalTransactionId,
+    );
+    await this.markProviderTransactionVerified({
+      order,
+      tokenHash,
+      providerTransactionId: verified.transactionId,
+      environment:
+        verified.environment === Environment.PRODUCTION
+          ? CourseProviderEnvironment.PRODUCTION
+          : CourseProviderEnvironment.SANDBOX,
+      payload: {
+        source: 'app_store_restore',
+        ...verified.sanitizedPayload,
+      },
+    });
+
+    return this.completePayment({
+      orderId: order.id,
+      provider: CoursePaymentProvider.APP_STORE,
+      providerReference: verified.transactionId,
       verifiedExpiresAt:
         order.providerSnapshot.accessType === CourseAccessType.TIME_LIMITED
           ? verified.expiresDate
@@ -1889,13 +1963,13 @@ export class CourseCommerceService {
 
       const calculatedExpiresAt =
         accessType === CourseAccessType.TIME_LIMITED
-          ? params.verifiedExpiresAt ??
+          ? (params.verifiedExpiresAt ??
             this.addDays(
               new Date(
                 Math.max(now.getTime(), enrollment?.expiresAt?.getTime() ?? 0),
               ),
               this.requireDurationDays(durationDays),
-            )
+            ))
           : null;
 
       order.entitlementExpiresAt = calculatedExpiresAt;
@@ -2321,7 +2395,9 @@ export class CourseCommerceService {
     }
     return (
       enrollment.accessType === CourseAccessType.LIFETIME ||
-      Boolean(enrollment.expiresAt && enrollment.expiresAt.getTime() > Date.now())
+      Boolean(
+        enrollment.expiresAt && enrollment.expiresAt.getTime() > Date.now(),
+      )
     );
   }
 
