@@ -36,6 +36,6 @@ import { CourseDeviceAccessGuard } from './guards/course-device-access.guard';
     CourseDeviceAttestationService,
     CourseDeviceAccessGuard,
   ],
-  exports: [CourseDeviceAccessService, CourseDeviceAccessGuard],
+  exports: [TypeOrmModule, CourseDeviceAccessService, CourseDeviceAccessGuard],
 })
 export class CourseDeviceAccessModule {}
