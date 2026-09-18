@@ -52,6 +52,7 @@ import { AiContentReportsModule } from './ai-content-reports/ai-content-reports.
 import { AccountDeletionModule } from './account-deletion/account-deletion.module';
 import { ResumeStudioModule } from './resume-studio/resume-studio.module';
 import { AppUpdateModule } from './app-update/app-update.module';
+import { CourseDeviceAccessModule } from './course-device-access/course-device-access.module';
 
 @Module({
   imports: [
@@ -134,6 +135,7 @@ import { AppUpdateModule } from './app-update/app-update.module';
     HomeModule,
     ResumeStudioModule,
     AppUpdateModule,
+    CourseDeviceAccessModule,
   ],
   controllers: [AppController],
   providers: [AppService],

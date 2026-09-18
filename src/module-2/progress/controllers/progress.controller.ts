@@ -19,6 +19,7 @@ import {
   RecordLessonVideoProgressDto,
 } from '../dto/progress.dto';
 import { ProgressService } from '../services/progress.service';
+import { CourseDeviceAccessGuard } from '../../../course-device-access/guards/course-device-access.guard';
 
 @Controller('learning-progress')
 @UseGuards(JwtAuthGuard)
@@ -26,6 +27,7 @@ export class ProgressController {
   constructor(private readonly progressService: ProgressService) {}
 
   @Post('lessons/opened')
+  @UseGuards(CourseDeviceAccessGuard)
   async recordLessonOpened(
     @Body() dto: RecordLessonOpenedDto,
     @Req() request: AuthenticatedRequest,
@@ -38,6 +40,7 @@ export class ProgressController {
   }
 
   @Post('lessons/video-progress')
+  @UseGuards(CourseDeviceAccessGuard)
   async recordVideoProgress(
     @Body() dto: RecordLessonVideoProgressDto,
     @Req() request: AuthenticatedRequest,
@@ -53,6 +56,7 @@ export class ProgressController {
   }
 
   @Post('lessons/theory-read')
+  @UseGuards(CourseDeviceAccessGuard)
   async markTheoryRead(
     @Body() dto: MarkTheoryReadDto,
     @Req() request: AuthenticatedRequest,
@@ -66,6 +70,7 @@ export class ProgressController {
   }
 
   @Post('lessons/audio-listened')
+  @UseGuards(CourseDeviceAccessGuard)
   async recordAudioTrackListened(
     @Body() dto: RecordAudioTrackListenedDto,
     @Req() request: AuthenticatedRequest,
@@ -80,6 +85,7 @@ export class ProgressController {
   }
 
   @Post('lessons/complete')
+  @UseGuards(CourseDeviceAccessGuard)
   async markLessonCompleted(
     @Body() dto: MarkLessonCompletedDto,
     @Req() request: AuthenticatedRequest,
@@ -100,6 +106,7 @@ export class ProgressController {
   }
 
   @Get('lessons/:lessonId')
+  @UseGuards(CourseDeviceAccessGuard)
   async getLessonProgress(
     @Param('lessonId') lessonId: string,
     @Req() request: AuthenticatedRequest,
@@ -111,6 +118,7 @@ export class ProgressController {
   }
 
   @Get('courses/:courseId')
+  @UseGuards(CourseDeviceAccessGuard)
   async getCourseProgress(
     @Param('courseId') courseId: string,
     @Req() request: AuthenticatedRequest,

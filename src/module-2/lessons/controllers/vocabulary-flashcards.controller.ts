@@ -17,9 +17,10 @@ import {
   StartVocabularyReviewSessionDto,
 } from '../dto/vocabulary-flashcard.dto';
 import { VocabularyFlashcardsService } from '../services/vocabulary-flashcards.service';
+import { CourseDeviceAccessGuard } from '../../../course-device-access/guards/course-device-access.guard';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CourseDeviceAccessGuard)
 export class VocabularyFlashcardsController {
   constructor(
     private readonly vocabularyFlashcardsService: VocabularyFlashcardsService,

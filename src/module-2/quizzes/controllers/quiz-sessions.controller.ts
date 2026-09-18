@@ -17,8 +17,10 @@ import {
   StartQuizSessionDto,
 } from '../dto/quiz-session.dto';
 import { QuizSessionsService } from '../services/quiz-sessions.service';
+import { CourseDeviceAccessGuard } from '../../../course-device-access/guards/course-device-access.guard';
 
 @Controller('quiz-sessions')
+@UseGuards(CourseDeviceAccessGuard)
 export class QuizSessionsController {
   constructor(private readonly quizSessionsService: QuizSessionsService) {}
 

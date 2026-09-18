@@ -17,6 +17,7 @@ import {
   SubmitExamAttemptDto,
 } from '../dto/exam-attempt.dto';
 import { ExamsService } from '../services/exams.service';
+import { CourseDeviceAccessGuard } from '../../../course-device-access/guards/course-device-access.guard';
 
 @Controller('final-exams')
 @UseGuards(JwtAuthGuard)
@@ -25,12 +26,11 @@ export class ExamsController {
 
   @Get('my-courses/gateways')
   async getMyCourseExamGateways(@Req() request: AuthenticatedRequest) {
-    return this.examsService.getMyCourseExamGateways(
-      this.getUserId(request),
-    );
+    return this.examsService.getMyCourseExamGateways(this.getUserId(request));
   }
 
   @Get('courses/:courseId/gateway')
+  @UseGuards(CourseDeviceAccessGuard)
   async getExamGateway(
     @Param('courseId') courseId: string,
     @Req() request: AuthenticatedRequest,
@@ -39,6 +39,7 @@ export class ExamsController {
   }
 
   @Post('start')
+  @UseGuards(CourseDeviceAccessGuard)
   async startAttempt(
     @Body() dto: StartExamAttemptDto,
     @Req() request: AuthenticatedRequest,
@@ -47,6 +48,7 @@ export class ExamsController {
   }
 
   @Get('attempts/:attemptId')
+  @UseGuards(CourseDeviceAccessGuard)
   async findAttempt(
     @Param('attemptId') attemptId: string,
     @Req() request: AuthenticatedRequest,
@@ -55,6 +57,7 @@ export class ExamsController {
   }
 
   @Post('attempts/:attemptId/answers')
+  @UseGuards(CourseDeviceAccessGuard)
   async submitAnswer(
     @Param('attemptId') attemptId: string,
     @Body() dto: SubmitExamAnswerDto,
@@ -68,6 +71,7 @@ export class ExamsController {
   }
 
   @Post('attempts/:attemptId/submit')
+  @UseGuards(CourseDeviceAccessGuard)
   async submitAttempt(
     @Param('attemptId') attemptId: string,
     @Body() dto: SubmitExamAttemptDto,
@@ -81,6 +85,7 @@ export class ExamsController {
   }
 
   @Get('attempts/:attemptId/result')
+  @UseGuards(CourseDeviceAccessGuard)
   async getResult(
     @Param('attemptId') attemptId: string,
     @Req() request: AuthenticatedRequest,

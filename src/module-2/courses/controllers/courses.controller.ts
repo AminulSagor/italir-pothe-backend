@@ -16,6 +16,7 @@ import {
   PublicCourseQueryDto,
 } from '../dto/course.dto';
 import { CoursesService } from '../services/courses.service';
+import { CourseDeviceAccessGuard } from '../../../course-device-access/guards/course-device-access.guard';
 
 @Controller('courses')
 export class CoursesController {
@@ -46,7 +47,7 @@ export class CoursesController {
   }
 
   @Get('me/:courseId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, CourseDeviceAccessGuard)
   async findMyCourseById(
     @Param('courseId', new ParseUUIDPipe({ version: '4' }))
     courseId: string,
@@ -71,6 +72,7 @@ export class CoursesController {
   }
 
   @Get(':courseId')
+  @UseGuards(CourseDeviceAccessGuard)
   async findCourseById(
     @Param('courseId', new ParseUUIDPipe({ version: '4' }))
     courseId: string,

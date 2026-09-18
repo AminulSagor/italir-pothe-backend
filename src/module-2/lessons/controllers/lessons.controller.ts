@@ -10,8 +10,10 @@ import {
 import { LessonsService } from '../services/lessons.service';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
+import { CourseDeviceAccessGuard } from '../../../course-device-access/guards/course-device-access.guard';
 
 @Controller('lessons')
+@UseGuards(CourseDeviceAccessGuard)
 export class LessonsController {
   constructor(private readonly lessonsService: LessonsService) {}
 
