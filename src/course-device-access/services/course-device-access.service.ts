@@ -411,12 +411,6 @@ export class CourseDeviceAccessService {
       );
       const request = await requestRepository.findOne({
         where: { id: requestId },
-        relations: [
-          'user',
-          'course',
-          'currentAuthorization',
-          'requestedAuthorization',
-        ],
         lock: { mode: 'pessimistic_write' },
       });
       if (!request) throw new NotFoundException('Device request not found.');

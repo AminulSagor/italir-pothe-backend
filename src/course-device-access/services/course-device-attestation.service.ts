@@ -224,13 +224,15 @@ export class CourseDeviceAttestationService {
       throw new ForbiddenException('The App Attest assertion was replayed.');
     }
 
-    const signedData = Buffer.concat([
-      authenticatorData,
-      this.sha256(params.clientData),
-    ]);
+    // App Attest signs the nonce, not the unhashed concatenation. Node's
+    // ECDSA verifier applies SHA-256 to the value passed to it, so pass the
+    // nonce prescribed by Apple: SHA256(authenticatorData || clientDataHash).
+    const nonce = this.sha256(
+      Buffer.concat([authenticatorData, this.sha256(params.clientData)]),
+    );
     const valid = verifySignature(
       'sha256',
-      signedData,
+      nonce,
       createPublicKey(params.authorization.publicKeyPem),
       signature,
     );
