@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { In, Repository } from 'typeorm';
 import {
   ResumeTemplate,
@@ -42,6 +44,8 @@ import { ResumeTemplateFieldInferenceService } from './resume-template-field-inf
 
 @Injectable()
 export class ResumeTemplateService {
+  private defaultPreviewPhotoDataUrl: string | null | undefined;
+
   constructor(
     @InjectRepository(ResumeTemplate)
     private readonly templateRepository: Repository<ResumeTemplate>,
@@ -582,6 +586,17 @@ export class ResumeTemplateService {
       return data;
     }
 
+    const defaultPhotoUrl = this.getDefaultPreviewPhotoDataUrl();
+    if (defaultPhotoUrl) {
+      return {
+        ...data,
+        personal: {
+          ...(data.personal ?? {}),
+          photoUrl: defaultPhotoUrl,
+        },
+      };
+    }
+
     const fullName = data.personal?.fullName?.trim() || 'CV Preview';
 
     const initials =
@@ -613,6 +628,30 @@ export class ResumeTemplateService {
         photoUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
       },
     };
+  }
+
+  private getDefaultPreviewPhotoDataUrl(): string | null {
+    if (this.defaultPreviewPhotoDataUrl !== undefined) {
+      return this.defaultPreviewPhotoDataUrl;
+    }
+
+    const photoPath = [
+      join(process.cwd(), 'assets', 'resume-studio', 'cv-preview-profile.png'),
+      join(
+        __dirname,
+        '..',
+        '..',
+        'assets',
+        'resume-studio',
+        'cv-preview-profile.png',
+      ),
+    ].find((candidate) => existsSync(candidate));
+
+    this.defaultPreviewPhotoDataUrl = photoPath
+      ? `data:image/png;base64,${readFileSync(photoPath).toString('base64')}`
+      : null;
+
+    return this.defaultPreviewPhotoDataUrl;
   }
 
   private validateSource(input: {
