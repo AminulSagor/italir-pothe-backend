@@ -23,6 +23,7 @@ import { ResumeTemplateFieldInferenceService } from './services/resume-template-
 import { ResumeTemplateSecurityService } from './services/resume-template-security.service';
 import { ResumeTemplateService } from './services/resume-template.service';
 import { ResumePaginationService } from './services/resume-pagination.service';
+import { ResumeProficiencyPresentationService } from './services/resume-proficiency-presentation.service';
 import { ResumeCreditService } from './services/resume-credit.service';
 
 @Module({
@@ -56,6 +57,7 @@ import { ResumeCreditService } from './services/resume-credit.service';
     ResumeLlmClientService,
     ResumeAiSuggestionService,
     ResumePaginationService,
+    ResumeProficiencyPresentationService,
     ResumeCreditService,
   ],
   exports: [ResumeTemplateService, ResumeDocumentService, ResumeCreditService],

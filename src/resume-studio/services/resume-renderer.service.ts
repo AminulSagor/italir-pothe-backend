@@ -11,6 +11,7 @@ import type { ResumeData } from '../types/resume-data.types';
 import type { ResumeRendererConfig } from '../types/template-schema.types';
 
 import { ResumePaginationService } from './resume-pagination.service';
+import { ResumeProficiencyPresentationService } from './resume-proficiency-presentation.service';
 import { ResumeSchemaService } from './resume-schema.service';
 import { ResumeTemplateEngineService } from './resume-template-engine.service';
 
@@ -55,6 +56,7 @@ export class ResumeRendererService {
     private readonly templateEngine: ResumeTemplateEngineService,
     private readonly schemaService: ResumeSchemaService,
     private readonly paginationService: ResumePaginationService,
+    private readonly proficiencyPresentationService: ResumeProficiencyPresentationService,
   ) {}
 
   async render(params: {
@@ -71,7 +73,10 @@ export class ResumeRendererService {
 
     const renderData = params.data as unknown as Record<string, unknown>;
 
-    const renderedBody = this.templateEngine.render(params.html, renderData);
+    const renderedBody =
+      this.proficiencyPresentationService.enhanceRenderedHtml(
+        this.templateEngine.render(params.html, renderData),
+      );
 
     const fontCss = await this.buildFontCss();
 
@@ -452,6 +457,8 @@ export class ResumeRendererService {
 ${fontCss}
 
 ${templateCss}
+
+${this.proficiencyPresentationService.buildRendererCss()}
 
 /*
  * =========================================

@@ -4,8 +4,11 @@ import { EXTREME_RESUME_DATA } from './extreme-resume.fixture';
 import { ResumeRendererService } from '../services/resume-renderer.service';
 import { ResumeSchemaService } from '../services/resume-schema.service';
 import { ResumeTemplateEngineService } from '../services/resume-template-engine.service';
+import { ResumePaginationService } from '../services/resume-pagination.service';
+import { ResumeProficiencyPresentationService } from '../services/resume-proficiency-presentation.service';
 
-const describeRenderer = process.env.RUN_CV_RENDER_TESTS === 'true' ? describe : describe.skip;
+const describeRenderer =
+  process.env.RUN_CV_RENDER_TESTS === 'true' ? describe : describe.skip;
 
 describeRenderer('ResumeRendererService extreme visual contract', () => {
   const schema = new ResumeSchemaService();
@@ -13,6 +16,8 @@ describeRenderer('ResumeRendererService extreme visual contract', () => {
     new ConfigService(process.env),
     new ResumeTemplateEngineService(),
     schema,
+    new ResumePaginationService(),
+    new ResumeProficiencyPresentationService(),
   );
 
   const html = `
