@@ -7,6 +7,7 @@ import {
   rgb,
   StandardFonts,
 } from 'pdf-lib';
+import 'regenerator-runtime/runtime';
 import * as fontkit from '@pdf-lib/fontkit';
 import QRCode from 'qrcode';
 import { existsSync, readFileSync } from 'fs';
@@ -26,10 +27,13 @@ interface CertificateFonts {
   italic: PDFFont;
   certificate: PDFFont;
   studentName: PDFFont;
+  bengaliBold: PDFFont;
 }
 
 @Injectable()
 export class CertificateGenerationService {
+  private readonly fontDataCache = new Map<string, Buffer>();
+
   private readonly assetDirectory = join(
     process.cwd(),
     'assets',
@@ -58,6 +62,12 @@ export class CertificateGenerationService {
     this.assetDirectory,
     'fonts',
     'Silentha.ttf',
+  );
+
+  private readonly notoSansBengaliBoldFontPath = join(
+    this.assetDirectory,
+    'fonts',
+    'NotoSansBengali-Bold.ttf',
   );
 
   private readonly leftFramePath = join(
@@ -155,11 +165,14 @@ export class CertificateGenerationService {
       'Rengkox.ttf',
     );
 
-    const studentName = await this.embedRequiredFont(
-      document,
-      this.silenthaFontPath,
-      'Silentha.ttf',
-    );
+    const [studentName, bengaliBold] = await Promise.all([
+      this.embedRequiredFont(document, this.silenthaFontPath, 'Silentha.ttf'),
+      this.embedRequiredFont(
+        document,
+        this.notoSansBengaliBoldFontPath,
+        'NotoSansBengali-Bold.ttf',
+      ),
+    ]);
 
     return {
       regular,
@@ -167,6 +180,7 @@ export class CertificateGenerationService {
       italic,
       certificate,
       studentName,
+      bengaliBold,
     };
   }
 
@@ -181,7 +195,14 @@ export class CertificateGenerationService {
       );
     }
 
-    return document.embedFont(readFileSync(path));
+    let fontData = this.fontDataCache.get(path);
+
+    if (!fontData) {
+      fontData = readFileSync(path);
+      this.fontDataCache.set(path, fontData);
+    }
+
+    return document.embedFont(fontData);
   }
 
   private async embedRequiredPng(
@@ -439,6 +460,11 @@ export class CertificateGenerationService {
     recipientName: string,
   ): void {
     const dark = rgb(22 / 255, 28 / 255, 25 / 255);
+    const recipientFont = this.selectDynamicTextFont(
+      recipientName,
+      fonts.studentName,
+      fonts.bengaliBold,
+    );
 
     this.drawCenteredText({
       page,
@@ -452,8 +478,8 @@ export class CertificateGenerationService {
     this.drawCenteredText({
       page,
       text: recipientName,
-      font: fonts.studentName,
-      size: this.fitFontSize(recipientName, 58, 34, 800, fonts.studentName),
+      font: recipientFont,
+      size: this.fitFontSize(recipientName, 58, 34, 800, recipientFont),
       y: 382,
       color: rgb(0, 0, 0),
     });
@@ -473,6 +499,11 @@ export class CertificateGenerationService {
     courseTitle: string,
   ): void {
     const dark = rgb(22 / 255, 28 / 255, 25 / 255);
+    const courseTitleFont = this.selectDynamicTextFont(
+      courseTitle,
+      fonts.bold,
+      fonts.bengaliBold,
+    );
 
     this.drawCenteredText({
       page,
@@ -486,8 +517,8 @@ export class CertificateGenerationService {
     this.drawCenteredText({
       page,
       text: courseTitle,
-      font: fonts.bold,
-      size: this.fitFontSize(courseTitle, 31, 21, 900, fonts.bold),
+      font: courseTitleFont,
+      size: this.fitFontSize(courseTitle, 31, 21, 900, courseTitleFont),
       y: 276,
       color: rgb(0, 0, 0),
     });
@@ -648,6 +679,14 @@ export class CertificateGenerationService {
     }
 
     return size;
+  }
+
+  private selectDynamicTextFont(
+    text: string,
+    latinFont: PDFFont,
+    bengaliFont: PDFFont,
+  ): PDFFont {
+    return /[\u0980-\u09ff]/u.test(text) ? bengaliFont : latinFont;
   }
 
   private drawImageContain(
