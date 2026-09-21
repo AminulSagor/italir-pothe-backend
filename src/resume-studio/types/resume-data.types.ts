@@ -10,6 +10,7 @@ export interface ResumePersonalInfo {
   photoFileId?: string;
   photoUrl?: string;
   drivingLicense?: string[];
+  availability?: string;
 }
 
 export interface ResumeExperienceItem {
@@ -69,6 +70,12 @@ export interface ResumeLanguageItem {
   proficiency?: string;
 }
 
+export interface ResumeSkillProficiencyItem {
+  id?: string;
+  name?: string;
+  proficiency?: string;
+}
+
 export interface ResumeReferenceItem {
   id?: string;
   name?: string;
@@ -84,9 +91,11 @@ export interface ResumeData {
   experience?: ResumeExperienceItem[];
   education?: ResumeEducationItem[];
   skills?: string[];
+  skillProficiencies?: ResumeSkillProficiencyItem[];
   projects?: ResumeProjectItem[];
   languages?: ResumeLanguageItem[];
   certifications?: ResumeCertificationItem[];
+  additionalInformation?: string[];
   references?: ResumeReferenceItem[];
 }
 

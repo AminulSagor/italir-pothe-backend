@@ -253,6 +253,19 @@ export class CvLanguageDto {
   proficiency?: string;
 }
 
+export class CvSkillProficiencyDto {
+  @Transform(trimString)
+  @IsString()
+  @MaxLength(100)
+  name: string;
+
+  @Transform(trimString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  proficiency?: string;
+}
+
 export class CvCertificationDto {
   @Transform(trimString)
   @IsString()
@@ -388,6 +401,20 @@ export class CvDataDto {
   @MaxLength(180)
   location: string;
 
+  @Transform(trimString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(220)
+  availability?: string;
+
+  @Transform(trimStringArray)
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  drivingLicense?: string[];
+
   /*
    * Canonical field: summary
    * Chatbot fallback: professionalSummary
@@ -455,6 +482,14 @@ export class CvDataDto {
   @Transform(normalizeNestedArray())
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => CvSkillProficiencyDto)
+  skillProficiencies?: CvSkillProficiencyDto[];
+
+  @Transform(normalizeNestedArray())
+  @IsOptional()
+  @IsArray()
   @ArrayMaxSize(10)
   @ValidateNested({ each: true })
   @Type(() => CvLanguageDto)
@@ -483,6 +518,14 @@ export class CvDataDto {
   @IsString({ each: true })
   @MaxLength(300, { each: true })
   achievements?: string[];
+
+  @Transform(trimStringArray)
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(300, { each: true })
+  additionalInformation?: string[];
 
   @Transform(normalizeNestedArray())
   @IsOptional()

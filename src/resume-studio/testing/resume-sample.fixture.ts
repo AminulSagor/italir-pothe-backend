@@ -10,6 +10,7 @@ export const RESUME_PREVIEW_SAMPLE: ResumeData = {
     website: 'https://example.com',
     linkedin: 'https://linkedin.com/in/alex-morgan',
     github: 'https://github.com/alex-morgan',
+    availability: 'Available immediately',
     photoUrl:
       'data:image/svg+xml;charset=utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="400"%3E%3Crect width="100%25" height="100%25" fill="%23e5e7eb"/%3E%3Ctext x="50%25" y="54%25" text-anchor="middle" font-size="120" font-family="Arial" fill="%236b7280"%3EAM%3C/text%3E%3C/svg%3E',
   },
@@ -45,6 +46,10 @@ export const RESUME_PREVIEW_SAMPLE: ResumeData = {
     },
   ],
   skills: ['Flutter', 'Dart', 'TypeScript', 'NestJS', 'PostgreSQL', 'REST APIs'],
+  skillProficiencies: [
+    { name: 'Flutter', proficiency: 'Expert' },
+    { name: 'Teamwork', proficiency: 'Advanced' },
+  ],
   projects: [
     {
       name: 'Mobile Commerce Platform',
@@ -57,4 +62,8 @@ export const RESUME_PREVIEW_SAMPLE: ResumeData = {
     { name: 'Italian', proficiency: 'Intermediate' },
   ],
   certifications: [{ name: 'Cloud Developer', issuer: 'Example Certification Body', issueDate: '2025-02' }],
+  additionalInformation: [
+    'Available for full-time work',
+    'Flexible with working hours',
+  ],
 };

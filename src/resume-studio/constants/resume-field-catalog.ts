@@ -4,7 +4,8 @@ import { RESUME_LIMITS } from './resume-limits';
 export const RESUME_ALLOWED_FIELD_KEYS = new Set([
   'personal.fullName', 'personal.jobTitle', 'personal.email', 'personal.phone',
   'personal.location', 'personal.website', 'personal.linkedin', 'personal.github',
-  'personal.photoFileId', 'personal.drivingLicense', 'summary',
+  'personal.photoFileId', 'personal.drivingLicense', 'personal.availability',
+  'summary',
   'experience.company', 'experience.position', 'experience.employmentType',
   'experience.location', 'experience.startDate', 'experience.endDate',
   'experience.isCurrent',
@@ -14,6 +15,7 @@ export const RESUME_ALLOWED_FIELD_KEYS = new Set([
   'education.endDate', 'education.isCurrent', 'education.achievements',
   'education.description',
   'skills',
+  'skillProficiencies.name', 'skillProficiencies.proficiency',
   'projects.name', 'projects.role', 'projects.url', 'projects.startDate',
   'projects.endDate', 'projects.isCurrent', 'projects.description',
   'projects.bullets', 'projects.technologies',
@@ -21,6 +23,7 @@ export const RESUME_ALLOWED_FIELD_KEYS = new Set([
   'certifications.name', 'certifications.issuer', 'certifications.issueDate',
   'certifications.expiryDate', 'certifications.doesNotExpire',
   'certifications.credentialId', 'certifications.credentialUrl',
+  'additionalInformation',
   'references.name', 'references.title', 'references.company',
   'references.email', 'references.phone',
 ]);
@@ -46,6 +49,7 @@ export const DEFAULT_RESUME_FIELD_SCHEMA: ResumeTemplateFieldSchema = {
         { key: 'personal.github', label: 'GitHub', type: 'url', enabled: true, maxLength: RESUME_LIMITS.url },
         { key: 'personal.photoFileId', label: 'Profile photo', type: 'image', enabled: true },
         { key: 'personal.drivingLicense', label: 'Driving license', type: 'tags', enabled: true, maxItems: RESUME_LIMITS.drivingLicenseItems, maxLength: 40 },
+        { key: 'personal.availability', label: 'Availability', type: 'text', enabled: true, maxLength: RESUME_LIMITS.shortText },
       ],
     },
     {
@@ -107,6 +111,18 @@ export const DEFAULT_RESUME_FIELD_SCHEMA: ResumeTemplateFieldSchema = {
       fields: [{ key: 'skills', label: 'Skills', type: 'tags', enabled: true, maxItems: RESUME_LIMITS.skillItems, maxLength: RESUME_LIMITS.shortText, aiAssist: 'technical-skill-suggestions' }],
     },
     {
+      key: 'skillProficiencies',
+      label: 'Skill proficiency',
+      enabled: false,
+      order: 45,
+      zone: 'sidebar',
+      maxItems: RESUME_LIMITS.skillProficiencyItems,
+      fields: [
+        { key: 'skillProficiencies.name', label: 'Skill', type: 'text', enabled: true, maxLength: RESUME_LIMITS.shortText },
+        { key: 'skillProficiencies.proficiency', label: 'Proficiency', type: 'select', enabled: true, options: ['Beginner', 'Basic', 'Intermediate', 'Advanced', 'Expert'] },
+      ],
+    },
+    {
       key: 'projects',
       label: 'Projects',
       enabled: true,
@@ -152,6 +168,17 @@ export const DEFAULT_RESUME_FIELD_SCHEMA: ResumeTemplateFieldSchema = {
         { key: 'certifications.doesNotExpire', label: 'Does not expire', type: 'boolean', enabled: true },
         { key: 'certifications.credentialId', label: 'Credential ID', type: 'text', enabled: true, maxLength: 160 },
         { key: 'certifications.credentialUrl', label: 'Credential URL', type: 'url', enabled: true, maxLength: RESUME_LIMITS.url },
+      ],
+    },
+    {
+      key: 'additionalInformation',
+      label: 'Additional information',
+      enabled: false,
+      order: 75,
+      zone: 'main',
+      maxItems: RESUME_LIMITS.additionalInformationItems,
+      fields: [
+        { key: 'additionalInformation', label: 'Additional information', type: 'tags', enabled: true, maxItems: RESUME_LIMITS.additionalInformationItems, maxLength: RESUME_LIMITS.shortText },
       ],
     },
     {

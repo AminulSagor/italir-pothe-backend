@@ -207,6 +207,10 @@ export class ResumeSchemaService {
             RESUME_LIMITS.drivingLicenseItems,
             40,
           ),
+          availability: this.cleanText(
+            personalRaw.availability,
+            RESUME_LIMITS.shortText,
+          ),
         }
       : undefined;
 
@@ -219,6 +223,15 @@ export class ResumeSchemaService {
         input.skills,
         RESUME_LIMITS.skillItems,
         RESUME_LIMITS.shortText,
+      ),
+      skillProficiencies: this.normalizeObjectArray(
+        input.skillProficiencies,
+        RESUME_LIMITS.skillProficiencyItems,
+        (item) => ({
+          id: this.cleanText(item.id, 80),
+          name: this.cleanText(item.name, RESUME_LIMITS.shortText),
+          proficiency: this.cleanText(item.proficiency, 80),
+        }),
       ),
       projects: this.normalizeProjects(input.projects),
       languages: this.normalizeObjectArray(
@@ -246,6 +259,11 @@ export class ResumeSchemaService {
           credentialId: this.cleanText(item.credentialId, 160),
           credentialUrl: this.cleanUrl(item.credentialUrl),
         }),
+      ),
+      additionalInformation: this.normalizeStringArray(
+        input.additionalInformation,
+        RESUME_LIMITS.additionalInformationItems,
+        RESUME_LIMITS.shortText,
       ),
       references: this.normalizeObjectArray(
         input.references,

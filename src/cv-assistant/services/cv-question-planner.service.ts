@@ -1747,6 +1747,10 @@ export class CvQuestionPlannerService {
 
       contact: ['email', 'phone', 'location'],
 
+      availability: ['availability'],
+
+      drivingLicense: ['drivingLicense'],
+
       professionalSummary: ['summary', 'professionalSummary'],
 
       workExperience: ['experiences', 'workExperience'],
@@ -1754,6 +1758,8 @@ export class CvQuestionPlannerService {
       education: ['education'],
 
       skills: ['skills', 'technicalSkills', 'softSkills'],
+
+      skillProficiencies: ['skillProficiencies'],
 
       technicalSkills: ['skills', 'technicalSkills'],
 
@@ -1768,6 +1774,8 @@ export class CvQuestionPlannerService {
       training: ['training'],
 
       achievements: ['achievements'],
+
+      additionalInformation: ['additionalInformation'],
 
       publications: ['publications'],
 
@@ -1801,11 +1809,15 @@ export class CvQuestionPlannerService {
   ): boolean {
     const optionalSections = new Set([
       'professionalSummary',
+      'availability',
+      'drivingLicense',
+      'skillProficiencies',
       'languages',
       'projects',
       'certifications',
       'training',
       'achievements',
+      'additionalInformation',
       'publications',
       'volunteering',
       'interests',
@@ -1856,6 +1868,18 @@ export class CvQuestionPlannerService {
       competencies: 'skills',
       skill: 'skills',
       skills: 'skills',
+      'skill proficiency': 'skillProficiencies',
+      'skill proficiencies': 'skillProficiencies',
+      'skills with proficiency': 'skillProficiencies',
+
+      availability: 'availability',
+      'work availability': 'availability',
+
+      'driving license': 'drivingLicense',
+      'driving licence': 'drivingLicense',
+
+      'additional information': 'additionalInformation',
+      'additional info': 'additionalInformation',
 
       language: 'languages',
       languages: 'languages',

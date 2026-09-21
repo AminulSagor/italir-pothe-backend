@@ -4,9 +4,11 @@ export const RESUME_SECTION_KEYS = [
   'experience',
   'education',
   'skills',
+  'skillProficiencies',
   'projects',
   'languages',
   'certifications',
+  'additionalInformation',
   'references',
 ] as const;
 

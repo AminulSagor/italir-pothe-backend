@@ -1,9 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import { EXTREME_RESUME_DATA } from './extreme-resume.fixture';
 import { ResumeSchemaService } from '../services/resume-schema.service';
+import { ResumeTemplateFieldInferenceService } from '../services/resume-template-field-inference.service';
 import { DEFAULT_RESUME_FIELD_SCHEMA } from '../constants/resume-field-catalog';
 
 const service = new ResumeSchemaService();
+const inferenceService = new ResumeTemplateFieldInferenceService();
 
 describe('ResumeSchemaService', () => {
   it('accepts the configured extreme maximums without truncating data', () => {
@@ -43,6 +45,44 @@ describe('ResumeSchemaService', () => {
     });
     expect(normalized.personal?.fullName).toContain('আমিন');
     expect(normalized.skills).toContain('中文');
+  });
+
+  it('keeps availability, skill proficiency, and additional information', () => {
+    const normalized = service.normalizeResumeData({
+      personal: {
+        availability: 'Available immediately',
+        drivingLicense: ['Category B'],
+      },
+      skillProficiencies: [{ name: 'Teamwork', proficiency: 'Advanced' }],
+      additionalInformation: ['Flexible with working hours', 'Own scooter'],
+    });
+
+    expect(normalized.personal?.availability).toBe('Available immediately');
+    expect(normalized.personal?.drivingLicense).toEqual(['Category B']);
+    expect(normalized.skillProficiencies).toEqual([
+      { name: 'Teamwork', proficiency: 'Advanced' },
+    ]);
+    expect(normalized.additionalInformation).toEqual([
+      'Flexible with working hours',
+      'Own scooter',
+    ]);
+  });
+
+  it('detects the new fields in resume template placeholders', () => {
+    const inferred = inferenceService.infer(`
+      <p>{{personal.availability}}</p>
+      {{#each skillProficiencies}}<p>{{name}}: {{proficiency}}</p>{{/each}}
+      {{#each additionalInformation}}<p>{{this}}</p>{{/each}}
+    `);
+
+    expect(inferred.detectedFieldKeys).toEqual(
+      expect.arrayContaining([
+        'personal.availability',
+        'skillProficiencies.name',
+        'skillProficiencies.proficiency',
+        'additionalInformation',
+      ]),
+    );
   });
 
   it('returns the stable field catalog with AI help on summary', () => {

@@ -314,10 +314,14 @@ Required information:
 After required information is complete, resolve these optional areas:
 
 - professionalSummary
+- availability
+- drivingLicense
+- skillProficiencies
 - projects
 - certifications
 - languages
 - achievements
+- additionalInformation
 - linkedinUrl
 - portfolioUrl
 - interests
@@ -654,17 +658,21 @@ professionalTitle
 email
 phone
 location
+availability
+drivingLicense
 summary
 linkedinUrl
 portfolioUrl
 experiences
 education
 skills
+skillProficiencies
 languages
 certifications
 training
 projects
 achievements
+additionalInformation
 publications
 volunteering
 interests
@@ -717,6 +725,7 @@ Use valueType "text" for:
 - email
 - phone
 - location
+- availability
 - summary
 - linkedinUrl
 - portfolioUrl
@@ -733,7 +742,9 @@ Use valueType "text" for:
 Use valueType "list" for:
 
 - skills
+- drivingLicense
 - achievements
+- additionalInformation
 - interests
 - assistantDeclinedSections
 - assistantResolvedSuggestions
@@ -773,6 +784,12 @@ education:
 - description
 
 languages:
+
+- itemIndex
+- name
+- proficiency
+
+skillProficiencies:
 
 - itemIndex
 - name
