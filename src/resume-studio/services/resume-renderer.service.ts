@@ -140,6 +140,8 @@ export class ResumeRendererService {
         timeout: 30000,
       });
 
+      const presentationRepairs = await this.applyPresentationRepairs(page);
+
       /*
        * -----------------------------------------
        * 5. WAIT FOR FONTS + IMAGES
@@ -249,6 +251,8 @@ export class ResumeRendererService {
 
       const pagination = await this.paginationService.apply(page);
 
+      const sparsePageFit = await this.applySparseLastPageFit(page);
+
       /*
        * -----------------------------------------
        * 9. FINAL LAYOUT DIAGNOSTICS
@@ -256,8 +260,14 @@ export class ResumeRendererService {
        */
 
       const diagnostics = await page.evaluate(() => {
+        const autoFitScale = Number.parseFloat(
+          document.body.firstElementChild?.getAttribute(
+            'data-resume-auto-fit',
+          ) ?? '1',
+        );
+        const visualScale = Number.isFinite(autoFitScale) ? autoFitScale : 1;
         const horizontalOverflow =
-          document.documentElement.scrollWidth >
+          document.documentElement.scrollWidth * visualScale >
           document.documentElement.clientWidth + 2;
 
         return {
@@ -373,6 +383,24 @@ export class ResumeRendererService {
         );
       }
 
+      if (presentationRepairs.duplicateAvailability > 0) {
+        warnings.push(
+          `${presentationRepairs.duplicateAvailability} duplicated availability label(s) were normalized.`,
+        );
+      }
+
+      if (presentationRepairs.brokenDrivingLicenceMarker > 0) {
+        warnings.push(
+          `${presentationRepairs.brokenDrivingLicenceMarker} broken driving-licence marker(s) were hidden.`,
+        );
+      }
+
+      if (sparsePageFit.applied) {
+        warnings.push(
+          `Content was compacted by ${sparsePageFit.reductionPercent}% to avoid a nearly empty final page.`,
+        );
+      }
+
       /*
        * -----------------------------------------
        * 15. RETURN RESULT
@@ -408,9 +436,9 @@ export class ResumeRendererService {
        * particular Puppeteer version.
        */
 
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const moduleName = 'puppeteer';
 
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const loaded = require(moduleName) as
         | PuppeteerLike
         | {
@@ -425,6 +453,135 @@ export class ResumeRendererService {
         'PDF renderer is unavailable. Install Puppeteer and configure CV_RENDER_CHROMIUM_PATH when required.',
       );
     }
+  }
+
+  private async applyPresentationRepairs(page: PuppeteerPageLike): Promise<{
+    duplicateAvailability: number;
+    brokenDrivingLicenceMarker: number;
+  }> {
+    return page.evaluate(() => {
+      let duplicateAvailability = 0;
+      let brokenDrivingLicenceMarker = 0;
+      const normalize = (value: string | null): string =>
+        (value ?? '').replace(/\s+/g, ' ').trim();
+      const textNodes: Text[] = [];
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+      );
+
+      while (walker.nextNode()) {
+        textNodes.push(walker.currentNode as Text);
+      }
+
+      for (const node of textNodes) {
+        const value = node.nodeValue ?? '';
+        const normalized = normalize(value);
+
+        if (value.includes('Available Available immediately')) {
+          node.nodeValue = value.replace(
+            'Available Available immediately',
+            'Available immediately',
+          );
+          duplicateAvailability += 1;
+          continue;
+        }
+
+        if (normalized === 'Available') {
+          let ancestor = node.parentElement;
+          let depth = 0;
+
+          while (ancestor && ancestor !== document.body && depth < 4) {
+            if (
+              normalize(ancestor.textContent).startsWith(
+                'Available Available immediately',
+              )
+            ) {
+              node.nodeValue = value.replace('Available', '');
+              duplicateAvailability += 1;
+              break;
+            }
+            ancestor = ancestor.parentElement;
+            depth += 1;
+          }
+        }
+
+        if (normalized === 'D') {
+          let ancestor = node.parentElement;
+          let depth = 0;
+
+          while (ancestor && ancestor !== document.body && depth < 4) {
+            const text = normalize(ancestor.textContent);
+            if (/^D\s*DRIVING LICEN[CS]E\b/.test(text)) {
+              const marker = node.parentElement;
+              if (marker) {
+                marker.style.setProperty('display', 'none', 'important');
+              }
+              brokenDrivingLicenceMarker += 1;
+              break;
+            }
+            ancestor = ancestor.parentElement;
+            depth += 1;
+          }
+        }
+      }
+
+      return { duplicateAvailability, brokenDrivingLicenceMarker };
+    });
+  }
+
+  private async applySparseLastPageFit(page: PuppeteerPageLike): Promise<{
+    applied: boolean;
+    reductionPercent: number;
+  }> {
+    return page.evaluate(async () => {
+      const root = document.body.firstElementChild as HTMLElement | null;
+      if (!root) return { applied: false, reductionPercent: 0 };
+
+      const probe = document.createElement('div');
+      probe.style.cssText =
+        'position:absolute;visibility:hidden;width:1px;height:297mm;';
+      document.body.appendChild(probe);
+      const pageHeight = probe.getBoundingClientRect().height || 1122.52;
+      probe.remove();
+
+      const totalHeight = Math.max(
+        root.scrollHeight,
+        root.getBoundingClientRect().height,
+        document.documentElement.scrollHeight,
+      );
+      const estimatedPages = Math.ceil((totalHeight - 2) / pageHeight);
+      if (estimatedPages <= 1) {
+        return { applied: false, reductionPercent: 0 };
+      }
+
+      const targetHeight = (estimatedPages - 1) * pageHeight - 4;
+      const scale = targetHeight / totalHeight;
+
+      // Only compact small overflows. Larger documents should paginate at
+      // their designed font size instead of becoming difficult to read.
+      if (scale < 0.9 || scale >= 1) {
+        return { applied: false, reductionPercent: 0 };
+      }
+
+      root.style.setProperty('zoom', String(scale), 'important');
+      root.style.setProperty('width', `${100 / scale}%`, 'important');
+      root.style.setProperty(
+        'min-height',
+        `${targetHeight / scale}px`,
+        'important',
+      );
+      root.setAttribute('data-resume-auto-fit', scale.toFixed(4));
+
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+
+      return {
+        applied: true,
+        reductionPercent: Math.round((1 - scale) * 1000) / 10,
+      };
+    });
   }
 
   /*
@@ -507,6 +664,11 @@ body {
 body > :first-child {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
+
+  height: auto !important;
+  min-height: 297mm;
+  max-height: none !important;
+  overflow: visible !important;
 }
 
 /*

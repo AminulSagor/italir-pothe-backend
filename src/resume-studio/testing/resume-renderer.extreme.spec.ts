@@ -76,4 +76,42 @@ describeRenderer('ResumeRendererService extreme visual contract', () => {
     expect(result.pageCount).toBeGreaterThanOrEqual(1);
     expect(result.pdfBuffer.length).toBeGreaterThan(1000);
   });
+
+  it('repairs template presentation artifacts and compacts a sparse second page', async () => {
+    const result = await renderer.render({
+      html: `
+        <main class="fixed-page">
+          <header><h1>{{personal.fullName}}</h1></header>
+          <p>Available <span>{{personal.availability}}</span></p>
+          <section><span>D</span><strong>DRIVING LICENCE</strong></section>
+          <div class="near-overflow"></div>
+        </main>`,
+      css: `
+        .fixed-page { width: 210mm; height: 297mm; overflow: hidden; }
+        .near-overflow { height: 280mm; }
+      `,
+      data: {
+        personal: {
+          fullName: 'Layout Test',
+          availability: 'Available immediately',
+        },
+      },
+      rendererConfig: {
+        layout: 'single-column',
+        sidebarContinuation: 'not-applicable',
+        recommendedMaxPages: 1,
+        hardMaxPages: 2,
+        locale: 'en',
+      },
+    });
+
+    expect(result.pageCount).toBe(1);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('duplicated availability'),
+        expect.stringContaining('broken driving-licence marker'),
+        expect.stringContaining('nearly empty final page'),
+      ]),
+    );
+  });
 });
