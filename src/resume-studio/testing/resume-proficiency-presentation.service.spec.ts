@@ -58,6 +58,22 @@ describe('ResumeProficiencyPresentationService', () => {
     expect(css).toContain('width: 95%');
   });
 
+  it('applies levels to any bound proficiency indicator, not only .fill', () => {
+    const css = service.buildRendererCss();
+
+    expect(css).toContain(
+      ':is([data-resume-proficiency],[data-proficiency])[data-resume-level="2"]',
+    );
+    expect(css).not.toContain('.fill[data-resume-level=');
+  });
+
+  it('hides a legacy meter rendered beside the data-bound meter', () => {
+    const css = service.buildRendererCss();
+
+    expect(css).toContain('~ :is(.fill,.bar,.progress,.progress-bar');
+    expect(css).toContain('display: none !important');
+  });
+
   it('replaces stale presentation metadata without mutating proficiency', () => {
     const html =
       '<span class="fill" data-resume-level="1" data-resume-proficiency="Native"></span>';

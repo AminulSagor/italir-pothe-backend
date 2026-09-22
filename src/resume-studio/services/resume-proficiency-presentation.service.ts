@@ -30,11 +30,25 @@ export class ResumeProficiencyPresentationService {
 
   buildRendererCss(): string {
     return `
-.fill[data-resume-level="1"]:is([data-resume-proficiency],[data-proficiency]) { width: 35% !important; }
-.fill[data-resume-level="2"]:is([data-resume-proficiency],[data-proficiency]) { width: 50% !important; }
-.fill[data-resume-level="3"]:is([data-resume-proficiency],[data-proficiency]) { width: 65% !important; }
-.fill[data-resume-level="4"]:is([data-resume-proficiency],[data-proficiency]) { width: 80% !important; }
-.fill[data-resume-level="5"]:is([data-resume-proficiency],[data-proficiency]) { width: 95% !important; }
+:is([data-resume-proficiency],[data-proficiency])[data-resume-level="1"] { width: 35% !important; }
+:is([data-resume-proficiency],[data-proficiency])[data-resume-level="2"] { width: 50% !important; }
+:is([data-resume-proficiency],[data-proficiency])[data-resume-level="3"] { width: 65% !important; }
+:is([data-resume-proficiency],[data-proficiency])[data-resume-level="4"] { width: 80% !important; }
+:is([data-resume-proficiency],[data-proficiency])[data-resume-level="5"] { width: 95% !important; }
+
+/*
+ * Some published templates contain a legacy, fixed-width meter immediately
+ * after the data-bound meter. Keep the bound meter as the single source of
+ * truth instead of showing both the selected level and the old placeholder.
+ */
+:is([data-resume-proficiency],[data-proficiency])
+  ~ :is(.fill,.bar,.progress,.progress-bar,.meter,.level,.rating),
+:is(.bar,.progress,.progress-bar,.meter,.level,.rating):has(
+    > :is([data-resume-proficiency],[data-proficiency])
+  )
+  ~ :is(.bar,.progress,.progress-bar,.meter,.level,.rating) {
+  display: none !important;
+}
 `.trim();
   }
 

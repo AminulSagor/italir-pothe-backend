@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "verbs:sync": "ts-node -r tsconfig-paths/register src/module-2/important-verbs/scripts/sync-important-verbs.ts",
     "verbs:import-static": "ts-node -r tsconfig-paths/register src/module-2/important-verbs/scripts/import-compact-important-verbs.ts",
+    "resume:test-published-templates": "node dist/resume-studio/testing/render-published-template-samples.js --upload",
     "start:worker:prod": "node dist/video-processing/video-worker.js",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts"
   },
