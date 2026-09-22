@@ -109,7 +109,7 @@ const SAMPLE_DATA: Record<'half' | 'full', ResumeData> = {
     ],
     skillProficiencies: [
       { name: 'Food preparation', proficiency: 'Advanced' },
-      { name: 'Teamwork', proficiency: 'Professional' },
+      { name: 'Teamwork', proficiency: 'Expert' },
       { name: 'Stock handling', proficiency: 'Intermediate' },
     ],
     languages: [
@@ -142,6 +142,13 @@ interface OutputLink {
   localPreview: string;
   pdfUrl?: string;
   previewUrl?: string;
+}
+
+interface RenderJob {
+  template: ResumeTemplate;
+  version: ResumeTemplateVersion;
+  sample: 'half' | 'full';
+  data: ResumeData;
 }
 
 async function bootstrap(): Promise<void> {
@@ -184,13 +191,7 @@ async function bootstrap(): Promise<void> {
       throw new Error(`Published template(s) not found: ${missing.join(', ')}`);
     }
 
-    await mkdir(outputDir, { recursive: true });
-
-    const photoBuffer = await readFile(
-      join(process.cwd(), 'assets', 'resume-studio', 'cv-preview-profile.png'),
-    );
-    const photoUrl = `data:image/png;base64,${photoBuffer.toString('base64')}`;
-    const outputs: OutputLink[] = [];
+    const jobs: RenderJob[] = [];
 
     for (const requestedName of TEMPLATE_NAMES) {
       const template = templatesByName.get(requestedName.toLowerCase())!;
@@ -214,71 +215,87 @@ async function bootstrap(): Promise<void> {
           normalized,
           version.fieldSchema,
         );
-        const renderData: ResumeData = {
-          ...visible,
-          personal: { ...(visible.personal ?? {}), photoUrl },
-        };
 
-        const rendered = await renderer.render({
-          html: version.html,
-          css: version.css,
-          data: renderData,
-          rendererConfig: version.rendererConfig,
-        });
-        const baseName = `${template.slug}-${sample}`;
-        const pdfPath = join(outputDir, `${baseName}.pdf`);
-        const previewPath = join(outputDir, `${baseName}.png`);
+        jobs.push({ template, version, sample, data: visible });
+      }
+    }
+
+    // Validate all six template/data combinations before creating or uploading
+    // anything, so a bad fixture can never leave behind a partial test run.
+    await mkdir(outputDir, { recursive: true });
+
+    const photoBuffer = await readFile(
+      join(process.cwd(), 'assets', 'resume-studio', 'cv-preview-profile.png'),
+    );
+    const photoUrl = `data:image/png;base64,${photoBuffer.toString('base64')}`;
+    const outputs: OutputLink[] = [];
+
+    for (const job of jobs) {
+      const { template, version, sample } = job;
+      const renderData: ResumeData = {
+        ...job.data,
+        personal: { ...(job.data.personal ?? {}), photoUrl },
+      };
+
+      const rendered = await renderer.render({
+        html: version.html,
+        css: version.css,
+        data: renderData,
+        rendererConfig: version.rendererConfig,
+      });
+      const baseName = `${template.slug}-${sample}`;
+      const pdfPath = join(outputDir, `${baseName}.pdf`);
+      const previewPath = join(outputDir, `${baseName}.png`);
+
+      await Promise.all([
+        writeFile(pdfPath, rendered.pdfBuffer),
+        writeFile(previewPath, rendered.previewImageBuffer),
+      ]);
+
+      const output: OutputLink = {
+        template: template.name,
+        sample,
+        pages: rendered.pageCount,
+        warnings: rendered.warnings,
+        localPdf: pdfPath,
+        localPreview: previewPath,
+      };
+
+      if (s3Service) {
+        const prefix = `resume-studio/test-renders/${runId}`;
+        const pdfStorageKey = `${prefix}/${baseName}.pdf`;
+        const previewStorageKey = `${prefix}/${baseName}.png`;
 
         await Promise.all([
-          writeFile(pdfPath, rendered.pdfBuffer),
-          writeFile(previewPath, rendered.previewImageBuffer),
+          s3Service.uploadBuffer({
+            storageKey: pdfStorageKey,
+            buffer: rendered.pdfBuffer,
+            mimeType: 'application/pdf',
+          }),
+          s3Service.uploadBuffer({
+            storageKey: previewStorageKey,
+            buffer: rendered.previewImageBuffer,
+            mimeType: 'image/png',
+          }),
         ]);
 
-        const output: OutputLink = {
-          template: template.name,
-          sample,
-          pages: rendered.pageCount,
-          warnings: rendered.warnings,
-          localPdf: pdfPath,
-          localPreview: previewPath,
-        };
-
-        if (s3Service) {
-          const prefix = `resume-studio/test-renders/${runId}`;
-          const pdfStorageKey = `${prefix}/${baseName}.pdf`;
-          const previewStorageKey = `${prefix}/${baseName}.png`;
-
-          await Promise.all([
-            s3Service.uploadBuffer({
-              storageKey: pdfStorageKey,
-              buffer: rendered.pdfBuffer,
-              mimeType: 'application/pdf',
-            }),
-            s3Service.uploadBuffer({
-              storageKey: previewStorageKey,
-              buffer: rendered.previewImageBuffer,
-              mimeType: 'image/png',
-            }),
-          ]);
-
-          [output.pdfUrl, output.previewUrl] = await Promise.all([
-            s3Service.createSignedReadUrl({
-              storageKey: pdfStorageKey,
-              mimeType: 'application/pdf',
-              originalName: `${baseName}.pdf`,
-              dispositionType: 'inline',
-            }),
-            s3Service.createSignedReadUrl({
-              storageKey: previewStorageKey,
-              mimeType: 'image/png',
-              originalName: `${baseName}.png`,
-              dispositionType: 'inline',
-            }),
-          ]);
-        }
-
-        outputs.push(output);
+        [output.pdfUrl, output.previewUrl] = await Promise.all([
+          s3Service.createSignedReadUrl({
+            storageKey: pdfStorageKey,
+            mimeType: 'application/pdf',
+            originalName: `${baseName}.pdf`,
+            dispositionType: 'inline',
+          }),
+          s3Service.createSignedReadUrl({
+            storageKey: previewStorageKey,
+            mimeType: 'image/png',
+            originalName: `${baseName}.png`,
+            dispositionType: 'inline',
+          }),
+        ]);
       }
+
+      outputs.push(output);
     }
 
     console.log(
