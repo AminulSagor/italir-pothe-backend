@@ -25,6 +25,7 @@ export class CourseDeviceAccessGuard
   extends AuthGuard('jwt')
   implements OnModuleInit
 {
+  private static compatibilityWarningLogged = false;
   private readonly logger = new Logger(CourseDeviceAccessGuard.name);
 
   constructor(
@@ -43,7 +44,11 @@ export class CourseDeviceAccessGuard
   }
 
   onModuleInit() {
-    if (!this.enabled) {
+    if (
+      !this.enabled &&
+      !CourseDeviceAccessGuard.compatibilityWarningLogged
+    ) {
+      CourseDeviceAccessGuard.compatibilityWarningLogged = true;
       this.logger.warn(
         'COURSE_DEVICE_ENFORCEMENT_ENABLED is not true; legacy mobile API compatibility is active. Enable only after the attested mobile release is rolled out.',
       );
