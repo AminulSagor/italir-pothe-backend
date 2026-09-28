@@ -348,8 +348,10 @@ export class StreakService {
   }
 
   private resolveActivityDate(activityDate?: string): string {
-    if (activityDate && /^\d{4}-\d{2}-\d{2}$/.test(activityDate)) {
-      return activityDate;
+    const dateOnly = activityDate?.slice(0, 10);
+
+    if (dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+      return dateOnly;
     }
 
     return new Date().toISOString().slice(0, 10);

@@ -50,6 +50,7 @@ import {
 } from 'src/module-2/scoring/services/streak.service';
 import { DailyChallengesService } from 'src/module-2/daily-challenges/services/daily-challenges.service';
 import { LearningActivityType } from 'src/module-2/daily-challenges/types/daily-challenge.type';
+import { DailyChallengeTaskKey } from 'src/module-2/daily-challenges/types/daily-challenge.type';
 import { LeaderboardXpService } from 'src/module-2/leaderboard/services/leaderboard-xp.service';
 import { UserLessonProgress } from 'src/module-2/progress/entities/user-lesson-progress.entity';
 
@@ -298,93 +299,124 @@ export class QuizSessionsService {
     dto: CheckQuizAnswerDto,
     user: QuizRequestUser,
   ): Promise<CheckQuizAnswerResponse> {
-    return this.answerRepository.manager.transaction(async (manager) => {
-      await manager.query(
-        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        [`quiz-answer:${sessionId}:${dto.questionId}`],
-      );
-
-      const session = await manager.getRepository(QuizSession).findOne({
-        where: { id: sessionId },
-        lock: { mode: 'pessimistic_write' },
-      });
-
-      if (!session) {
-        throw new NotFoundException('Quiz session not found');
-      }
-      if (session.userId !== user.id) {
-        throw new UnauthorizedException(
-          'Quiz session does not belong to this user',
+    const answerResult = await this.answerRepository.manager.transaction(
+      async (manager) => {
+        await manager.query(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          [`quiz-answer:${sessionId}:${dto.questionId}`],
         );
-      }
-      if (session.status !== QuizSessionStatus.IN_PROGRESS) {
-        throw new BadRequestException('This quiz session is already submitted');
-      }
 
-      const question = await manager.getRepository(QuizQuestion).findOne({
-        where: {
-          id: dto.questionId,
-          quizId: session.quizId,
-          status: QuizQuestionStatus.ACTIVE,
-        },
-        relations: ['options', 'pairs', 'sequenceItems', 'acceptedAnswers'],
-      });
-
-      if (!question) {
-        throw new NotFoundException('Quiz question not found');
-      }
-      this.sortQuestionRelations(question);
-
-      const gradeResult = this.gradeQuestion(question, dto);
-      const answerRepository = manager.getRepository(QuizAttemptAnswer);
-      const existingAnswer = await answerRepository.findOne({
-        where: { sessionId: session.id, questionId: question.id },
-      });
-
-      /* A retried request after a lost response is idempotent. */
-      const isCorrect = existingAnswer?.isCorrect ?? gradeResult.isCorrect;
-
-      if (!existingAnswer) {
-        const attemptAnswer = answerRepository.create({
-          sessionId: session.id,
-          questionId: question.id,
-          questionType: question.questionType,
-          isCorrect: gradeResult.isCorrect,
-          pointsEarned: gradeResult.isCorrect ? question.points : 0,
-          timeSpentSeconds: dto.timeSpentSeconds ?? null,
-          writtenAnswer: dto.writtenAnswer?.trim() || null,
-          selectedOptionId: dto.selectedOptionId ?? null,
+        const session = await manager.getRepository(QuizSession).findOne({
+          where: { id: sessionId },
+          lock: { mode: 'pessimistic_write' },
         });
 
-        const savedAnswer = await answerRepository.save(attemptAnswer);
-        const answerItems = this.buildAnswerItems(savedAnswer.id, question, dto);
-        if (answerItems.length > 0) {
-          await manager.getRepository(QuizAttemptAnswerItem).save(answerItems);
+        if (!session) {
+          throw new NotFoundException('Quiz session not found');
+        }
+        if (session.userId !== user.id) {
+          throw new UnauthorizedException(
+            'Quiz session does not belong to this user',
+          );
+        }
+        if (session.status !== QuizSessionStatus.IN_PROGRESS) {
+          throw new BadRequestException(
+            'This quiz session is already submitted',
+          );
         }
 
-        // Keep session recency aligned with confirmed answer activity.
-        session.updatedAt = new Date();
-        await manager.getRepository(QuizSession).save(session);
+        const question = await manager.getRepository(QuizQuestion).findOne({
+          where: {
+            id: dto.questionId,
+            quizId: session.quizId,
+            status: QuizQuestionStatus.ACTIVE,
+          },
+          relations: ['options', 'pairs', 'sequenceItems', 'acceptedAnswers'],
+        });
+
+        if (!question) {
+          throw new NotFoundException('Quiz question not found');
+        }
+        this.sortQuestionRelations(question);
+
+        const gradeResult = this.gradeQuestion(question, dto);
+        const answerRepository = manager.getRepository(QuizAttemptAnswer);
+        const existingAnswer = await answerRepository.findOne({
+          where: { sessionId: session.id, questionId: question.id },
+        });
+
+        /* A retried request after a lost response is idempotent. */
+        const isCorrect = existingAnswer?.isCorrect ?? gradeResult.isCorrect;
+
+        if (!existingAnswer) {
+          const attemptAnswer = answerRepository.create({
+            sessionId: session.id,
+            questionId: question.id,
+            questionType: question.questionType,
+            isCorrect: gradeResult.isCorrect,
+            pointsEarned: gradeResult.isCorrect ? question.points : 0,
+            timeSpentSeconds: dto.timeSpentSeconds ?? null,
+            writtenAnswer: dto.writtenAnswer?.trim() || null,
+            selectedOptionId: dto.selectedOptionId ?? null,
+          });
+
+          const savedAnswer = await answerRepository.save(attemptAnswer);
+          const answerItems = this.buildAnswerItems(
+            savedAnswer.id,
+            question,
+            dto,
+          );
+          if (answerItems.length > 0) {
+            await manager
+              .getRepository(QuizAttemptAnswerItem)
+              .save(answerItems);
+          }
+
+          // Keep session recency aligned with confirmed answer activity.
+          session.updatedAt = new Date();
+          await manager.getRepository(QuizSession).save(session);
+        }
+
+        const fillBlankCorrectAnswer =
+          question.questionType === QuizQuestionFormat.FILL_IN_THE_BLANKS
+            ? ((question.options ?? []).find((option) => option.isCorrect)
+                ?.optionText ?? null)
+            : null;
+
+        return {
+          sessionId: session.id,
+          questionId: question.id,
+          isCorrect,
+          correctAnswer: gradeResult.correctAnswer,
+          meaning:
+            fillBlankCorrectAnswer ??
+            question.translationText ??
+            question.helperText,
+          explanation: question.helperText,
+        };
+      },
+    );
+
+    // Released clients omit clientActivityDate here and continue using the
+    // completion-time fallback. New clients include it, enabling immediate
+    // progress without risking a server-date/client-date double count.
+    if (dto.clientActivityDate) {
+      try {
+        await this.recordAnsweredQuestionDailyChallengeActivities({
+          userId: user.id,
+          sessionId,
+          questionId: dto.questionId,
+          clientActivityDate: dto.clientActivityDate,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Immediate Daily Challenge tracking failed for quiz answer session=${sessionId}, question=${dto.questionId}`,
+          error instanceof Error ? error.stack : String(error),
+        );
       }
+    }
 
-      const fillBlankCorrectAnswer =
-        question.questionType === QuizQuestionFormat.FILL_IN_THE_BLANKS
-          ? ((question.options ?? []).find((option) => option.isCorrect)
-              ?.optionText ?? null)
-          : null;
-
-      return {
-        sessionId: session.id,
-        questionId: question.id,
-        isCorrect,
-        correctAnswer: gradeResult.correctAnswer,
-        meaning:
-          fillBlankCorrectAnswer ??
-          question.translationText ??
-          question.helperText,
-        explanation: question.helperText,
-      };
-    });
+    return answerResult;
   }
 
   async completeSession(
@@ -441,6 +473,7 @@ export class QuizSessionsService {
         totalTimeSeconds,
         scoring: result.scoring,
       },
+      clientActivityDate: dto.clientActivityDate,
     });
 
     const streak = await this.streakService.updateDailyStreak(
@@ -471,6 +504,19 @@ export class QuizSessionsService {
 
     await this.sessionRepository.save(session);
 
+    const [quiz, lessonProgress] = await Promise.all([
+      this.quizRepository.findOne({ where: { id: session.quizId } }),
+      this.lessonProgressRepository.findOne({
+        where: { userId: user.id, lessonId: session.lessonId },
+      }),
+    ]);
+    const completedAfterVideo = Boolean(
+      quiz &&
+      lessonProgress &&
+      session.lesson?.videoFileId &&
+      lessonProgress.videoWatchPercent >= quiz.unlockVideoWatchPercent,
+    );
+
     await this.recordQuizDailyChallengeActivities({
       userId: user.id,
       session,
@@ -479,6 +525,9 @@ export class QuizSessionsService {
       result,
       reward,
       clientActivityDate: dto.clientActivityDate,
+      completedAfterVideo,
+      supportsIncrementalTracking:
+        dto.supportsIncrementalDailyChallengeTracking === true,
     });
 
     return this.buildRewardedResult({
@@ -497,6 +546,8 @@ export class QuizSessionsService {
     result: QuizSessionResultResponse;
     reward: XpRewardSummary;
     clientActivityDate?: string;
+    completedAfterVideo: boolean;
+    supportsIncrementalTracking: boolean;
   }) {
     const formatStats = this.buildQuestionFormatStats(
       params.questions,
@@ -512,6 +563,7 @@ export class QuizSessionsService {
         sourceId: `${sourcePrefix}:completed`,
         value: 1,
         clientActivityDate: params.clientActivityDate,
+        metadata: { completedAfterVideo: params.completedAfterVideo },
       }),
 
       this.recordIf(
@@ -542,47 +594,11 @@ export class QuizSessionsService {
       ),
 
       this.recordIf(
-        formatStats.fillInTheBlanksCorrect > 0,
-        params.userId,
-        LearningActivityType.QUIZ_FILL_BLANKS_CORRECT,
-        `${sourcePrefix}:fill-blanks`,
-        formatStats.fillInTheBlanksCorrect,
-        params.clientActivityDate,
-      ),
-
-      this.recordIf(
         formatStats.matchPairsPerfect,
         params.userId,
         LearningActivityType.QUIZ_MATCH_PAIRS_PERFECT,
         `${sourcePrefix}:match-pairs-perfect`,
         1,
-        params.clientActivityDate,
-      ),
-
-      this.recordIf(
-        formatStats.audioTranscriptionCorrect > 0,
-        params.userId,
-        LearningActivityType.QUIZ_AUDIO_TRANSCRIPTION_CORRECT,
-        `${sourcePrefix}:audio-transcription`,
-        formatStats.audioTranscriptionCorrect,
-        params.clientActivityDate,
-      ),
-
-      this.recordIf(
-        formatStats.trueFalseCorrect > 0,
-        params.userId,
-        LearningActivityType.QUIZ_TRUE_FALSE_AUDIO_CORRECT,
-        `${sourcePrefix}:true-false`,
-        formatStats.trueFalseCorrect,
-        params.clientActivityDate,
-      ),
-
-      this.recordIf(
-        formatStats.audioTrackCount > 0,
-        params.userId,
-        LearningActivityType.AUDIO_TRACK_LISTENED,
-        `${sourcePrefix}:audio-tracks`,
-        formatStats.audioTrackCount,
         params.clientActivityDate,
       ),
 
@@ -594,7 +610,123 @@ export class QuizSessionsService {
         params.reward.totalXpEarned,
         params.clientActivityDate,
       ),
+      this.recordIf(
+        !params.supportsIncrementalTracking && formatStats.audioTrackCount > 0,
+        params.userId,
+        LearningActivityType.AUDIO_TRACK_LISTENED,
+        `${sourcePrefix}:legacy-audio-tracks`,
+        formatStats.audioTrackCount,
+        params.clientActivityDate,
+      ),
+      ...this.buildPerQuestionActivityRequests({
+        userId: params.userId,
+        sessionId: params.session.id,
+        questions: params.questions,
+        answers: params.session.answers ?? [],
+        clientActivityDate: params.clientActivityDate,
+      }),
     ]);
+  }
+
+  private async recordAnsweredQuestionDailyChallengeActivities(params: {
+    userId: string;
+    sessionId: string;
+    questionId: string;
+    clientActivityDate?: string;
+  }) {
+    const [question, answer, allQuestions, answers] = await Promise.all([
+      this.questionRepository.findOne({ where: { id: params.questionId } }),
+      this.answerRepository.findOne({
+        where: { sessionId: params.sessionId, questionId: params.questionId },
+      }),
+      this.sessionRepository
+        .findOne({ where: { id: params.sessionId } })
+        .then((session) =>
+          session ? this.findActiveQuestions(session.quizId) : [],
+        ),
+      this.answerRepository.find({ where: { sessionId: params.sessionId } }),
+    ]);
+
+    if (!question || !answer) {
+      return;
+    }
+
+    await Promise.all(
+      this.buildPerQuestionActivityRequests({
+        userId: params.userId,
+        sessionId: params.sessionId,
+        questions: [question],
+        answers: [answer],
+        clientActivityDate: params.clientActivityDate,
+      }),
+    );
+
+    let currentStreak = 0;
+    const answerMap = new Map(answers.map((item) => [item.questionId, item]));
+    for (const item of [...allQuestions].sort(
+      (a, b) => a.sortOrder - b.sortOrder,
+    )) {
+      const answered = answerMap.get(item.id);
+      if (!answered) {
+        break;
+      }
+      currentStreak = answered.isCorrect ? currentStreak + 1 : 0;
+    }
+
+    await this.dailyChallengesService.recordAbsoluteTaskProgress({
+      userId: params.userId,
+      challengeDate: params.clientActivityDate,
+      taskKey: DailyChallengeTaskKey.ANSWER_COMBO_5,
+      value: currentStreak,
+    });
+  }
+
+  private buildPerQuestionActivityRequests(params: {
+    userId: string;
+    sessionId: string;
+    questions: QuizQuestion[];
+    answers: QuizAttemptAnswer[];
+    clientActivityDate?: string;
+  }) {
+    const answerMap = new Map(
+      params.answers.map((answer) => [answer.questionId, answer]),
+    );
+    const requests: Promise<boolean>[] = [];
+
+    for (const question of params.questions) {
+      if (!answerMap.get(question.id)?.isCorrect) {
+        continue;
+      }
+
+      let activityType: LearningActivityType | null = null;
+      if (question.questionType === QuizQuestionFormat.FILL_IN_THE_BLANKS) {
+        activityType = LearningActivityType.QUIZ_FILL_BLANKS_CORRECT;
+      } else if (
+        question.questionType === QuizQuestionFormat.LISTEN_AND_ASSEMBLE
+      ) {
+        activityType = LearningActivityType.QUIZ_AUDIO_TRANSCRIPTION_CORRECT;
+      } else if (
+        question.questionType === QuizQuestionFormat.TRUE_FALSE &&
+        question.mediaFileId
+      ) {
+        activityType = LearningActivityType.QUIZ_TRUE_FALSE_AUDIO_CORRECT;
+      }
+
+      if (activityType) {
+        requests.push(
+          this.dailyChallengesService.recordInternalActivity({
+            userId: params.userId,
+            activityType,
+            sourceId: `quiz-session:${params.sessionId}:question:${question.id}`,
+            value: 1,
+            clientActivityDate: params.clientActivityDate,
+            metadata: { dedupeAcrossDates: true },
+          }),
+        );
+      }
+    }
+
+    return requests;
   }
 
   private async recordIf(
@@ -661,7 +793,8 @@ export class QuizSessionsService {
 
       if (
         question.questionType === QuizQuestionFormat.TRUE_FALSE &&
-        isCorrect
+        isCorrect &&
+        hasAudio
       ) {
         trueFalseCorrect += 1;
       }
@@ -1092,10 +1225,7 @@ export class QuizSessionsService {
       .createQueryBuilder('session')
       .leftJoin('session.answers', 'answer')
       .select('session.id', 'id')
-      .addSelect(
-        'COUNT(DISTINCT answer."questionId")',
-        'answeredQuestions',
-      )
+      .addSelect('COUNT(DISTINCT answer."questionId")', 'answeredQuestions')
       .where('session."userId" = :userId', { userId })
       .andWhere('session."quizId" = :quizId', { quizId })
       .andWhere('session."lessonId" = :lessonId', { lessonId })
@@ -1154,10 +1284,12 @@ export class QuizSessionsService {
       );
     }
 
-    await manager.getRepository(QuizSession).update(
-      { id: In(duplicateSessionIds) },
-      { status: QuizSessionStatus.CANCELLED },
-    );
+    await manager
+      .getRepository(QuizSession)
+      .update(
+        { id: In(duplicateSessionIds) },
+        { status: QuizSessionStatus.CANCELLED },
+      );
 
     this.logger.warn(
       `Repaired ${duplicateSessionIds.length} duplicate in-progress quiz session(s) for user=${userId}, quiz=${quizId}, lesson=${lessonId}`,

@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -51,6 +52,10 @@ export class CheckQuizAnswerDto {
   @IsInt()
   @Min(0)
   timeSpentSeconds?: number;
+
+  @IsOptional()
+  @IsDateString()
+  clientActivityDate?: string;
 }
 
 export class StartQuizSessionDto {
@@ -72,4 +77,8 @@ export class CompleteQuizSessionDto {
   @IsOptional()
   @IsDateString()
   clientActivityDate?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  supportsIncrementalDailyChallengeTracking?: boolean;
 }

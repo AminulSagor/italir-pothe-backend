@@ -1,7 +1,11 @@
-import { IsDateString, IsOptional } from "class-validator";
+import { IsDateString, IsIn, IsOptional } from 'class-validator';
 
 export class ReviewImportantVerbDto {
   @IsOptional()
   @IsDateString()
   clientActivityDate?: string;
+
+  @IsOptional()
+  @IsIn(['learning'])
+  interaction?: 'learning';
 }

@@ -28,6 +28,7 @@ interface RecordLessonCompletionXpPayload {
   userId: string;
   lessonId: string;
   baseXp: number;
+  clientActivityDate?: string;
 }
 
 interface RecordQuizCompletionXpPayload {
@@ -37,6 +38,7 @@ interface RecordQuizCompletionXpPayload {
   baseXp: number;
   bonusXp: number;
   scoringMetadata?: Record<string, unknown>;
+  clientActivityDate?: string;
 }
 
 interface RecordDailyChestXpPayload {
@@ -60,6 +62,7 @@ interface RecordXpTransactionPayload {
   bonusXp: number;
   reason: string;
   applyBoost: boolean;
+  clientActivityDate?: string;
 }
 
 @Injectable()
@@ -94,6 +97,7 @@ export class ScoringService {
       bonusXp: payload.bonusXp,
       reason: 'Quiz completion reward',
       applyBoost: true,
+      clientActivityDate: payload.clientActivityDate,
     });
   }
 
@@ -125,6 +129,7 @@ export class ScoringService {
       bonusXp: 0,
       reason: 'Lesson completion reward',
       applyBoost: true,
+      clientActivityDate: payload.clientActivityDate,
     });
   }
 
@@ -288,6 +293,9 @@ export class ScoringService {
       multiplier: boostMultiplier,
       boostAmount: boostXp,
       reason: payload.reason,
+      activityDate:
+        payload.clientActivityDate?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ??
+        new Date().toISOString().slice(0, 10),
     });
 
     await this.xpTransactionRepository.save(transaction);

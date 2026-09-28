@@ -385,6 +385,7 @@ export class ImportantVerbsService {
         verbId: params.verbId,
       },
     });
+    const isFirstReview = !progress;
 
     if (!progress) {
       progress = this.progressRepository.create({
@@ -406,7 +407,27 @@ export class ImportantVerbsService {
       sourceId: `important-verb:${params.verbId}:review:${savedProgress.reviewCount}`,
       value: 1,
       clientActivityDate: params.dto.clientActivityDate,
+      metadata: {
+        // Released clients have no interaction field and call this route when
+        // opening the detail page. Keep that legacy fallback; new clients send
+        // `learning` only after a real pronunciation/learning action.
+        firstReview:
+          isFirstReview &&
+          (params.dto.interaction === undefined ||
+            params.dto.interaction === 'learning'),
+      },
     });
+
+    if (params.dto.interaction === 'learning') {
+      await this.dailyChallengesService.recordInternalActivity({
+        userId: params.userId,
+        activityType: LearningActivityType.AUDIO_TRACK_LISTENED,
+        sourceId: `important-verb:${params.verbId}:audio:${savedProgress.reviewCount}`,
+        value: 1,
+        clientActivityDate: params.dto.clientActivityDate,
+        metadata: { scope: 'practice_hub' },
+      });
+    }
 
     return {
       message: 'Important verb reviewed successfully.',

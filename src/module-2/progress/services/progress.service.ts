@@ -181,6 +181,7 @@ export class ProgressService {
         userId: params.user.id,
         lessonId: params.lessonId,
         baseXp: 20,
+        clientActivityDate: params.clientActivityDate,
       });
 
       const streak = await this.streakService.getUserStreakSummary(

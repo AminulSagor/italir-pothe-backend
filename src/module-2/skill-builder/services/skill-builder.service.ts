@@ -462,6 +462,17 @@ export class SkillBuilderService {
       clientActivityDate: params.dto.clientActivityDate,
     });
 
+    // The mobile flow records a sentence review only after its Practice Hub
+    // audio playback finishes, so this is a reliable hub-scoped listen event.
+    await this.dailyChallengesService.recordInternalActivity({
+      userId: params.userId,
+      activityType: LearningActivityType.AUDIO_TRACK_LISTENED,
+      sourceId: `skill-builder-sentence:${sentence.id}:audio:${savedProgress.reviewCount}`,
+      value: 1,
+      clientActivityDate: params.dto.clientActivityDate,
+      metadata: { scope: 'practice_hub' },
+    });
+
     return {
       message: 'Skill builder sentence reviewed successfully',
       sentence,

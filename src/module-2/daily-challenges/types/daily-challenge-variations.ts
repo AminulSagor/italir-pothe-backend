@@ -102,7 +102,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
       {
         key: DailyChallengeTaskKey.WATCH_VIDEO_80,
         title: 'Watch a Video Lesson to the 80% Unlock Mark',
-        targetValue: 100,
+        targetValue: 80,
         rewardXp: 10,
       },
       {

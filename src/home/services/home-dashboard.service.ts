@@ -24,14 +24,18 @@ export class HomeDashboardService {
     private readonly configService: ConfigService,
   ) {}
 
-  async getDashboard(userId: string, weekStart?: string) {
+  async getDashboard(
+    userId: string,
+    weekStart?: string,
+    activityDate?: string,
+  ) {
     const [overview, currentChapter, careerTracks, webinar, challenges] =
       await Promise.all([
         this.learningActivityService.getWeeklySummary(userId, weekStart),
         this.progressService.getCurrentChapter(userId),
         this.skillBuilderService.findHomeCareerTracks(userId),
         this.webinarsService.getNextHomeWebinar(),
-        this.dailyChallengesService.getTodayHomeSummary(userId),
+        this.dailyChallengesService.getTodayHomeSummary(userId, activityDate),
       ]);
 
     return {

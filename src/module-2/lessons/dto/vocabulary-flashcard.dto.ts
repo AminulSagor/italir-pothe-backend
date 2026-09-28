@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 
 import { VocabularyReviewMode } from '../entities/vocabulary-review-session.entity';
+import { VocabularyReviewChoice } from '../entities/user-vocabulary-progress.entity';
 
 export class StartVocabularyReviewSessionDto {
   @IsOptional()
@@ -38,6 +39,15 @@ export class CompleteWeakVocabularyReviewDto {
   @IsArray()
   @IsUUID('4', { each: true })
   stillWeakVocabularyIds: string[];
+
+  @IsOptional()
+  @IsDateString()
+  clientActivityDate?: string;
+}
+
+export class RecordVocabularyCardReviewDto {
+  @IsEnum(VocabularyReviewChoice)
+  choice: VocabularyReviewChoice;
 
   @IsOptional()
   @IsDateString()

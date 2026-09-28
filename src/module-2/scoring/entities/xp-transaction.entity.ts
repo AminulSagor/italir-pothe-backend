@@ -20,7 +20,7 @@ export class XpTransaction {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
+  @Index('IDX_xp_transactions_activity_date')
   @Column({ type: 'uuid' })
   userId: string;
 
@@ -50,6 +50,10 @@ export class XpTransaction {
 
   @Column({ type: 'varchar', length: 180, nullable: true })
   reason: string | null;
+
+  @Index()
+  @Column({ type: 'date', nullable: true })
+  activityDate: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

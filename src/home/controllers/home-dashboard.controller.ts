@@ -27,6 +27,10 @@ export class HomeDashboardController {
       throw new UnauthorizedException('Authenticated user not found');
     }
 
-    return this.homeDashboardService.getDashboard(userId, query.weekStart);
+    return this.homeDashboardService.getDashboard(
+      userId,
+      query.weekStart,
+      query.activityDate,
+    );
   }
 }

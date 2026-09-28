@@ -10,6 +10,8 @@ import { DailyChallengesService } from './services/daily-challenges.service';
 import { DailyChallengePlanTask } from './entities/daily-challenge-plan-task.entity';
 import { DailyLearningActivityLog } from './entities/daily-learning-activity-log.entity';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+import { XpTransaction } from '../scoring/entities/xp-transaction.entity';
+import { UserLearningActivityTimeEntry } from '../learning-activity/entities/user-learning-activity-time-entry.entity';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { LeaderboardModule } from '../leaderboard/leaderboard.module';
       DailyLearningActivityLog,
       UserDailyChallengeProgress,
       UserDailyChestReward,
+      XpTransaction,
+      UserLearningActivityTimeEntry,
     ]),
     ScoringModule,
     LeaderboardModule,

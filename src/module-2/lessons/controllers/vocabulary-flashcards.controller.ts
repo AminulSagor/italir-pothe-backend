@@ -14,6 +14,7 @@ import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-r
 import {
   CompleteVocabularyReviewDto,
   CompleteWeakVocabularyReviewDto,
+  RecordVocabularyCardReviewDto,
   StartVocabularyReviewSessionDto,
 } from '../dto/vocabulary-flashcard.dto';
 import { VocabularyFlashcardsService } from '../services/vocabulary-flashcards.service';
@@ -33,6 +34,21 @@ export class VocabularyFlashcardsController {
   ) {
     return this.vocabularyFlashcardsService.getLessonFlashcards(
       lessonId,
+      this.getCurrentUser(request),
+    );
+  }
+
+  @Post('vocabulary-review-sessions/:sessionId/cards/:vocabularyId/review')
+  async recordCardReview(
+    @Param('sessionId') sessionId: string,
+    @Param('vocabularyId') vocabularyId: string,
+    @Body() dto: RecordVocabularyCardReviewDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.vocabularyFlashcardsService.recordCardReview(
+      sessionId,
+      vocabularyId,
+      dto,
       this.getCurrentUser(request),
     );
   }

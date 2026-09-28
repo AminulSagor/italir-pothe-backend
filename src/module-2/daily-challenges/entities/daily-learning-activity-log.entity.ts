@@ -9,7 +9,11 @@ import {
 import { LearningActivityType } from '../types/daily-challenge.type';
 
 @Entity('daily_learning_activity_logs')
-@Index(['userId', 'activityType', 'sourceId'], { unique: true })
+@Index(
+  'IDX_daily_learning_activity_daily_source',
+  ['userId', 'activityType', 'sourceId', 'activityDate'],
+  { unique: true },
+)
 export class DailyLearningActivityLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;

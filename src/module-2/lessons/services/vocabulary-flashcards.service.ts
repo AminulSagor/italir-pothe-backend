@@ -23,6 +23,7 @@ import { VocabularyReviewSessionItem } from '../entities/vocabulary-review-sessi
 import {
   CompleteVocabularyReviewDto,
   CompleteWeakVocabularyReviewDto,
+  RecordVocabularyCardReviewDto,
   StartVocabularyReviewSessionDto,
 } from '../dto/vocabulary-flashcard.dto';
 import {
@@ -144,6 +145,25 @@ export class VocabularyFlashcardsService {
     const knownSet = new Set(dto.knownVocabularyIds);
     const weakSet = new Set(dto.weakVocabularyIds);
 
+    const previousProgress = await this.getProgressMap(
+      user.id,
+      session.lessonId,
+    );
+    const newlyLearnedIds = dto.knownVocabularyIds.filter((id) => {
+      const status = previousProgress.get(id)?.masteryStatus;
+      return (
+        !status ||
+        status === VocabularyMasteryStatus.NEW ||
+        status === VocabularyMasteryStatus.LEARNING ||
+        status === VocabularyMasteryStatus.WEAK
+      );
+    });
+    const weakClearedIds = dto.knownVocabularyIds.filter(
+      (id) =>
+        previousProgress.get(id)?.masteryStatus ===
+        VocabularyMasteryStatus.WEAK,
+    );
+
     await this.saveSessionItems(session.id, vocabularyIds, knownSet, weakSet);
     await this.updateVocabularyProgress(
       user.id,
@@ -161,13 +181,54 @@ export class VocabularyFlashcardsService {
 
     await this.recordVocabularyDailyActivities({
       userId: user.id,
+      sourceScope: `vocabulary-session:${session.id}`,
       reviewedVocabularyIds: vocabularyIds,
-      knownVocabularyIds: dto.knownVocabularyIds,
-      weakClearedVocabularyIds: [],
+      knownVocabularyIds: newlyLearnedIds,
+      weakClearedVocabularyIds: weakClearedIds,
       clientActivityDate: dto.clientActivityDate,
     });
 
     return this.buildSummary(savedSession);
+  }
+
+  async recordCardReview(
+    sessionId: string,
+    vocabularyId: string,
+    dto: RecordVocabularyCardReviewDto,
+    user: VocabularyRequestUser,
+  ) {
+    const session = await this.getSessionForUser(sessionId, user.id);
+    if (session.status !== VocabularyReviewSessionStatus.IN_PROGRESS) {
+      return { recorded: false, reason: 'session_completed' };
+    }
+
+    await this.ensureVocabularyBelongsToLesson(
+      [vocabularyId],
+      session.lessonId,
+    );
+    const previous = await this.progressRepository.findOne({
+      where: { userId: user.id, vocabularyId },
+    });
+    const isKnown = dto.choice === VocabularyReviewChoice.KNOWN;
+    const isNewlyLearned =
+      isKnown &&
+      (!previous ||
+        previous.masteryStatus === VocabularyMasteryStatus.NEW ||
+        previous.masteryStatus === VocabularyMasteryStatus.LEARNING ||
+        previous.masteryStatus === VocabularyMasteryStatus.WEAK);
+    const isWeakCleared =
+      isKnown && previous?.masteryStatus === VocabularyMasteryStatus.WEAK;
+
+    await this.recordVocabularyDailyActivities({
+      userId: user.id,
+      sourceScope: `vocabulary-session:${session.id}`,
+      reviewedVocabularyIds: [vocabularyId],
+      knownVocabularyIds: isNewlyLearned ? [vocabularyId] : [],
+      weakClearedVocabularyIds: isWeakCleared ? [vocabularyId] : [],
+      clientActivityDate: dto.clientActivityDate,
+    });
+
+    return { recorded: true };
   }
 
   async getWeakCards(
@@ -275,6 +336,7 @@ export class VocabularyFlashcardsService {
 
     await this.recordVocabularyDailyActivities({
       userId: user.id,
+      sourceScope: `vocabulary-session:${savedWeakReviewSession.id}`,
       reviewedVocabularyIds: submittedIds,
       knownVocabularyIds: dto.knownVocabularyIds,
       weakClearedVocabularyIds: dto.knownVocabularyIds,
@@ -290,6 +352,7 @@ export class VocabularyFlashcardsService {
 
   private async recordVocabularyDailyActivities(params: {
     userId: string;
+    sourceScope: string;
     reviewedVocabularyIds: string[];
     knownVocabularyIds: string[];
     weakClearedVocabularyIds: string[];
@@ -300,6 +363,7 @@ export class VocabularyFlashcardsService {
     await Promise.all([
       ...this.buildVocabularyActivityRequests({
         userId: params.userId,
+        sourceScope: params.sourceScope,
         vocabularyIds: params.reviewedVocabularyIds,
         activityDate,
         activityType: LearningActivityType.VOCABULARY_FLASHCARD_REVIEWED,
@@ -307,6 +371,7 @@ export class VocabularyFlashcardsService {
       }),
       ...this.buildVocabularyActivityRequests({
         userId: params.userId,
+        sourceScope: params.sourceScope,
         vocabularyIds: params.knownVocabularyIds,
         activityDate,
         activityType: LearningActivityType.VOCABULARY_WORD_LEARNED,
@@ -314,6 +379,7 @@ export class VocabularyFlashcardsService {
       }),
       ...this.buildVocabularyActivityRequests({
         userId: params.userId,
+        sourceScope: params.sourceScope,
         vocabularyIds: params.weakClearedVocabularyIds,
         activityDate,
         activityType: LearningActivityType.VOCABULARY_WEAK_WORD_CLEARED,
@@ -324,6 +390,7 @@ export class VocabularyFlashcardsService {
 
   private buildVocabularyActivityRequests(params: {
     userId: string;
+    sourceScope: string;
     vocabularyIds: string[];
     activityDate: string;
     activityType: LearningActivityType;
@@ -335,10 +402,10 @@ export class VocabularyFlashcardsService {
       this.dailyChallengesService.recordInternalActivity({
         userId: params.userId,
         activityType: params.activityType,
-        sourceId:
-          `vocabulary:${vocabularyId}:${params.eventKey}:${params.activityDate}`,
+        sourceId: `${params.sourceScope}:${vocabularyId}:${params.eventKey}`,
         value: 1,
         clientActivityDate: params.activityDate,
+        metadata: { dedupeAcrossDates: true },
       }),
     );
   }
