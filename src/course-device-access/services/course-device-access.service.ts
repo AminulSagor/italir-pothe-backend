@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
@@ -38,6 +39,7 @@ export class CourseDeviceAccessService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly attestation: CourseDeviceAttestationService,
+    private readonly config: ConfigService,
     @InjectRepository(CourseDeviceAuthorization)
     private readonly authorizationRepository: Repository<CourseDeviceAuthorization>,
     @InjectRepository(CourseDeviceChallenge)
@@ -104,6 +106,7 @@ export class CourseDeviceAccessService {
       clientDataBase64: entity.clientDataBase64,
       expiresAt: entity.expiresAt,
       requiresAttestation: !known,
+      enforcementEnabled: this.enforcementEnabled,
     };
   }
 
@@ -112,6 +115,14 @@ export class CourseDeviceAccessService {
     courseId: string,
     dto: VerifyCourseDeviceDto,
   ) {
+    if (!this.enforcementEnabled) {
+      return {
+        authorized: true,
+        code: 'ENFORCEMENT_DISABLED',
+        accessToken: randomBytes(32).toString('base64url'),
+      };
+    }
+
     return this.dataSource.transaction('SERIALIZABLE', async (manager) => {
       const challengeRepository = manager.getRepository(CourseDeviceChallenge);
       const authorizationRepository = manager.getRepository(
@@ -554,5 +565,11 @@ export class CourseDeviceAccessService {
 
   private hash(value: string) {
     return createHash('sha256').update(value).digest('base64url');
+  }
+
+  private get enforcementEnabled(): boolean {
+    return (
+      this.config.get<string>('COURSE_DEVICE_ENFORCEMENT_ENABLED') === 'true'
+    );
   }
 }

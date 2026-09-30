@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { DataSource, Repository } from 'typeorm';
 
 import { CourseDeviceAuthorization } from '../entities/course-device-authorization.entity';
@@ -66,6 +67,7 @@ describe('CourseDeviceAccessService admin decisions', () => {
     const service = new CourseDeviceAccessService(
       dataSource,
       {} as CourseDeviceAttestationService,
+      { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
       unusedRepository as Repository<CourseDeviceAuthorization>,
       unusedRepository as Repository<CourseDeviceChallenge>,
       unusedRepository as Repository<CourseDeviceRequest>,
@@ -88,5 +90,38 @@ describe('CourseDeviceAccessService admin decisions', () => {
     });
     expect(requested.status).toBe(CourseDeviceAuthorizationStatus.ACTIVE);
     expect(requestRepository.save).toHaveBeenCalledWith(request);
+  });
+
+  it('bypasses Play Integrity when device enforcement is disabled', async () => {
+    const dataSource = {
+      transaction: jest.fn(),
+    } as unknown as DataSource;
+    const attestation = {
+      verifyAndroid: jest.fn(),
+    } as unknown as CourseDeviceAttestationService;
+    const unusedRepository = {} as Repository<never>;
+    const service = new CourseDeviceAccessService(
+      dataSource,
+      attestation,
+      { get: jest.fn().mockReturnValue('false') } as unknown as ConfigService,
+      unusedRepository as Repository<CourseDeviceAuthorization>,
+      unusedRepository as Repository<CourseDeviceChallenge>,
+      unusedRepository as Repository<CourseDeviceRequest>,
+      unusedRepository as never,
+    );
+
+    await expect(
+      service.verifyDevice('user-id', 'course-id', {
+        challengeId: '00000000-0000-4000-8000-000000000000',
+        deviceKeyId: 'device-key-id',
+      }),
+    ).resolves.toEqual({
+      authorized: true,
+      code: 'ENFORCEMENT_DISABLED',
+      accessToken: expect.any(String),
+    });
+
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(attestation.verifyAndroid).not.toHaveBeenCalled();
   });
 });
