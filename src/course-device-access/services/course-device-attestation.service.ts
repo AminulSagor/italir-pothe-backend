@@ -38,9 +38,7 @@ type AppAttestObject = {
 
 @Injectable()
 export class CourseDeviceAttestationService {
-  private readonly googleAuth = new GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/playintegrity'],
-  });
+  private googleAuth: GoogleAuth | null = null;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -58,7 +56,7 @@ export class CourseDeviceAttestationService {
 
     let payload: PlayIntegrityPayload;
     try {
-      const response = await this.googleAuth.request<{
+      const response = await this.getGoogleAuth().request<{
         tokenPayloadExternal?: PlayIntegrityPayload;
       }>({
         url,
@@ -126,6 +124,34 @@ export class CourseDeviceAttestationService {
         .export({ type: 'spki', format: 'pem' })
         .toString(),
     };
+  }
+
+  private getGoogleAuth(): GoogleAuth {
+    if (this.googleAuth) {
+      return this.googleAuth;
+    }
+
+    const projectId = this.config
+      .get<string>('PLAY_INTEGRITY_PROJECT_ID')
+      ?.trim();
+    const clientEmail = this.config
+      .get<string>('PLAY_INTEGRITY_CLIENT_EMAIL')
+      ?.trim();
+    const privateKey = this.config
+      .get<string>('PLAY_INTEGRITY_PRIVATE_KEY')
+      ?.replace(/\\n/g, '\n')
+      .trim();
+
+    this.googleAuth = new GoogleAuth({
+      projectId,
+      credentials:
+        clientEmail && privateKey
+          ? { client_email: clientEmail, private_key: privateKey }
+          : undefined,
+      scopes: ['https://www.googleapis.com/auth/playintegrity'],
+    });
+
+    return this.googleAuth;
   }
 
   async verifyAppleAttestation(params: {
