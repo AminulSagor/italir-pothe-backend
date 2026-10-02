@@ -64,6 +64,9 @@ export class CourseDeviceAccessGuard
       throw new UnauthorizedException('Authenticated user not found.');
 
     const courseId = await this.resolveCourseId(request);
+    if (!(await this.service.requiresCourseDeviceAccess(courseId))) {
+      return true;
+    }
     const deviceKeyId = this.header(request, 'x-course-device-key-id');
     const accessToken = this.header(request, 'x-course-device-access-token');
     if (!deviceKeyId || !accessToken) {

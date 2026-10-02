@@ -1,11 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import { DataSource, Repository } from 'typeorm';
 
+import { Course } from '../../module-2/courses/entities/course.entity';
 import { CourseDeviceAuthorization } from '../entities/course-device-authorization.entity';
 import { CourseDeviceChallenge } from '../entities/course-device-challenge.entity';
 import { CourseDeviceRequest } from '../entities/course-device-request.entity';
 import {
   CourseDeviceAuthorizationStatus,
+  CourseDevicePlatform,
   CourseDeviceRequestDecision,
   CourseDeviceRequestStatus,
 } from '../enums/course-device-access.enums';
@@ -123,5 +125,102 @@ describe('CourseDeviceAccessService admin decisions', () => {
 
     expect(dataSource.transaction).not.toHaveBeenCalled();
     expect(attestation.verifyAndroid).not.toHaveBeenCalled();
+  });
+
+  it('bypasses device binding for free courses', async () => {
+    const dataSource = {
+      transaction: jest.fn(),
+    } as unknown as DataSource;
+    const attestation = {
+      verifyAndroid: jest.fn(),
+    } as unknown as CourseDeviceAttestationService;
+    const courseRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'course-id',
+        isFree: true,
+      }),
+    } as unknown as Repository<Course>;
+    const unusedRepository = {} as Repository<never>;
+    const service = new CourseDeviceAccessService(
+      dataSource,
+      attestation,
+      { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
+      unusedRepository as Repository<CourseDeviceAuthorization>,
+      unusedRepository as Repository<CourseDeviceChallenge>,
+      unusedRepository as Repository<CourseDeviceRequest>,
+      courseRepository,
+    );
+
+    await expect(
+      service.verifyDevice('user-id', 'course-id', {
+        challengeId: '00000000-0000-4000-8000-000000000000',
+        deviceKeyId: 'device-key-id',
+      }),
+    ).resolves.toEqual({
+      authorized: true,
+      code: 'FREE_COURSE',
+      accessToken: expect.any(String),
+    });
+
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(attestation.verifyAndroid).not.toHaveBeenCalled();
+  });
+
+  it('does not create a device challenge for a free course', async () => {
+    const challengeRepository = {
+      save: jest.fn(),
+    } as unknown as Repository<CourseDeviceChallenge>;
+    const courseRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'course-id',
+        isFree: true,
+      }),
+    } as unknown as Repository<Course>;
+    const unusedRepository = {} as Repository<never>;
+    const service = new CourseDeviceAccessService(
+      {} as DataSource,
+      {} as CourseDeviceAttestationService,
+      { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
+      unusedRepository as Repository<CourseDeviceAuthorization>,
+      challengeRepository,
+      unusedRepository as Repository<CourseDeviceRequest>,
+      courseRepository,
+    );
+
+    await expect(
+      service.createChallenge('user-id', 'course-id', {
+        platform: CourseDevicePlatform.ANDROID,
+        deviceKeyId: 'device-key-id',
+        deviceLabel: 'Test phone',
+      }),
+    ).resolves.toEqual({
+      code: 'FREE_COURSE',
+      enforcementEnabled: false,
+    });
+
+    expect(challengeRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('requires device binding for paid courses', async () => {
+    const courseRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'course-id',
+        isFree: false,
+      }),
+    } as unknown as Repository<Course>;
+    const unusedRepository = {} as Repository<never>;
+    const service = new CourseDeviceAccessService(
+      {} as DataSource,
+      {} as CourseDeviceAttestationService,
+      { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
+      unusedRepository as Repository<CourseDeviceAuthorization>,
+      unusedRepository as Repository<CourseDeviceChallenge>,
+      unusedRepository as Repository<CourseDeviceRequest>,
+      courseRepository,
+    );
+
+    await expect(service.requiresCourseDeviceAccess('course-id')).resolves.toBe(
+      true,
+    );
   });
 });

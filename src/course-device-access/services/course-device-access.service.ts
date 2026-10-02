@@ -64,9 +64,15 @@ export class CourseDeviceAccessService {
   ) {
     const course = await this.courseRepository.findOne({
       where: { id: courseId, status: CourseStatus.PUBLISHED },
-      select: { id: true },
+      select: { id: true, isFree: true },
     });
     if (!course) throw new NotFoundException('Course not found.');
+    if (!this.enforcementEnabled || course.isFree) {
+      return {
+        code: course.isFree ? 'FREE_COURSE' : 'ENFORCEMENT_DISABLED',
+        enforcementEnabled: false,
+      };
+    }
 
     const deviceKeyId = dto.deviceKeyId.trim();
     const deviceLabel = dto.deviceLabel.trim();
@@ -106,7 +112,7 @@ export class CourseDeviceAccessService {
       clientDataBase64: entity.clientDataBase64,
       expiresAt: entity.expiresAt,
       requiresAttestation: !known,
-      enforcementEnabled: this.enforcementEnabled,
+      enforcementEnabled: true,
     };
   }
 
@@ -119,6 +125,13 @@ export class CourseDeviceAccessService {
       return {
         authorized: true,
         code: 'ENFORCEMENT_DISABLED',
+        accessToken: randomBytes(32).toString('base64url'),
+      };
+    }
+    if (!(await this.requiresCourseDeviceAccess(courseId))) {
+      return {
+        authorized: true,
+        code: 'FREE_COURSE',
         accessToken: randomBytes(32).toString('base64url'),
       };
     }
@@ -324,6 +337,12 @@ export class CourseDeviceAccessService {
   }
 
   async createRequest(userId: string, courseId: string, deviceKeyId: string) {
+    if (!(await this.requiresCourseDeviceAccess(courseId))) {
+      throw new BadRequestException(
+        'Free courses do not require a device access request.',
+      );
+    }
+
     return this.dataSource.transaction('SERIALIZABLE', async (manager) => {
       const authorizationRepository = manager.getRepository(
         CourseDeviceAuthorization,
@@ -502,6 +521,15 @@ export class CourseDeviceAccessService {
         message: 'A current verified device proof is required for this course.',
       });
     }
+  }
+
+  async requiresCourseDeviceAccess(courseId: string): Promise<boolean> {
+    const course = await this.courseRepository.findOne({
+      where: { id: courseId },
+      select: { id: true, isFree: true },
+    });
+    if (!course) throw new NotFoundException('Course not found.');
+    return !course.isFree;
   }
 
   private async createAuthorizedSession(
