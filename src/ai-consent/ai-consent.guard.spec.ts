@@ -1,7 +1,6 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 
 import { DevicePlatform } from '../devices/enums/device.enums';
-import { UserDeviceService } from '../devices/services/user-device.service';
 import { AiConsentGuard } from './ai-consent.guard';
 import { AiConsentService } from './ai-consent.service';
 
@@ -26,16 +25,12 @@ describe('AiConsentGuard', () => {
     hasConsent: boolean;
     platform: DevicePlatform;
   }) =>
-    new AiConsentGuard(
-      {
-        hasCurrentConsent: jest.fn().mockResolvedValue(params.hasConsent),
-      } as unknown as AiConsentService,
-      {
-        assertAuthSessionActive: jest.fn().mockResolvedValue({
-          platform: params.platform,
-        }),
-      } as unknown as UserDeviceService,
-    );
+    new AiConsentGuard({
+      hasCurrentConsent: jest.fn().mockResolvedValue(params.hasConsent),
+      isAuthenticatedLegacyAndroidClient: jest
+        .fn()
+        .mockResolvedValue(params.platform === DevicePlatform.ANDROID),
+    } as unknown as AiConsentService);
 
   it('allows a legacy Android client without a consent record', async () => {
     const guard = createGuard({

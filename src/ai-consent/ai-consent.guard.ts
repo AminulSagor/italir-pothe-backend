@@ -7,18 +7,13 @@ import {
 } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
-import { DevicePlatform } from 'src/devices/enums/device.enums';
-import { UserDeviceService } from 'src/devices/services/user-device.service';
 import { AiConsentService } from './ai-consent.service';
 
 @Injectable()
 export class AiConsentGuard implements CanActivate {
   private static readonly consentCapability = 'ai-consent-v1';
 
-  constructor(
-    private readonly aiConsentService: AiConsentService,
-    private readonly userDeviceService: UserDeviceService,
-  ) {}
+  constructor(private readonly aiConsentService: AiConsentService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -35,7 +30,11 @@ export class AiConsentGuard implements CanActivate {
     // client remain subject to explicit consent enforcement.
     if (
       !this.isConsentAwareClient(request) &&
-      (await this.isAuthenticatedLegacyAndroidClient(request, userId))
+      (await this.aiConsentService.isAuthenticatedLegacyAndroidClient({
+        userId,
+        deviceId: request.user?.deviceId,
+        sessionId: request.user?.sessionId,
+      }))
     ) {
       return true;
     }
@@ -54,21 +53,5 @@ export class AiConsentGuard implements CanActivate {
       .split(',')
       .map((value) => value.trim().toLowerCase())
       .includes(AiConsentGuard.consentCapability);
-  }
-
-  private async isAuthenticatedLegacyAndroidClient(
-    request: AuthenticatedRequest,
-    userId: string,
-  ): Promise<boolean> {
-    const deviceId = request.user?.deviceId?.trim();
-    const sessionId = request.user?.sessionId?.trim();
-    if (!deviceId || !sessionId) return false;
-
-    const device = await this.userDeviceService.assertAuthSessionActive({
-      userId,
-      deviceId,
-      sessionId,
-    });
-    return device.platform === DevicePlatform.ANDROID;
   }
 }

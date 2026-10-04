@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 
+import { DevicePlatform } from '../devices/enums/device.enums';
+import { UserDeviceService } from '../devices/services/user-device.service';
 import {
   AI_CONSENT_DATA_CATEGORIES,
   AI_CONSENT_PROVIDERS,
@@ -14,7 +16,25 @@ export class AiConsentService {
   constructor(
     @InjectRepository(UserAiConsent)
     private readonly consentRepository: Repository<UserAiConsent>,
+    private readonly userDeviceService: UserDeviceService,
   ) {}
+
+  async isAuthenticatedLegacyAndroidClient(params: {
+    userId: string;
+    deviceId?: string;
+    sessionId?: string;
+  }): Promise<boolean> {
+    const deviceId = params.deviceId?.trim();
+    const sessionId = params.sessionId?.trim();
+    if (!deviceId || !sessionId) return false;
+
+    const device = await this.userDeviceService.assertAuthSessionActive({
+      userId: params.userId,
+      deviceId,
+      sessionId,
+    });
+    return device.platform === DevicePlatform.ANDROID;
+  }
 
   async status(userId: string) {
     const consent = await this.consentRepository.findOne({ where: { userId } });
