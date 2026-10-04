@@ -15,10 +15,10 @@ export class MessageModerationService {
     private readonly llm: MessageModerationLlmService,
     private readonly configService: ConfigService,
   ) {
-    // Default off so an older mobile client cannot be affected merely by
-    // deploying this backend. Enable only after the client handles moderation
-    // acknowledgements.
-    this.enabled = this.booleanConfig('CHAT_MODERATION_ENABLED', false);
+    // UGC is moderated by default. Operators may disable this only for a
+    // documented emergency rollback while the reporting/blocking controls
+    // remain available.
+    this.enabled = this.booleanConfig('CHAT_MODERATION_ENABLED', true);
     this.enforcementConfidence = this.numberConfig(
       'CHAT_MODERATION_HIGH_CONFIDENCE',
       0.9,
@@ -29,11 +29,26 @@ export class MessageModerationService {
 
   async moderate(
     content: string | null | undefined,
+    options: { allowThirdPartyAi?: boolean } = {},
   ): Promise<MessageModerationDecision> {
     if (!this.enabled || !content?.trim()) return this.safe('local');
 
     const scan = this.scanner.scan(content);
     if (!scan.suspicious) return this.safe('local');
+
+    // Messages and webinar chat are UGC, not user-requested AI features. Do
+    // not send them to a third-party AI service unless the caller has proved
+    // that the user gave separate, current permission for that disclosure.
+    // The default privacy-preserving path enforces the local filter directly.
+    if (options.allowThirdPartyAi !== true) {
+      return {
+        action: 'block',
+        confidence: 1,
+        categories: scan.categories,
+        reason: 'Blocked by the on-device/server-local safety filter.',
+        source: 'local',
+      };
+    }
 
     try {
       const result = await this.llm.classify({

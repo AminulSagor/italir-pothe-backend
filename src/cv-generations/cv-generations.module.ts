@@ -11,9 +11,11 @@ import { CvGenerationsService } from './services/cv-generations.service';
 import { CvImageGenerationService } from './services/cv-image-generation.service';
 import { CvPromptService } from './services/cv-prompt.service';
 import { PackageStoreModule } from 'src/package-store/package-store.module';
+import { AiConsentModule } from 'src/ai-consent/ai-consent.module';
 
 @Module({
   imports: [
+    AiConsentModule,
     ConfigModule,
     TypeOrmModule.forFeature([CvGeneration]),
     CvTemplatesModule,

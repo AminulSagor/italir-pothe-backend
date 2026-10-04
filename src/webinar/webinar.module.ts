@@ -21,9 +21,16 @@ import { AgoraTokenService } from './services/agora-token.service';
 import { WebinarAudienceService } from './services/webinar-audience.service';
 import { WebinarNotificationService } from './services/webinar-notification.service';
 import { WebinarsService } from './services/webinars.service';
+import { UserBlocksModule } from 'src/user-blocks/user-blocks.module';
+import { ConfigModule } from '@nestjs/config';
+import { MessageKeywordScannerService } from 'src/chat/moderation/message-keyword-scanner.service';
+import { MessageModerationLlmService } from 'src/chat/moderation/message-moderation-llm.service';
+import { MessageModerationService } from 'src/chat/moderation/message-moderation.service';
 
 @Module({
   imports: [
+    ConfigModule,
+    UserBlocksModule,
     FilesModule,
     NotificationsModule,
     TypeOrmModule.forFeature([
@@ -47,6 +54,9 @@ import { WebinarsService } from './services/webinars.service';
     WebinarGateway,
     WebinarAudienceService,
     WebinarNotificationService,
+    MessageKeywordScannerService,
+    MessageModerationLlmService,
+    MessageModerationService,
   ],
   exports: [WebinarsService, AgoraTokenService],
 })

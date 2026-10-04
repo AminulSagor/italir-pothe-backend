@@ -44,6 +44,18 @@ describe('MessageModerationService', () => {
     expect(classify).not.toHaveBeenCalled();
   });
 
+  it('blocks suspicious UGC locally unless third-party AI sharing is allowed', async () => {
+    const classify = jest.fn();
+    const service = createService(classify);
+
+    await expect(service.moderate('I will kill you')).resolves.toMatchObject({
+      action: 'block',
+      source: 'local',
+      categories: ['threat'],
+    });
+    expect(classify).not.toHaveBeenCalled();
+  });
+
   it('keeps a low-confidence classification safe', async () => {
     const classify = jest.fn().mockResolvedValue({
       action: 'block',
@@ -53,7 +65,9 @@ describe('MessageModerationService', () => {
     });
     const service = createService(classify);
 
-    await expect(service.moderate('I will kill you')).resolves.toMatchObject({
+    await expect(
+      service.moderate('I will kill you', { allowThirdPartyAi: true }),
+    ).resolves.toMatchObject({
       action: 'safe',
       source: 'llm',
     });
@@ -68,7 +82,9 @@ describe('MessageModerationService', () => {
     });
     const service = createService(classify);
 
-    await expect(service.moderate('go die')).resolves.toMatchObject({
+    await expect(
+      service.moderate('go die', { allowThirdPartyAi: true }),
+    ).resolves.toMatchObject({
       action: 'warn',
       confidence: 0.96,
       source: 'llm',
@@ -84,7 +100,9 @@ describe('MessageModerationService', () => {
     const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     const service = createService(classify);
 
-    await expect(service.moderate('I will kill you')).resolves.toMatchObject({
+    await expect(
+      service.moderate('I will kill you', { allowThirdPartyAi: true }),
+    ).resolves.toMatchObject({
       action: 'safe',
       source: 'fail_open',
     });

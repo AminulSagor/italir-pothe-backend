@@ -169,6 +169,20 @@ export class UserBlocksService {
     return count > 0;
   }
 
+  async getBlockedUserIds(currentUserId: string): Promise<string[]> {
+    const blocks = await this.userBlockRepository.find({
+      where: [{ blockerId: currentUserId }, { blockedId: currentUserId }],
+      select: { blockerId: true, blockedId: true },
+    });
+    return [
+      ...new Set(
+        blocks.map((block) =>
+          block.blockerId === currentUserId ? block.blockedId : block.blockerId,
+        ),
+      ),
+    ];
+  }
+
   async assertCanMessage(senderId: string, receiverId: string): Promise<void> {
     const { status } = await this.getBlockStatus(senderId, receiverId);
 

@@ -53,6 +53,7 @@ import { AccountDeletionModule } from './account-deletion/account-deletion.modul
 import { ResumeStudioModule } from './resume-studio/resume-studio.module';
 import { AppUpdateModule } from './app-update/app-update.module';
 import { CourseDeviceAccessModule } from './course-device-access/course-device-access.module';
+import { AiConsentModule } from './ai-consent/ai-consent.module';
 
 @Module({
   imports: [
@@ -136,6 +137,7 @@ import { CourseDeviceAccessModule } from './course-device-access/course-device-a
     ResumeStudioModule,
     AppUpdateModule,
     CourseDeviceAccessModule,
+    AiConsentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

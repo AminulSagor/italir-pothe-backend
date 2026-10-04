@@ -1,9 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
+  Param,
   Req,
   UnauthorizedException,
   UseGuards,
@@ -114,6 +117,26 @@ export class AuthController {
       this.getAuthenticatedUserId(request),
       'apple',
       dto,
+    );
+  }
+
+  @Get('social-accounts')
+  @UseGuards(JwtAuthGuard)
+  getSocialAccounts(@Req() request: AuthenticatedRequest) {
+    return this.authService.getSocialAccounts(
+      this.getAuthenticatedUserId(request),
+    );
+  }
+
+  @Delete('social-accounts/:provider')
+  @UseGuards(JwtAuthGuard)
+  unlinkSocialAccount(
+    @Req() request: AuthenticatedRequest,
+    @Param('provider') provider: string,
+  ) {
+    return this.authService.unlinkSocialAccount(
+      this.getAuthenticatedUserId(request),
+      provider,
     );
   }
 

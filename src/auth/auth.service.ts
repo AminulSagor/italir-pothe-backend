@@ -645,6 +645,86 @@ export class AuthService {
     return { message: `${provider} account linked successfully.` };
   }
 
+  async getSocialAccounts(userId: string) {
+    const [user, accounts] = await Promise.all([
+      this.userRepository
+        .createQueryBuilder('user')
+        .addSelect('user.password')
+        .where('user.id = :userId', { userId })
+        .getOne(),
+      this.socialAccountRepository.find({
+        where: { userId },
+        order: { createdAt: 'ASC' },
+      }),
+    ]);
+    if (!user) throw new NotFoundException('User not found');
+
+    return {
+      hasPassword: Boolean(user.password),
+      accounts: accounts.map((account) => ({
+        provider: account.provider,
+        email: account.providerEmail,
+        connectedAt: account.createdAt,
+      })),
+    };
+  }
+
+  async unlinkSocialAccount(userId: string, providerValue: string) {
+    if (!['google', 'facebook', 'apple'].includes(providerValue)) {
+      throw new BadRequestException('Unsupported social provider.');
+    }
+    const provider = this.toSocialProvider(
+      providerValue as 'google' | 'facebook' | 'apple',
+    );
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.password')
+      .where('user.id = :userId', { userId })
+      .getOne();
+    if (!user) throw new NotFoundException('User not found');
+
+    const accounts = await this.socialAccountRepository
+      .createQueryBuilder('account')
+      .addSelect([
+        'account.appleRefreshTokenCiphertext',
+        'account.appleRefreshTokenIv',
+        'account.appleRefreshTokenAuthTag',
+      ])
+      .where('account.userId = :userId', { userId })
+      .getMany();
+    const account = accounts.find((item) => item.provider === provider);
+    if (!account)
+      throw new NotFoundException('Social account is not connected.');
+
+    if (!user.password && accounts.length <= 1) {
+      throw new BadRequestException(
+        'Set a password or connect another sign-in method before disconnecting this account.',
+      );
+    }
+
+    if (provider === SocialAuthProvider.APPLE) {
+      const ciphertext = account.appleRefreshTokenCiphertext?.trim() ?? '';
+      const iv = account.appleRefreshTokenIv?.trim() ?? '';
+      const authTag = account.appleRefreshTokenAuthTag?.trim() ?? '';
+      if (!ciphertext || !iv || !authTag) {
+        throw new BadRequestException(
+          'Sign in with Apple again before disconnecting this account.',
+        );
+      }
+      await this.appleSignInTokenService.revokeEncryptedRefreshToken({
+        ciphertext,
+        iv,
+        authTag,
+      });
+    }
+
+    await this.socialAccountRepository.delete(account.id);
+    this.logger.log(
+      `Social account unlinked provider=${provider} userId=${userId}`,
+    );
+    return { message: `${provider} account disconnected successfully.` };
+  }
+
   async logout(userId: string, sessionId: string, deviceId: string) {
     await this.userDeviceService.deactivateAuthSession({
       userId,

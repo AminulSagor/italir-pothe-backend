@@ -25,9 +25,11 @@ import { ResumeTemplateService } from './services/resume-template.service';
 import { ResumePaginationService } from './services/resume-pagination.service';
 import { ResumeProficiencyPresentationService } from './services/resume-proficiency-presentation.service';
 import { ResumeCreditService } from './services/resume-credit.service';
+import { AiConsentModule } from '../ai-consent/ai-consent.module';
 
 @Module({
   imports: [
+    AiConsentModule,
     FilesModule,
     PackageStoreModule,
     TypeOrmModule.forFeature([

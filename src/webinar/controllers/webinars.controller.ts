@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -14,7 +15,10 @@ import {
 
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
-import { PaginationQueryDto, SendWebinarChatMessageDto } from '../dto/webinar.dto';
+import {
+  PaginationQueryDto,
+  SendWebinarChatMessageDto,
+} from '../dto/webinar.dto';
 import { WebinarsService } from '../services/webinars.service';
 
 @Controller('webinars')
@@ -48,8 +52,13 @@ export class WebinarsController {
   async getChatMessages(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Query() query: PaginationQueryDto,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return this.webinarsService.getChatMessages(id, query);
+    return this.webinarsService.getChatMessages(
+      id,
+      this.getCurrentUserId(request),
+      query,
+    );
   }
 
   @Post(':id/chat-messages')
@@ -63,6 +72,20 @@ export class WebinarsController {
       this.getCurrentUserId(request),
       request.user?.role,
       dto,
+    );
+  }
+
+  @Delete(':id/chat-messages/:messageId')
+  async removeChatMessage(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('messageId', new ParseUUIDPipe()) messageId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.webinarsService.removeChatMessage(
+      id,
+      messageId,
+      this.getCurrentUserId(request),
+      request.user?.role,
     );
   }
 
@@ -87,7 +110,10 @@ export class WebinarsController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.webinarsService.leaveWebinar(id, this.getCurrentUserId(request));
+    return this.webinarsService.leaveWebinar(
+      id,
+      this.getCurrentUserId(request),
+    );
   }
 
   @Patch(':id/leave-stage')

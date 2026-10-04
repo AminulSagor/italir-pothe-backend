@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { AiTutorService } from './ai-tutor.service';
+import { AiConsentGuard } from '../ai-consent/ai-consent.guard';
 import {
   EvaluateAiTutorLevelTestDto,
   ReconnectAiTutorVoiceSessionDto,
@@ -38,6 +39,7 @@ export class AiTutorController {
   constructor(private readonly aiTutorService: AiTutorService) {}
 
   @Post('voice/sessions')
+  @UseGuards(AiConsentGuard)
   async startVoiceSession(
     @Req() request: AuthenticatedRequest,
     @Body() dto: StartAiTutorVoiceSessionDto,
@@ -65,6 +67,7 @@ export class AiTutorController {
   }
 
   @Post('voice/sessions/:sessionId/reconnect')
+  @UseGuards(AiConsentGuard)
   async reconnectVoiceSession(
     @Req() request: AuthenticatedRequest,
     @Param('sessionId') sessionId: string,
@@ -79,6 +82,7 @@ export class AiTutorController {
   }
 
   @Post('voice/sessions/:sessionId/events')
+  @UseGuards(AiConsentGuard)
   async recordLiveEvents(
     @Req() request: AuthenticatedRequest,
     @Param('sessionId') sessionId: string,
@@ -89,6 +93,7 @@ export class AiTutorController {
   }
 
   @Post('chat')
+  @UseGuards(AiConsentGuard)
   async sendMessage(
     @Req() request: AuthenticatedRequest,
     @Body() dto: SendAiTutorMessageDto,
@@ -104,12 +109,14 @@ export class AiTutorController {
   }
 
   @Post('level-test/voice/session')
+  @UseGuards(AiConsentGuard)
   async startLevelTestVoiceSession(@Req() request: AuthenticatedRequest) {
     const user = this.requireUser(request);
     return this.aiTutorService.startLevelTestVoiceSession(user);
   }
 
   @Post('level-test/transcribe')
+  @UseGuards(AiConsentGuard)
   @UseInterceptors(
     FileInterceptor('audio', {
       limits: { fileSize: 12 * 1024 * 1024 },
@@ -129,6 +136,7 @@ export class AiTutorController {
   }
 
   @Post('level-test/evaluate')
+  @UseGuards(AiConsentGuard)
   async evaluateLevelTest(
     @Req() request: AuthenticatedRequest,
     @Body() dto: EvaluateAiTutorLevelTestDto,

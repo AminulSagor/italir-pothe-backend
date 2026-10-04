@@ -21,6 +21,7 @@ import { FileRequestUser } from 'src/files/services/files.service';
 import { CreateCvGenerationDto } from '../dto/create-cv-generation.dto';
 import { RegenerateCvGenerationDto } from '../dto/regenerate-cv-generation.dto';
 import { CvGenerationsService } from '../services/cv-generations.service';
+import { AiConsentGuard } from 'src/ai-consent/ai-consent.guard';
 
 @Controller('cv-generations')
 @UseGuards(JwtAuthGuard)
@@ -28,6 +29,7 @@ export class CvGenerationsController {
   constructor(private readonly cvGenerationsService: CvGenerationsService) {}
 
   @Post()
+  @UseGuards(AiConsentGuard)
   async createGeneration(
     @Body() dto: CreateCvGenerationDto,
     @Req() request: AuthenticatedRequest,
@@ -63,6 +65,7 @@ export class CvGenerationsController {
   }
 
   @Post(':id/regenerate')
+  @UseGuards(AiConsentGuard)
   async regenerate(
     @Param('id', new ParseUUIDPipe())
     id: string,

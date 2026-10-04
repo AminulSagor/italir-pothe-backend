@@ -96,11 +96,13 @@ export class WebinarGateway {
     this.emitToWebinarRoom(webinarId, 'participants_list_updated', payload);
   }
 
-  emitChatMessageCreated(
-    webinarId: string,
-    payload: Record<string, unknown>,
-  ) {
+  emitChatMessageCreated(webinarId: string, payload: Record<string, unknown>) {
     this.emitToWebinarRoom(webinarId, 'webinar_chat_message_created', payload);
+    this.emitToWebinarRoom(webinarId, 'webinar_chat_messages_updated', payload);
+  }
+
+  emitChatMessageRemoved(webinarId: string, payload: Record<string, unknown>) {
+    this.emitToWebinarRoom(webinarId, 'webinar_chat_message_removed', payload);
     this.emitToWebinarRoom(webinarId, 'webinar_chat_messages_updated', payload);
   }
 

@@ -1,14 +1,26 @@
-import { Body, Controller, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  Req,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
-import { ResumeFieldSuggestionDto, ResumeSummarySuggestionDto } from '../dto/resume-ai.dto';
+import {
+  ResumeFieldSuggestionDto,
+  ResumeSummarySuggestionDto,
+} from '../dto/resume-ai.dto';
 import { ResumeAiSuggestionService } from '../services/resume-ai-suggestion.service';
+import { AiConsentGuard } from '../../ai-consent/ai-consent.guard';
 
 @Controller('resume-studio/ai')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AiConsentGuard)
 export class ResumeAiController {
-  constructor(private readonly aiSuggestionService: ResumeAiSuggestionService) {}
-
+  constructor(
+    private readonly aiSuggestionService: ResumeAiSuggestionService,
+  ) {}
 
   @Post('field-suggestions')
   suggestField(
@@ -16,7 +28,8 @@ export class ResumeAiController {
     @Body() dto: ResumeFieldSuggestionDto,
   ) {
     const userId = request.user?.id ?? request.user?.sub;
-    if (!userId) throw new UnauthorizedException('Authenticated user id is missing');
+    if (!userId)
+      throw new UnauthorizedException('Authenticated user id is missing');
     return this.aiSuggestionService.suggestField(userId, dto);
   }
 
@@ -26,7 +39,8 @@ export class ResumeAiController {
     @Body() dto: ResumeSummarySuggestionDto,
   ) {
     const userId = request.user?.id ?? request.user?.sub;
-    if (!userId) throw new UnauthorizedException('Authenticated user id is missing');
+    if (!userId)
+      throw new UnauthorizedException('Authenticated user id is missing');
     return this.aiSuggestionService.suggestSummary(userId, dto);
   }
 }

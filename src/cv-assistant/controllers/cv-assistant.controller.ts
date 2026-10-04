@@ -19,6 +19,7 @@ import { CreateCvSessionDto } from '../dto/create-cv-session.dto';
 import { SendCvMessageDto } from '../dto/send-cv-message.dto';
 import { StartCvEditDto } from '../dto/start-cv-edit.dto';
 import { CvAssistantService } from '../services/cv-assistant.service';
+import { AiConsentGuard } from 'src/ai-consent/ai-consent.guard';
 
 @Controller('cv-assistant')
 @UseGuards(JwtAuthGuard)
@@ -26,6 +27,7 @@ export class CvAssistantController {
   constructor(private readonly cvAssistantService: CvAssistantService) {}
 
   @Post('sessions')
+  @UseGuards(AiConsentGuard)
   createSession(
     @Body()
     dto: CreateCvSessionDto,
@@ -53,6 +55,7 @@ export class CvAssistantController {
   }
 
   @Post('sessions/:sessionId/messages')
+  @UseGuards(AiConsentGuard)
   sendMessage(
     @Param('sessionId', new ParseUUIDPipe())
     sessionId: string,
@@ -71,6 +74,7 @@ export class CvAssistantController {
   }
 
   @Post('sessions/:sessionId/attachments')
+  @UseGuards(AiConsentGuard)
   attachAssets(
     @Param('sessionId', new ParseUUIDPipe())
     sessionId: string,
@@ -89,6 +93,7 @@ export class CvAssistantController {
   }
 
   @Post('sessions/:sessionId/generate')
+  @UseGuards(AiConsentGuard)
   generateCv(
     @Param('sessionId', new ParseUUIDPipe())
     sessionId: string,
@@ -103,6 +108,7 @@ export class CvAssistantController {
   }
 
   @Post('generations/:generationId/edit')
+  @UseGuards(AiConsentGuard)
   startGenerationEdit(
     @Param('generationId', new ParseUUIDPipe())
     generationId: string,

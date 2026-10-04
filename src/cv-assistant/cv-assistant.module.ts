@@ -13,9 +13,11 @@ import { CvAssistantOpenAiService } from './services/cv-assistant-openai.service
 import { CvAssistantService } from './services/cv-assistant.service';
 import { CvQuestionPlannerService } from './services/cv-question-planner.service';
 import { CvTemplateAnalysisService } from './services/cv-template-analysis.service';
+import { AiConsentModule } from 'src/ai-consent/ai-consent.module';
 
 @Module({
   imports: [
+    AiConsentModule,
     ConfigModule,
 
     TypeOrmModule.forFeature([CvAssistantSession, CvAssistantMessage]),

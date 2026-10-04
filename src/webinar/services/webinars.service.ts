@@ -32,6 +32,9 @@ import { WebinarGateway } from '../gateways/webinar.gateway';
 import { AgoraLiveRole, AgoraTokenService } from './agora-token.service';
 import { WebinarAudienceService } from './webinar-audience.service';
 import { WebinarNotificationService } from './webinar-notification.service';
+import { UserBlocksService } from 'src/user-blocks/user-blocks.service';
+import { MessageModerationService } from 'src/chat/moderation/message-moderation.service';
+import { MessageModerationBlockedException } from 'src/chat/moderation/message-moderation.exception';
 
 type WebinarUserRaw = {
   userId: string;
@@ -89,6 +92,8 @@ export class WebinarsService {
     private readonly webinarGateway: WebinarGateway,
     private readonly webinarAudienceService: WebinarAudienceService,
     private readonly webinarNotificationService: WebinarNotificationService,
+    private readonly userBlocksService: UserBlocksService,
+    private readonly messageModerationService: MessageModerationService,
   ) {}
 
   async createWebinar(dto: CreateWebinarDto, adminId: string) {
@@ -170,7 +175,10 @@ export class WebinarsService {
       webinar.sendNotification &&
       (!wasScheduled || !wasNotificationEnabled)
     ) {
-      await this.webinarNotificationService.notifyScheduled(webinar.id, adminId);
+      await this.webinarNotificationService.notifyScheduled(
+        webinar.id,
+        adminId,
+      );
     }
 
     return {
@@ -330,7 +338,8 @@ export class WebinarsService {
     });
 
     if (speakerRequest) {
-      speakerRequest.speakingPermission = WebinarSpeakerRequestPermission.REJECTED;
+      speakerRequest.speakingPermission =
+        WebinarSpeakerRequestPermission.REJECTED;
       speakerRequest.respondedAt = new Date();
       await this.webinarSpeakerRequestRepository.save(speakerRequest);
     }
@@ -386,13 +395,15 @@ export class WebinarsService {
       });
     }
 
-    speakerRequest.speakingPermission = WebinarSpeakerRequestPermission.REQUESTED;
+    speakerRequest.speakingPermission =
+      WebinarSpeakerRequestPermission.REQUESTED;
     speakerRequest.respondedByAdminId = null;
     speakerRequest.respondedAt = null;
 
     await this.webinarSpeakerRequestRepository.save(speakerRequest);
 
-    participant.speakingPermission = WebinarParticipantSpeakingPermission.REQUESTED;
+    participant.speakingPermission =
+      WebinarParticipantSpeakingPermission.REQUESTED;
     await this.webinarParticipantRepository.save(participant);
 
     const speakerRequestResponse = await this.findSpeakerRequestResponse(
@@ -551,10 +562,7 @@ export class WebinarsService {
     };
   }
 
-  async getUpcomingWebinarsList(
-    userId: string,
-    query: PaginationQueryDto,
-  ) {
+  async getUpcomingWebinarsList(userId: string, query: PaginationQueryDto) {
     return this.getWebinarsListByStatus({
       status: WebinarStatus.SCHEDULED,
       query,
@@ -597,7 +605,11 @@ export class WebinarsService {
     });
   }
 
-  async approveSpeakerRequest(webinarId: string, userId: string, adminId: string) {
+  async approveSpeakerRequest(
+    webinarId: string,
+    userId: string,
+    adminId: string,
+  ) {
     return this.updateSpeakerRequestPermission({
       webinarId,
       userId,
@@ -608,7 +620,11 @@ export class WebinarsService {
     });
   }
 
-  async rejectSpeakerRequest(webinarId: string, userId: string, adminId: string) {
+  async rejectSpeakerRequest(
+    webinarId: string,
+    userId: string,
+    adminId: string,
+  ) {
     return this.updateSpeakerRequestPermission({
       webinarId,
       userId,
@@ -619,7 +635,11 @@ export class WebinarsService {
     });
   }
 
-  async getChatMessages(webinarId: string, query: PaginationQueryDto) {
+  async getChatMessages(
+    webinarId: string,
+    currentUserId: string,
+    query: PaginationQueryDto,
+  ) {
     await this.findLiveWebinarById(webinarId);
 
     const pagination = this.normalizePagination(query);
@@ -633,6 +653,17 @@ export class WebinarsService {
         { uploadStatus: FileUploadStatus.UPLOADED },
       )
       .where('chatMessage.webinarId = :webinarId', { webinarId });
+
+    const blockedUserIds =
+      await this.userBlocksService.getBlockedUserIds(currentUserId);
+    if (blockedUserIds.length > 0) {
+      baseQuery.andWhere(
+        'chatMessage.senderUserId NOT IN (:...blockedUserIds)',
+        {
+          blockedUserIds,
+        },
+      );
+    }
 
     const totalItems = await baseQuery.clone().getCount();
 
@@ -670,7 +701,8 @@ export class WebinarsService {
     dto: SendWebinarChatMessageDto,
   ) {
     const webinar = await this.findLiveWebinarById(webinarId);
-    const isHost = userRole === UserRole.ADMIN && webinar.createdByAdminId === userId;
+    const isHost =
+      userRole === UserRole.ADMIN && webinar.createdByAdminId === userId;
 
     if (!isHost) {
       const participant = await this.webinarParticipantRepository.findOne({
@@ -681,8 +713,17 @@ export class WebinarsService {
       });
 
       if (!participant || participant.leftAt) {
-        throw new BadRequestException('Please join the live webinar before chatting.');
+        throw new BadRequestException(
+          'Please join the live webinar before chatting.',
+        );
       }
+    }
+
+    const moderation = await this.messageModerationService.moderate(
+      dto.message,
+    );
+    if (moderation.action === 'block') {
+      throw new MessageModerationBlockedException();
     }
 
     const chatMessage = this.webinarChatMessageRepository.create({
@@ -692,8 +733,11 @@ export class WebinarsService {
       isHost,
     });
 
-    const savedChatMessage = await this.webinarChatMessageRepository.save(chatMessage);
-    const chatMessageResponse = await this.findChatMessageResponse(savedChatMessage.id);
+    const savedChatMessage =
+      await this.webinarChatMessageRepository.save(chatMessage);
+    const chatMessageResponse = await this.findChatMessageResponse(
+      savedChatMessage.id,
+    );
 
     this.webinarGateway.emitChatMessageCreated(webinarId, {
       chatMessage: chatMessageResponse,
@@ -702,7 +746,47 @@ export class WebinarsService {
     return {
       message: 'Chat message sent successfully.',
       chatMessage: chatMessageResponse,
+      moderationWarning:
+        moderation.action === 'warn'
+          ? {
+              code: 'MESSAGE_ALLOWED_WITH_WARNING',
+              message:
+                'Your message was sent, but it may be inappropriate. Please communicate respectfully.',
+              categories: moderation.categories,
+            }
+          : null,
     };
+  }
+
+  async removeChatMessage(
+    webinarId: string,
+    messageId: string,
+    userId: string,
+    userRole: UserRole | string | undefined,
+  ) {
+    const webinar = await this.findWebinarEntityById(webinarId);
+    const canModerate =
+      userRole === UserRole.MODERATOR ||
+      userRole === UserRole.LEAD_MODERATOR ||
+      (userRole === UserRole.ADMIN && webinar.createdByAdminId === userId);
+    if (!canModerate) {
+      throw new ForbiddenException(
+        'Only the webinar host or a moderator can remove chat messages.',
+      );
+    }
+
+    const message = await this.webinarChatMessageRepository.findOne({
+      where: { id: messageId, webinarId },
+    });
+    if (!message)
+      throw new NotFoundException('Webinar chat message not found.');
+
+    await this.webinarChatMessageRepository.delete(message.id);
+    this.webinarGateway.emitChatMessageRemoved(webinarId, {
+      messageId: message.id,
+      removedByUserId: userId,
+    });
+    return { message: 'Webinar chat message removed.' };
   }
 
   async deleteWebinar(id: string) {
@@ -818,7 +902,8 @@ export class WebinarsService {
     );
 
     if (
-      params.speakerRequestPermission === WebinarSpeakerRequestPermission.GRANTED
+      params.speakerRequestPermission ===
+      WebinarSpeakerRequestPermission.GRANTED
     ) {
       this.webinarGateway.emitSpeakerRequestApproved(params.webinarId, {
         participant: participantResponse,
@@ -1119,10 +1204,9 @@ export class WebinarsService {
     webinarId: string,
     userId: string,
   ): Promise<void> {
-    const audienceCourses =
-      await this.webinarAudienceCourseRepository.find({
-        where: { webinarId },
-      });
+    const audienceCourses = await this.webinarAudienceCourseRepository.find({
+      where: { webinarId },
+    });
     const courseIds = audienceCourses.map(
       (audienceCourse) => audienceCourse.courseId,
     );
@@ -1137,9 +1221,7 @@ export class WebinarsService {
         courseIds,
       );
 
-    if (
-      this.webinarAudienceService.isEligible(courseIds, enrolledCourseIds)
-    ) {
+    if (this.webinarAudienceService.isEligible(courseIds, enrolledCourseIds)) {
       return;
     }
 
@@ -1159,7 +1241,9 @@ export class WebinarsService {
   private normalizeNullableString(value?: string | null): string | null {
     const normalizedValue = value?.trim();
 
-    return normalizedValue && normalizedValue.length > 0 ? normalizedValue : null;
+    return normalizedValue && normalizedValue.length > 0
+      ? normalizedValue
+      : null;
   }
 
   private parseIsoDateTime(dateTime: string): Date {
@@ -1203,7 +1287,9 @@ export class WebinarsService {
         chatMessage.senderFullName ?? (chatMessage.isHost ? 'Host' : 'User'),
       senderRole: chatMessage.senderRole,
       senderProfilePhoto: chatMessage.senderProfilePhotoStorageKey
-        ? this.s3Service.createPublicUrl(chatMessage.senderProfilePhotoStorageKey)
+        ? this.s3Service.createPublicUrl(
+            chatMessage.senderProfilePhotoStorageKey,
+          )
         : null,
       message: chatMessage.message,
       isHost: chatMessage.isHost,
@@ -1253,12 +1339,13 @@ export class WebinarsService {
     let uid = baseUid;
 
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      const existingParticipant = await this.webinarParticipantRepository.findOne({
-        where: {
-          webinarId,
-          agoraUid: uid,
-        },
-      });
+      const existingParticipant =
+        await this.webinarParticipantRepository.findOne({
+          where: {
+            webinarId,
+            agoraUid: uid,
+          },
+        });
 
       if (!existingParticipant || existingParticipant.userId === userId) {
         return uid;
@@ -1271,9 +1358,7 @@ export class WebinarsService {
   }
 
   private createAgoraUid(webinarId: string, userId: string): number {
-    const hash = createHash('sha256')
-      .update(`${webinarId}:${userId}`)
-      .digest();
+    const hash = createHash('sha256').update(`${webinarId}:${userId}`).digest();
     const value = hash.readUInt32BE(0);
 
     return (value % 2147483646) + 1;

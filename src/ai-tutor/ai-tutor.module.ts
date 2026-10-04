@@ -11,9 +11,11 @@ import { AiTutorLiveSession } from './entities/ai-tutor-live-session.entity';
 import { AiTutorLearningMemory } from './entities/ai-tutor-learning-memory.entity';
 import { AiTutorLiveSessionService } from './ai-tutor-live-session.service';
 import { GeminiLiveService } from './gemini-live.service';
+import { AiConsentModule } from 'src/ai-consent/ai-consent.module';
 
 @Module({
   imports: [
+    AiConsentModule,
     PackageStoreModule,
     TypeOrmModule.forFeature([
       AiTutorLearnerProfile,
