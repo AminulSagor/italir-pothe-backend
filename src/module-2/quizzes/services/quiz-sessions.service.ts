@@ -706,10 +706,10 @@ export class QuizSessionsService {
       ) {
         activityType = LearningActivityType.QUIZ_AUDIO_TRANSCRIPTION_CORRECT;
       } else if (
-        question.questionType === QuizQuestionFormat.TRUE_FALSE &&
-        question.mediaFileId
+        question.questionType === QuizQuestionFormat.LISTENING_MCQ &&
+        (question.mediaFileId || question.generatedAudioText)
       ) {
-        activityType = LearningActivityType.QUIZ_TRUE_FALSE_AUDIO_CORRECT;
+        activityType = LearningActivityType.QUIZ_LISTENING_MCQ_CORRECT;
       }
 
       if (activityType) {
@@ -760,7 +760,7 @@ export class QuizSessionsService {
 
     let fillInTheBlanksCorrect = 0;
     let audioTranscriptionCorrect = 0;
-    let trueFalseCorrect = 0;
+    let listeningMcqCorrect = 0;
     let audioTrackCount = 0;
 
     let matchPairTotal = 0;
@@ -792,11 +792,11 @@ export class QuizSessionsService {
       }
 
       if (
-        question.questionType === QuizQuestionFormat.TRUE_FALSE &&
+        question.questionType === QuizQuestionFormat.LISTENING_MCQ &&
         isCorrect &&
         hasAudio
       ) {
-        trueFalseCorrect += 1;
+        listeningMcqCorrect += 1;
       }
 
       if (question.questionType === QuizQuestionFormat.MATCH_THE_PAIR) {
@@ -811,7 +811,7 @@ export class QuizSessionsService {
     return {
       fillInTheBlanksCorrect,
       audioTranscriptionCorrect,
-      trueFalseCorrect,
+      listeningMcqCorrect,
       audioTrackCount,
       matchPairsPerfect:
         matchPairTotal > 0 && matchPairTotal === matchPairCorrect,

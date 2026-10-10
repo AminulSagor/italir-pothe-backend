@@ -148,4 +148,26 @@ describe('DailyChallengesService tracking rules', () => {
       { taskKey: DailyChallengeTaskKey.READ_THEORY_PAGE, value: 1 },
     ]);
   });
+
+  it('presents the current Listening MCQ title for existing challenge rows', () => {
+    const service = createService();
+    const tasks = (
+      service as unknown as {
+        applyCurrentTaskTitles: (
+          items: object[],
+          variationKey: string,
+        ) => { title: string }[];
+      }
+    ).applyCurrentTaskTitles(
+      [
+        {
+          taskKey: DailyChallengeTaskKey.LISTENING_MCQ_CORRECT,
+          title: 'Get 3 “True/False” Audio Questions Correct',
+        },
+      ],
+      'daily_challenge_variation_06',
+    );
+
+    expect(tasks[0].title).toBe('Answer 3 “Listening MCQ” Questions Correctly');
+  });
 });

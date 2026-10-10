@@ -130,8 +130,8 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         rewardXp: 10,
       },
       {
-        key: DailyChallengeTaskKey.TRUE_FALSE_AUDIO_CORRECT,
-        title: 'Get 3 “True/False” Audio Questions Correct',
+        key: DailyChallengeTaskKey.LISTENING_MCQ_CORRECT,
+        title: 'Answer 3 “Listening MCQ” Questions Correctly',
         targetValue: 3,
         rewardXp: 15,
       },

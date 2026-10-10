@@ -20,7 +20,8 @@ export enum DailyChallengeTaskKey {
   LEARN_VERBS = 'learn_verbs',
 
   AUDIO_TRANSCRIPTION_NO_MISTAKES = 'audio_transcription_no_mistakes',
-  TRUE_FALSE_AUDIO_CORRECT = 'true_false_audio_correct',
+  // Keep the persisted value for compatibility with existing challenge rows.
+  LISTENING_MCQ_CORRECT = 'true_false_audio_correct',
   LISTEN_TRACKS_HUB = 'listen_tracks_hub',
 
   ACTIVE_LEARNING_MINUTES = 'active_learning_minutes',
@@ -36,7 +37,8 @@ export enum LearningActivityType {
   QUIZ_FILL_BLANKS_CORRECT = 'quiz_fill_blanks_correct',
   QUIZ_MATCH_PAIRS_PERFECT = 'quiz_match_pairs_perfect',
   QUIZ_AUDIO_TRANSCRIPTION_CORRECT = 'quiz_audio_transcription_correct',
-  QUIZ_TRUE_FALSE_AUDIO_CORRECT = 'quiz_true_false_audio_correct',
+  // Keep the persisted value for compatibility with existing activity logs.
+  QUIZ_LISTENING_MCQ_CORRECT = 'quiz_true_false_audio_correct',
 
   XP_EARNED = 'xp_earned',
   AUDIO_TRACK_LISTENED = 'audio_track_listened',

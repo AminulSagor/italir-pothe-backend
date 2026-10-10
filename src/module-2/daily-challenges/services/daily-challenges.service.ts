@@ -110,7 +110,10 @@ export class DailyChallengesService {
       totalXp,
       streak,
       xpBoost,
-      tasks: this.sortProgress(progress),
+      tasks: this.applyCurrentTaskTitles(
+        this.sortProgress(progress),
+        planWithTasks.plan.variationKey,
+      ),
       chest: {
         isUnlocked: progress.every(
           (item) =>
@@ -861,7 +864,7 @@ export class DailyChallengesService {
 
         if (metadata.trueFalseAudioCorrectCount) {
           updates.push({
-            taskKey: DailyChallengeTaskKey.TRUE_FALSE_AUDIO_CORRECT,
+            taskKey: DailyChallengeTaskKey.LISTENING_MCQ_CORRECT,
             value: Number(metadata.trueFalseAudioCorrectCount),
           });
         }
@@ -923,9 +926,9 @@ export class DailyChallengesService {
 
         break;
 
-      case LearningActivityType.QUIZ_TRUE_FALSE_AUDIO_CORRECT:
+      case LearningActivityType.QUIZ_LISTENING_MCQ_CORRECT:
         updates.push({
-          taskKey: DailyChallengeTaskKey.TRUE_FALSE_AUDIO_CORRECT,
+          taskKey: DailyChallengeTaskKey.LISTENING_MCQ_CORRECT,
           value,
         });
 
@@ -1099,5 +1102,25 @@ export class DailyChallengesService {
     }
 
     return new Date().toISOString().slice(0, 10);
+  }
+
+  private applyCurrentTaskTitles(
+    items: UserDailyChallengeProgress[],
+    variationKey: string,
+  ) {
+    const variation = DAILY_CHALLENGE_VARIATIONS.find(
+      (item) => item.key === variationKey,
+    );
+    if (!variation) {
+      return items;
+    }
+
+    const titles = new Map(
+      variation.tasks.map((task) => [task.key, task.title]),
+    );
+    return items.map((item) => ({
+      ...item,
+      title: titles.get(item.taskKey) ?? item.title,
+    }));
   }
 }
