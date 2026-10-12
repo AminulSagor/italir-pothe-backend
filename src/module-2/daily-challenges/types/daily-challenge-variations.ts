@@ -11,7 +11,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.LEARN_NEW_WORDS,
         title: 'Learn 5 New Words',
         details:
-          'Open a course chapter and choose Vocabulary. Review the flashcards and mark five words you have not learned before as “I Know.” Words already in your Needs Review stack do not count as new words.',
+          'Do this: Open a course chapter, choose Vocabulary, mark five previously unlearned words as “I Know,” and finish the full flashcard session.\n\nWhen it records: After the completed session saves each word from New or Learning to Known.\n\nWon’t count: Quitting early, choosing “Study Again,” words already Known or Mastered, or weak words cleared through Needs Review.',
         targetValue: 5,
         rewardXp: 10,
       },
@@ -19,7 +19,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.QUIZ_SCORE_80,
         title: 'Score 80% or Higher on Any Quiz',
         details:
-          'Complete any course quiz with a final score of at least 80%. Your progress is recorded when you submit and finish the quiz.',
+          'Do this: Finish any course quiz with at least 80% of its questions correct.\n\nWhen it records: After the entire quiz is submitted and the final score is calculated.\n\nWon’t count: An unfinished quiz, a final score below 80%, or reaching 80% temporarily before submitting.',
         targetValue: 1,
         rewardXp: 15,
       },
@@ -27,7 +27,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.LISTEN_AUDIO_TRACKS,
         title: 'Listen to 3 Lesson Audio Tracks',
         details:
-          'Open a course chapter or quiz and play three audio tracks through to the end. Practice Hub tracks belong to a separate challenge.',
+          'Do this: Play three different audio tracks found in course lessons or quiz questions all the way to the end.\n\nWhen it records: Each track counts after playback finishes and its completion request succeeds.\n\nWon’t count: Opening the player without pressing play, stopping early, replaying the same track on the same day, or Practice Hub audio.',
         targetValue: 3,
         rewardXp: 15,
       },
@@ -40,7 +40,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.REVIEW_IMPORTANT_VERB,
         title: 'Review 1 Important Verb',
         details:
-          'Go to Practice Hub, open Important Verbs, choose a verb, and use its learning or pronunciation action to complete one review.',
+          'Do this: Go to Practice Hub, open Important Verbs, choose one verb, and tap one of its pronunciation audio buttons.\n\nWhen it records: After the audio starts successfully and the review request is saved.\n\nWon’t count: Only opening the verb list or details page, an unavailable Italian voice, failed audio, or leaving without tapping an audio button.',
         targetValue: 1,
         rewardXp: 15,
       },
@@ -48,7 +48,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.READ_THEORY_PAGE,
         title: 'Read 1 Theory or Grammar Page',
         details:
-          'Open a course chapter and select its Theory or Grammar material. Open the page or PDF and read it; the challenge is recorded when the theory material opens.',
+          'Do this: Open an available Theory or Grammar PDF from a course chapter or a Skill Builder career track.\n\nWhen it records: Course theory counts after the PDF loads; Skill Builder theory counts when its available resource is opened.\n\nWon’t count: Only opening the chapter or track, tapping a locked or missing resource, or viewing unrelated content.',
         targetValue: 1,
         rewardXp: 10,
       },
@@ -56,7 +56,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.FILL_BLANK_CORRECT,
         title: 'Answer 5 Fill-in-the-Blank Questions Correctly',
         details:
-          'Complete fill-in-the-blank questions in course quizzes. Five correct answers count across the quizzes you finish today.',
+          'Do this: Answer five Fill in the Blanks questions correctly in course quizzes. The five answers may come from multiple quizzes today.\n\nWhen it records: Each correct answer counts after that answer is checked and saved.\n\nWon’t count: Incorrect answers, other question formats, an answer that was never submitted, or submitting the same question again.',
         targetValue: 5,
         rewardXp: 10,
       },
@@ -69,15 +69,15 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.CLEAR_WEAK_FLASHCARDS,
         title: 'Clear 5 Words from Your Needs Review Flashcards',
         details:
-          'Open Vocabulary and tap the Needs Attention banner. Review the weak-word flashcards, mark five as “I Know,” and finish the review session so the changes are saved.',
+          'Do this: Open a lesson’s Vocabulary, tap Needs Attention, mark five weak words as “I Know,” and finish the complete Needs Review session.\n\nWhen it records: After the session saves each selected word from Weak to Known.\n\nWon’t count: Quitting early, choosing “Study Again,” marking ordinary new words as known, or reviewing words that were not weak before the session.',
         targetValue: 5,
         rewardXp: 10,
       },
       {
         key: DailyChallengeTaskKey.MATCH_PAIRS_100,
-        title: 'Complete a Match the Pairs Quiz with 100% Accuracy',
+        title: 'Answer Every Match-the-Pairs Question Correctly',
         details:
-          'Find a course quiz containing a Match the Pairs question. Match every pair correctly without a mistake, then finish and submit the quiz.',
+          'Do this: In one course quiz, answer every Match the Pair question correctly, then finish the quiz. Other question formats do not need a perfect score for this challenge.\n\nWhen it records: After the full quiz is submitted and all of its Match the Pair questions are correct.\n\nWon’t count: One incorrect Match the Pair question, an unfinished quiz, or a quiz with no Match the Pair questions.',
         targetValue: 1,
         rewardXp: 10,
       },
@@ -85,7 +85,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.ANSWER_COMBO_5,
         title: 'Get 5 Correct Answers in a Row in Any Quiz',
         details:
-          'Answer five consecutive quiz questions correctly in one quiz attempt. A wrong answer breaks the streak, so the next correct answer starts a new one.',
+          'Do this: Answer five consecutive questions correctly, in question order, during one quiz attempt.\n\nWhen it records: The streak updates as confirmed answers are saved and is also verified when the quiz is submitted.\n\nWon’t count: Correct answers split across different quiz attempts; any wrong answer resets the current streak to zero.',
         targetValue: 5,
         rewardXp: 5,
       },
@@ -98,7 +98,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.EARN_FAST_FINISH_BONUS,
         title: 'Earn the +15 XP Fast Finish Bonus on Any Quiz',
         details:
-          'Complete and submit any timed course quiz quickly enough to receive the +15 XP Fast Finish bonus shown in the quiz results.',
+          'Do this: Complete a course quiz within its Fast Finish limit: no more than 13 seconds for each question in the quiz.\n\nWhen it records: After the submitted quiz result awards the +15 XP Fast Finish bonus.\n\nWon’t count: An unfinished quiz, missing or zero recorded time, or a total time above 13 seconds multiplied by the number of questions.',
         targetValue: 1,
         rewardXp: 10,
       },
@@ -106,7 +106,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.FLASHCARD_SWIPES,
         title: 'Review 15 Vocabulary Flashcards',
         details:
-          'Open a course chapter, choose Vocabulary, switch to Flashcards, and review 15 cards by selecting “I Know” or “Study Again.”',
+          'Do this: Open a lesson’s Vocabulary, switch to Flashcards, and respond to 15 cards with “I Know” or “Study Again.” You may use more than one session today.\n\nWhen it records: Each card counts after its response request succeeds; you do not need to wait for the whole session to finish.\n\nWon’t count: Only viewing or flipping a card, browsing the vocabulary list, or leaving a card without choosing a response.',
         targetValue: 15,
         rewardXp: 15,
       },
@@ -114,7 +114,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.EARN_XP_50,
         title: 'Earn 50 XP Today',
         details:
-          'Earn a total of 50 XP today from lessons, quizzes, and other eligible learning activities. Daily challenge reward XP also contributes after it is claimed.',
+          'Do this: Earn 50 eligible XP today by completing lessons, quizzes, or other XP-awarding learning activities.\n\nWhen it records: The challenge reads today’s saved XP transactions and updates automatically.\n\nWon’t count: Daily-challenge task or chest rewards, incomplete activities, zero-XP results, or XP recorded on another local date.',
         targetValue: 50,
         rewardXp: 15,
       },
@@ -127,7 +127,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.WATCH_VIDEO_80,
         title: 'Watch at Least 80% of a Video Lesson',
         details:
-          'Open a course chapter and watch its lesson video until at least 80% has played. Skipping ahead does not replace the required watched progress.',
+          'Do this: Play a course lesson or Skill Builder video until its reported playback progress reaches at least 80%.\n\nWhen it records: After an 80% or higher progress update is saved successfully.\n\nWon’t count: Only opening the video, stopping below 80%, offline progress that never syncs, or watching an unrelated video outside these learning areas.',
         targetValue: 80,
         rewardXp: 10,
       },
@@ -135,7 +135,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.COMPLETE_CHAPTER_QUIZ_AFTER_VIDEO,
         title: 'Complete a Chapter Quiz After Its Video',
         details:
-          'Watch the chapter video far enough to unlock the quiz, then open and complete that chapter’s quiz. Submit the quiz to record completion.',
+          'Do this: Meet a chapter quiz’s video-watch requirement, then complete and submit that same chapter’s quiz. A video requirement completed earlier still qualifies.\n\nWhen it records: At quiz submission, when the saved video progress meets that quiz’s unlock percentage.\n\nWon’t count: A quiz from another chapter, an unfinished quiz, a lesson with no qualifying video, or video progress below the quiz’s requirement.',
         targetValue: 1,
         rewardXp: 15,
       },
@@ -143,7 +143,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.LEARN_VERBS,
         title: 'Learn 3 New Verbs',
         details:
-          'Go to Practice Hub and open Important Verbs. Use the learning or pronunciation action on three verbs you have not reviewed before. New verb vocabulary can also count.',
+          'Do this: In Practice Hub, choose three Important Verbs you have never reviewed and tap a pronunciation audio button for each one.\n\nWhen it records: Each verb counts only on its first successful audio-start review.\n\nWon’t count: Previously reviewed verbs, repeated audio on the same verb, only opening the verb page, or audio that fails to start.',
         targetValue: 3,
         rewardXp: 15,
       },
@@ -156,15 +156,15 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.AUDIO_TRANSCRIPTION_NO_MISTAKES,
         title: 'Complete an Audio Transcription Question without Mistakes',
         details:
-          'Open a course quiz containing an Audio Transcription question. Listen, enter the transcription correctly on the first attempt, and finish the quiz.',
+          'Do this: In a course quiz, open a Listen and Assemble audio question, arrange the words in the correct order, and submit the correct answer.\n\nWhen it records: After that question’s correct answer is checked and saved.\n\nWon’t count: An incorrect sequence, a Listening multiple-choice question, only playing the audio, or leaving without submitting the answer.',
         targetValue: 1,
         rewardXp: 10,
       },
       {
         key: DailyChallengeTaskKey.LISTENING_MCQ_CORRECT,
-        title: 'Answer 3 Listening MCQ Questions Correctly',
+        title: 'Answer 3 Listening Questions Correctly',
         details:
-          'Complete Listening MCQ questions in course quizzes and choose the correct answer for three of them. Progress is recorded when the quiz is finished.',
+          'Do this: Correctly answer three Listening multiple-choice questions that include audio. They may come from more than one course quiz today.\n\nWhen it records: Each correct answer counts after that answer is checked and saved.\n\nWon’t count: Text-only multiple choice, the separate True/False format, wrong answers, only playing the audio, or leaving without submitting an answer.',
         targetValue: 3,
         rewardXp: 15,
       },
@@ -172,7 +172,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.LISTEN_TRACKS_HUB,
         title: 'Listen to 5 Audio Tracks in the Practice Hub',
         details:
-          'Open Practice Hub and play five learning audio tracks through their completion action. Important Verb pronunciation and Skill Builder sentence audio count toward this challenge.',
+          'Do this: Complete five eligible audio actions in Practice Hub using Important Verb pronunciation or unlearned Skill Builder sentences.\n\nWhen it records: Important Verb audio counts after it starts successfully; a Skill Builder sentence counts after its speech finishes and the review saves.\n\nWon’t count: Only opening a page, failed verb audio, stopping sentence speech early, replaying an already learned sentence, or course lesson audio outside Practice Hub.',
         targetValue: 5,
         rewardXp: 5,
       },
@@ -185,7 +185,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.ACTIVE_LEARNING_MINUTES,
         title: 'Spend 15 Minutes Actively Learning',
         details:
-          'Use lessons, videos, quizzes, vocabulary, or Practice Hub activities for 15 active minutes today. Time is counted from verified learning activity, not simply leaving the app open.',
+          'Do this: Keep eligible learning screens visible in the foreground for a total of 15 minutes today. These include lessons, PDFs, quizzes, exams, vocabulary, Practice Hub, AI Tutor, and live webinars.\n\nWhen it records: Foreground time syncs about every five minutes and when you leave a tracked screen or background the app; completed full minutes are shown.\n\nWon’t count: Home or other untracked screens, time while the app is backgrounded or the device is locked, failed uploads that have not synced yet, or time from another local date.',
         targetValue: 15,
         rewardXp: 15,
       },
@@ -193,7 +193,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.REVIEW_VOCAB_WORDS,
         title: 'Review 20 Vocabulary Words',
         details:
-          'Open a course chapter, choose Vocabulary, and review 20 word cards. Each card counts when you select “I Know” or “Study Again.”',
+          'Do this: Open lesson Vocabulary and respond to 20 flashcards using “I Know” or “Study Again.” You may continue across multiple sessions today.\n\nWhen it records: Each card counts after its response request succeeds; completing the whole session is not required for this challenge.\n\nWon’t count: Only viewing or flipping a word, browsing the vocabulary list, or leaving a card without selecting a response.',
         targetValue: 20,
         rewardXp: 20,
       },
@@ -201,7 +201,7 @@ export const DAILY_CHALLENGE_VARIATIONS: DailyChallengeVariation[] = [
         key: DailyChallengeTaskKey.EARN_XP_100,
         title: 'Earn 100 XP Today',
         details:
-          'Earn a total of 100 XP today from eligible lessons, quizzes, and learning activities. Your XP is also reflected on the leaderboard.',
+          'Do this: Earn 100 eligible XP today by completing lessons, quizzes, or other XP-awarding learning activities.\n\nWhen it records: The challenge reads today’s saved XP transactions and updates automatically.\n\nWon’t count: Daily-challenge task or chest rewards, incomplete activities, zero-XP results, or XP recorded on another local date.',
         targetValue: 100,
         rewardXp: 50,
       },

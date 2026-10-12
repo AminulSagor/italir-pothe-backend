@@ -150,7 +150,7 @@ describe('DailyChallengesService tracking rules', () => {
     ]);
   });
 
-  it('presents the current Listening MCQ title for existing challenge rows', () => {
+  it('presents the current Listening title for existing rows', () => {
     const service = createService();
     const tasks = (
       service as unknown as {
@@ -169,8 +169,8 @@ describe('DailyChallengesService tracking rules', () => {
       'daily_challenge_variation_06',
     );
 
-    expect(tasks[0].title).toBe('Answer 3 Listening MCQ Questions Correctly');
-    expect(tasks[0].details).toContain('course quizzes');
+    expect(tasks[0].title).toBe('Answer 3 Listening Questions Correctly');
+    expect(tasks[0].details).toContain('course quiz');
   });
 
   it('provides completion instructions for every challenge', () => {
@@ -179,6 +179,13 @@ describe('DailyChallengesService tracking rules', () => {
     );
 
     expect(tasks).toHaveLength(21);
-    expect(tasks.every((task) => task.details.trim().length > 0)).toBe(true);
+    expect(
+      tasks.every(
+        (task) =>
+          task.details.includes('Do this:') &&
+          task.details.includes('When it records:') &&
+          task.details.includes('Won’t count:'),
+      ),
+    ).toBe(true);
   });
 });
