@@ -24,6 +24,7 @@ import { DirectConversation } from './entities/direct-conversation.entity';
 import { Message } from './entities/message.entity';
 import { Call } from '../calls/entities/call.entity';
 import { CallStatus } from '../calls/enums/call.enums';
+import { User } from '../users/entities/user.entity';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -51,6 +52,10 @@ export class ChatController {
     @InjectRepository(Call)
     private readonly callRepo:
       Repository<Call>,
+
+    @InjectRepository(User)
+    private readonly userRepo:
+      Repository<User>,
   ) {}
 
   @Get('sync')
@@ -274,6 +279,8 @@ export class ChatController {
                 }
               : null,
 
+            isUnavailable: !participant.user,
+
             lastReadMessageId:
               participant.lastReadMessageId,
             lastReadSequenceNo:
@@ -484,8 +491,22 @@ export class ChatController {
                       .avatarUrl,
 
                   isOnline: false,
+
+                  isUnavailable: false,
                 }
-              : null,
+              : otherMember
+                ? {
+                    id: otherMember.userId,
+                    fullName: 'User unavailable',
+                    avatarUrl: '',
+                    isOnline: false,
+                    isUnavailable: true,
+                  }
+                : null,
+
+          isUnavailable: Boolean(
+            otherMember && !otherMember.user,
+          ),
 
           members,
 
@@ -701,6 +722,29 @@ export class ChatController {
       return { error: 'not a participant' };
     }
 
+    const participantIds =
+      await this.chatService.getConversationParticipantIds(id);
+
+    const receiverIds = participantIds.filter((pid) => pid !== me.id);
+
+    const activeReceiverCount = receiverIds.length
+      ? await this.userRepo.count({
+          where: {
+            id: In(receiverIds),
+          },
+        })
+      : 0;
+
+    if (
+      receiverIds.length === 0 ||
+      activeReceiverCount !== receiverIds.length
+    ) {
+      return {
+        error: 'This account is no longer available.',
+        code: 'USER_UNAVAILABLE',
+      };
+    }
+
     // Persist the message using the same service path as the socket handler.
     const savedMessage = await this.chatService.createMessage({
       conversationId: id,
@@ -715,11 +759,6 @@ export class ChatController {
     (this.chatGateway.server as any).to(room).emit('message', savedMessage);
 
     // Notify each receiver individually and update unread counts.
-    const participantIds =
-      await this.chatService.getConversationParticipantIds(id);
-
-    const receiverIds = participantIds.filter((pid) => pid !== me.id);
-
     if (receiverIds.length > 0) {
       await this.chatService.createDeliveryJobs({
         messageId: savedMessage.id,

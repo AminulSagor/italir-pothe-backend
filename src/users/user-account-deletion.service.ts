@@ -4,9 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 import { AppleSignInTokenService } from '../auth/apple-sign-in-token.service';
+import { SessionSocketRegistryService } from '../auth/session-socket-registry.service';
 import {
   SocialAuthProvider,
   UserSocialAccount,
@@ -31,10 +32,15 @@ export class UserAccountDeletionService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly appleSignInTokenService: AppleSignInTokenService,
+    private readonly sessionSocketRegistry: SessionSocketRegistryService,
   ) {}
 
   async deleteAccount(params: DeleteAccountParams) {
     await this.revokeAppleAuthorization(params.targetUserId);
+
+    const activeSessionIds = await this.getActiveSessionIds(
+      params.targetUserId,
+    );
 
     return this.dataSource.transaction(async (manager) => {
       const userRepository = manager.getRepository(User);
@@ -79,6 +85,10 @@ export class UserAccountDeletionService {
           'An admin cannot delete their own admin account.',
         );
       }
+
+      // Stop authenticated chat and call activity after all deletion guards
+      // pass, but before any user-authored content is erased.
+      this.disconnectSessions(activeSessionIds);
 
       const auditRepository = manager.getRepository(DeletedUserAudit);
 
@@ -154,6 +164,8 @@ export class UserAccountDeletionService {
         );
       }
 
+      await this.deleteUserAuthoredContent(manager, user.id);
+
       try {
         const deleteResult = await userRepository.delete(user.id);
 
@@ -182,8 +194,216 @@ export class UserAccountDeletionService {
         deletedUserId: user.id,
 
         relatedRecordsPreserved: true,
+
+        userAuthoredContentDeleted: true,
       };
     });
+  }
+
+  private async deleteUserAuthoredContent(
+    manager: EntityManager,
+    userId: string,
+  ): Promise<void> {
+    const affectedConversationResult: unknown = await manager.query(
+      `
+        SELECT DISTINCT "conversationId"
+        FROM "messages"
+        WHERE "senderId" = $1
+      `,
+      [userId],
+    );
+
+    if (!Array.isArray(affectedConversationResult)) {
+      throw new Error('Failed to identify conversations for content erasure.');
+    }
+
+    const affectedConversationRows: unknown[] = affectedConversationResult;
+    const conversationIds = affectedConversationRows
+      .filter(
+        (row): row is { conversationId: string } =>
+          typeof row === 'object' &&
+          row !== null &&
+          'conversationId' in row &&
+          typeof row.conversationId === 'string',
+      )
+      .map(({ conversationId }) => conversationId)
+      .sort();
+
+    if (conversationIds.length > 0) {
+      // Break the last-message reference before removing authored messages.
+      await manager.query(
+        `
+          UPDATE "conversations"
+          SET
+            "lastMessageId" = NULL,
+            "lastMessageAt" = NULL
+          WHERE "id" = ANY($1::uuid[])
+        `,
+        [conversationIds],
+      );
+
+      // These pointers are optional denormalized references. Clear only the
+      // ones that target content being erased so deletion remains safe even
+      // when a production database is missing the expected SET NULL foreign
+      // keys. Sequence numbers are retained for read/delivery progress.
+      await manager.query(
+        `
+          UPDATE "conversation_participants" AS participant
+          SET
+            "lastReadMessageId" = CASE
+              WHEN participant."lastReadMessageId" IN (
+                SELECT "id" FROM "messages" WHERE "senderId" = $1
+              ) THEN NULL
+              ELSE participant."lastReadMessageId"
+            END,
+            "lastDeliveredMessageId" = CASE
+              WHEN participant."lastDeliveredMessageId" IN (
+                SELECT "id" FROM "messages" WHERE "senderId" = $1
+              ) THEN NULL
+              ELSE participant."lastDeliveredMessageId"
+            END
+          WHERE participant."lastReadMessageId" IN (
+              SELECT "id" FROM "messages" WHERE "senderId" = $1
+            )
+             OR participant."lastDeliveredMessageId" IN (
+              SELECT "id" FROM "messages" WHERE "senderId" = $1
+            )
+        `,
+        [userId],
+      );
+    }
+
+    // Delete dependent rows explicitly. Production schema synchronization is
+    // disabled, so privacy erasure must not rely only on ORM cascade metadata.
+    await manager.query(
+      `
+        DELETE FROM "message_attachments"
+        WHERE "messageId" IN (
+          SELECT "id"
+          FROM "messages"
+          WHERE "senderId" = $1
+        )
+      `,
+      [userId],
+    );
+
+    await manager.query(
+      `
+        DELETE FROM "message_receipts"
+        WHERE "userId" = $1
+           OR "messageId" IN (
+            SELECT "id"
+            FROM "messages"
+            WHERE "senderId" = $1
+          )
+      `,
+      [userId],
+    );
+
+    await manager.query(
+      `
+        DELETE FROM "message_delivery_jobs"
+        WHERE "receiverId" = $1
+           OR "messageId" IN (
+            SELECT "id"
+            FROM "messages"
+            WHERE "senderId" = $1
+          )
+      `,
+      [userId],
+    );
+
+    await manager.query(
+      `
+        DELETE FROM "messages"
+        WHERE "senderId" = $1
+      `,
+      [userId],
+    );
+
+    if (conversationIds.length > 0) {
+      // Point each affected conversation at its newest remaining message.
+      await manager.query(
+        `
+          UPDATE "conversations" AS conversation
+          SET
+            "lastMessageId" = latest."id",
+            "lastMessageAt" = latest."createdAt"
+          FROM (
+            SELECT DISTINCT ON (message."conversationId")
+              message."conversationId",
+              message."id",
+              message."createdAt"
+            FROM "messages" AS message
+            WHERE message."conversationId" = ANY($1::uuid[])
+            ORDER BY
+              message."conversationId",
+              message."sequenceNo" DESC,
+              message."createdAt" DESC
+          ) AS latest
+          WHERE conversation."id" = latest."conversationId"
+        `,
+        [conversationIds],
+      );
+
+      await manager.query(
+        `
+          UPDATE "conversation_participants" AS participant
+          SET "unreadCount" = (
+            SELECT COUNT(*)::int
+            FROM "messages" AS message
+            WHERE message."conversationId" = participant."conversationId"
+              AND message."sequenceNo" > participant."lastReadSequenceNo"
+              AND message."senderId" IS DISTINCT FROM participant."userId"
+          )
+          WHERE participant."conversationId" = ANY($1::uuid[])
+        `,
+        [conversationIds],
+      );
+    }
+
+    await manager.query(
+      `
+        DELETE FROM "webinar_chat_messages"
+        WHERE "senderUserId" = $1
+      `,
+      [userId],
+    );
+  }
+
+  private async getActiveSessionIds(userId: string): Promise<string[]> {
+    const result: unknown = await this.dataSource.query(
+      `
+        SELECT DISTINCT "authSessionId"
+        FROM "user_devices"
+        WHERE "userId" = $1
+          AND "isSessionActive" = true
+          AND "authSessionId" IS NOT NULL
+      `,
+      [userId],
+    );
+
+    if (!Array.isArray(result)) {
+      return [];
+    }
+
+    const rows: unknown[] = result;
+    return rows
+      .filter(
+        (row): row is { authSessionId: string } =>
+          typeof row === 'object' &&
+          row !== null &&
+          'authSessionId' in row &&
+          typeof row.authSessionId === 'string' &&
+          row.authSessionId.trim().length > 0,
+      )
+      .map(({ authSessionId }) => authSessionId.trim());
+  }
+
+  private disconnectSessions(sessionIds: string[]): void {
+    for (const sessionId of sessionIds) {
+      this.sessionSocketRegistry.disconnectSession(sessionId);
+    }
   }
 
   private async revokeAppleAuthorization(userId: string): Promise<void> {

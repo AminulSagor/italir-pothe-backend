@@ -282,12 +282,16 @@ export class UserSettingsService {
   ): Promise<UserSettingsMessageResponse> {
     const user = await this.findUser(userId);
 
-    if (
-      this.normalizeFullName(dto.fullName) !==
-      this.normalizeFullName(user.fullName)
-    ) {
+    const fullNameMatches = Boolean(
+      dto.fullName &&
+      this.normalizeFullName(dto.fullName) ===
+        this.normalizeFullName(user.fullName),
+    );
+    const deletionPhraseMatches = dto.confirmation?.toUpperCase() === 'DELETE';
+
+    if (!fullNameMatches && !deletionPhraseMatches) {
       throw new BadRequestException(
-        'The entered full name does not match your account.',
+        'The account deletion confirmation does not match.',
       );
     }
 

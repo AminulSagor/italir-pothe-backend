@@ -1,10 +1,13 @@
-import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class DeleteUserAccountDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
   @MaxLength(120)
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
-  fullName: string;
+  fullName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  confirmation?: string;
 }

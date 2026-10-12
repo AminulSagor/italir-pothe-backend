@@ -21,6 +21,7 @@ import { AdminUserDirectoryController } from './admin-user-directory.controller'
 import { DeletedUserAudit } from './entities/deleted-user-audit.entity';
 import { UserAccountDeletionService } from './user-account-deletion.service';
 import { AppleSignInTokenModule } from '../auth/apple-sign-in-token.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { AppleSignInTokenModule } from '../auth/apple-sign-in-token.module';
     LearningActivityModule,
     MailModule,
     AppleSignInTokenModule,
+    AuthModule,
   ],
   providers: [
     UsersService,

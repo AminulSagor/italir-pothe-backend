@@ -287,6 +287,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { error: 'Unauthorized' };
     }
 
+    const isParticipant = await this.participantRepo.exists({
+      where: {
+        conversationId: payload.conversationId,
+        userId: user.id,
+      },
+    });
+
+    if (!isParticipant) {
+      return {
+        error: 'Not a conversation participant.',
+        code: 'NOT_A_PARTICIPANT',
+      };
+    }
+
     const room = this.conversationRoom(payload.conversationId);
 
     await client.join(room);
@@ -345,37 +359,85 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { error: 'Unauthorized' };
     }
 
+    const isParticipant = await this.participantRepo.exists({
+      where: {
+        conversationId: payload.conversationId,
+        userId: user.id,
+      },
+    });
+
+    if (!isParticipant) {
+      return {
+        error: 'Not a conversation participant.',
+        code: 'NOT_A_PARTICIPANT',
+      };
+    }
+
     const conversation = await this.conversationRepo.findOne({
       where: {
         id: payload.conversationId,
       },
     });
 
+    if (!conversation) {
+      return {
+        error: 'Conversation not found.',
+        code: 'CONVERSATION_NOT_FOUND',
+      };
+    }
+
     /*
      * For direct conversations, verify that neither user has blocked
      * the other before allowing the message.
      */
-    if (conversation?.type === 'direct') {
+    if (conversation.type === 'direct') {
       const directConversation = await this.directConversationRepo.findOne({
         where: {
           conversationId: payload.conversationId,
         },
       });
 
-      if (directConversation) {
-        const otherUserId =
-          directConversation.userOneId === user.id
-            ? directConversation.userTwoId
-            : directConversation.userOneId;
+      if (!directConversation) {
+        return {
+          error: 'Conversation is unavailable.',
+          code: 'CONVERSATION_UNAVAILABLE',
+        };
+      }
 
-        try {
-          await this.userBlocksService.assertCanMessage(user.id, otherUserId);
-        } catch (error) {
-          return {
-            error:
-              error instanceof Error ? error.message : 'Cannot send message',
-          };
-        }
+      if (
+        directConversation.userOneId !== user.id &&
+        directConversation.userTwoId !== user.id
+      ) {
+        return {
+          error: 'Not a conversation participant.',
+          code: 'NOT_A_PARTICIPANT',
+        };
+      }
+
+      const otherUserId =
+        directConversation.userOneId === user.id
+          ? directConversation.userTwoId
+          : directConversation.userOneId;
+
+      const otherUserExists = await this.userRepo.exists({
+        where: {
+          id: otherUserId,
+        },
+      });
+
+      if (!otherUserExists) {
+        return {
+          error: 'This account is no longer available.',
+          code: 'USER_UNAVAILABLE',
+        };
+      }
+
+      try {
+        await this.userBlocksService.assertCanMessage(user.id, otherUserId);
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : 'Cannot send message',
+        };
       }
     }
 
