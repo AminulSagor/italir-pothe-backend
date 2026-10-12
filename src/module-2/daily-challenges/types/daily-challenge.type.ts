@@ -62,6 +62,7 @@ export enum LearningActivityType {
 export interface DailyChallengeTaskDefinition {
   key: DailyChallengeTaskKey;
   title: string;
+  details: string;
   targetValue: number;
   rewardXp: number;
 }

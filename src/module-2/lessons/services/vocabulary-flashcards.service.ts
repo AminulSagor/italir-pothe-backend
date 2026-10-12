@@ -154,8 +154,7 @@ export class VocabularyFlashcardsService {
       return (
         !status ||
         status === VocabularyMasteryStatus.NEW ||
-        status === VocabularyMasteryStatus.LEARNING ||
-        status === VocabularyMasteryStatus.WEAK
+        status === VocabularyMasteryStatus.LEARNING
       );
     });
     const weakClearedIds = dto.knownVocabularyIds.filter(
@@ -206,25 +205,16 @@ export class VocabularyFlashcardsService {
       [vocabularyId],
       session.lessonId,
     );
-    const previous = await this.progressRepository.findOne({
-      where: { userId: user.id, vocabularyId },
-    });
-    const isKnown = dto.choice === VocabularyReviewChoice.KNOWN;
-    const isNewlyLearned =
-      isKnown &&
-      (!previous ||
-        previous.masteryStatus === VocabularyMasteryStatus.NEW ||
-        previous.masteryStatus === VocabularyMasteryStatus.LEARNING ||
-        previous.masteryStatus === VocabularyMasteryStatus.WEAK);
-    const isWeakCleared =
-      isKnown && previous?.masteryStatus === VocabularyMasteryStatus.WEAK;
-
+    // A card tap is enough to count review/swipe activity, but learning and
+    // weak-word transitions are recorded only when the session completes.
+    // This keeps challenge progress consistent with persisted mastery status
+    // when a learner exits before submitting the session.
     await this.recordVocabularyDailyActivities({
       userId: user.id,
       sourceScope: `vocabulary-session:${session.id}`,
       reviewedVocabularyIds: [vocabularyId],
-      knownVocabularyIds: isNewlyLearned ? [vocabularyId] : [],
-      weakClearedVocabularyIds: isWeakCleared ? [vocabularyId] : [],
+      knownVocabularyIds: [],
+      weakClearedVocabularyIds: [],
       clientActivityDate: dto.clientActivityDate,
     });
 

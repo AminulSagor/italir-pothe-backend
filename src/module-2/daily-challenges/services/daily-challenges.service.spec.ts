@@ -4,6 +4,7 @@ import {
 } from '../types/daily-challenge.type';
 import { DailyChallengesService } from './daily-challenges.service';
 import { DailyChallengeProgressStatus } from '../entities/user-daily-challenge-progress.entity';
+import { DAILY_CHALLENGE_VARIATIONS } from '../types/daily-challenge-variations';
 
 describe('DailyChallengesService tracking rules', () => {
   const createService = (
@@ -153,12 +154,12 @@ describe('DailyChallengesService tracking rules', () => {
     const service = createService();
     const tasks = (
       service as unknown as {
-        applyCurrentTaskTitles: (
+        applyCurrentTaskContent: (
           items: object[],
           variationKey: string,
-        ) => { title: string }[];
+        ) => { title: string; details: string }[];
       }
-    ).applyCurrentTaskTitles(
+    ).applyCurrentTaskContent(
       [
         {
           taskKey: DailyChallengeTaskKey.LISTENING_MCQ_CORRECT,
@@ -168,6 +169,16 @@ describe('DailyChallengesService tracking rules', () => {
       'daily_challenge_variation_06',
     );
 
-    expect(tasks[0].title).toBe('Answer 3 “Listening MCQ” Questions Correctly');
+    expect(tasks[0].title).toBe('Answer 3 Listening MCQ Questions Correctly');
+    expect(tasks[0].details).toContain('course quizzes');
+  });
+
+  it('provides completion instructions for every challenge', () => {
+    const tasks = DAILY_CHALLENGE_VARIATIONS.flatMap(
+      (variation) => variation.tasks,
+    );
+
+    expect(tasks).toHaveLength(21);
+    expect(tasks.every((task) => task.details.trim().length > 0)).toBe(true);
   });
 });

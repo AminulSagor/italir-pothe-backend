@@ -110,7 +110,7 @@ export class DailyChallengesService {
       totalXp,
       streak,
       xpBoost,
-      tasks: this.applyCurrentTaskTitles(
+      tasks: this.applyCurrentTaskContent(
         this.sortProgress(progress),
         planWithTasks.plan.variationKey,
       ),
@@ -1104,7 +1104,7 @@ export class DailyChallengesService {
     return new Date().toISOString().slice(0, 10);
   }
 
-  private applyCurrentTaskTitles(
+  private applyCurrentTaskContent(
     items: UserDailyChallengeProgress[],
     variationKey: string,
   ) {
@@ -1115,12 +1115,19 @@ export class DailyChallengesService {
       return items;
     }
 
-    const titles = new Map(
-      variation.tasks.map((task) => [task.key, task.title]),
+    const content = new Map(
+      variation.tasks.map((task) => [
+        task.key,
+        { title: task.title, details: task.details },
+      ]),
     );
-    return items.map((item) => ({
-      ...item,
-      title: titles.get(item.taskKey) ?? item.title,
-    }));
+    return items.map((item) => {
+      const current = content.get(item.taskKey);
+      return {
+        ...item,
+        title: current?.title ?? item.title,
+        details: current?.details ?? '',
+      };
+    });
   }
 }
