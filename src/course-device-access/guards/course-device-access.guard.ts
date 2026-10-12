@@ -20,6 +20,11 @@ import { VocabularyReviewSession } from '../../module-2/lessons/entities/vocabul
 import type { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { CourseDeviceAccessService } from '../services/course-device-access.service';
 
+interface ResolvedCourseResource {
+  courseId: string;
+  previewAllowed: boolean;
+}
+
 @Injectable()
 export class CourseDeviceAccessGuard
   extends AuthGuard('jwt')
@@ -44,10 +49,7 @@ export class CourseDeviceAccessGuard
   }
 
   onModuleInit() {
-    if (
-      !this.enabled &&
-      !CourseDeviceAccessGuard.compatibilityWarningLogged
-    ) {
+    if (!this.enabled && !CourseDeviceAccessGuard.compatibilityWarningLogged) {
       CourseDeviceAccessGuard.compatibilityWarningLogged = true;
       this.logger.warn(
         'COURSE_DEVICE_ENFORCEMENT_ENABLED is not true; legacy mobile API compatibility is active. Enable only after the attested mobile release is rolled out.',
@@ -63,9 +65,19 @@ export class CourseDeviceAccessGuard
     if (!userId)
       throw new UnauthorizedException('Authenticated user not found.');
 
-    const courseId = await this.resolveCourseId(request);
-    if (!(await this.service.requiresCourseDeviceAccess(courseId))) {
-      return true;
+    const resource = await this.resolveCourseResource(request);
+    const requirement = await this.service.getCourseDeviceAccessRequirement(
+      resource.courseId,
+      userId,
+    );
+    if (!requirement.requiresDeviceAccess) {
+      if (requirement.courseIsFree || resource.previewAllowed) {
+        return true;
+      }
+      throw new ForbiddenException({
+        code: 'COURSE_PURCHASE_REQUIRED',
+        message: 'Purchase this course to access its paid content.',
+      });
     }
     const deviceKeyId = this.header(request, 'x-course-device-key-id');
     const accessToken = this.header(request, 'x-course-device-access-token');
@@ -77,46 +89,54 @@ export class CourseDeviceAccessGuard
     }
     await this.service.assertCourseAccess({
       userId,
-      courseId,
+      courseId: resource.courseId,
       deviceKeyId,
       accessToken,
     });
     return true;
   }
 
-  private async resolveCourseId(
+  private async resolveCourseResource(
     request: AuthenticatedRequest,
-  ): Promise<string> {
+  ): Promise<ResolvedCourseResource> {
     const params = request.params ?? {};
     const body = (request.body ?? {}) as Record<string, unknown>;
-    const direct =
-      this.routeParam(params.courseId) ||
-      (typeof body.courseId === 'string' ? body.courseId : '');
-    if (direct) return direct;
-
-    const lessonId = this.routeParam(params.lessonId);
+    const lessonId =
+      this.routeParam(params.lessonId) ||
+      (typeof body.lessonId === 'string' ? body.lessonId.trim() : '');
     if (lessonId) {
       const lesson = await this.lessonRepository.findOne({
         where: { id: lessonId },
-        select: { id: true, courseId: true },
+        select: { id: true, courseId: true, isFree: true },
       });
       if (!lesson?.courseId)
         throw new NotFoundException('Lesson course was not found.');
-      return lesson.courseId;
+      return {
+        courseId: lesson.courseId,
+        previewAllowed: lesson.isFree,
+      };
     }
     const sessionId = this.routeParam(params.sessionId);
     if (sessionId) {
       const session = await this.quizSessionRepository.findOne({
         where: { id: sessionId },
-        relations: ['quiz'],
+        relations: ['quiz', 'lesson'],
       });
-      if (session?.quiz?.courseId) return session.quiz.courseId;
+      if (session?.quiz?.courseId) {
+        return {
+          courseId: session.quiz.courseId,
+          previewAllowed: session.lesson?.isFree === true,
+        };
+      }
       const vocabularySession = await this.vocabularySessionRepository.findOne({
         where: { id: sessionId },
         relations: ['lesson'],
       });
       if (vocabularySession?.lesson?.courseId) {
-        return vocabularySession.lesson.courseId;
+        return {
+          courseId: vocabularySession.lesson.courseId,
+          previewAllowed: vocabularySession.lesson.isFree,
+        };
       }
       throw new NotFoundException('Course activity was not found.');
     }
@@ -128,8 +148,19 @@ export class CourseDeviceAccessGuard
       });
       if (!attempt?.courseId)
         throw new NotFoundException('Exam course was not found.');
-      return attempt.courseId;
+      return { courseId: attempt.courseId, previewAllowed: false };
     }
+
+    const direct =
+      this.routeParam(params.courseId) ||
+      (typeof body.courseId === 'string' ? body.courseId.trim() : '');
+    if (direct) {
+      return {
+        courseId: direct,
+        previewAllowed: !request.originalUrl.includes('/final-exams/'),
+      };
+    }
+
     throw new ForbiddenException('The protected course could not be resolved.');
   }
 

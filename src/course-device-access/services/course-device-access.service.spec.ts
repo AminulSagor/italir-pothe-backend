@@ -2,6 +2,11 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource, Repository } from 'typeorm';
 
 import { Course } from '../../module-2/courses/entities/course.entity';
+import { CourseEnrollment } from '../../module-2/course-commerce/entities/course-enrollment.entity';
+import {
+  CourseAccessType,
+  CourseEnrollmentStatus,
+} from '../../module-2/course-commerce/types/course-commerce.type';
 import { CourseDeviceAuthorization } from '../entities/course-device-authorization.entity';
 import { CourseDeviceChallenge } from '../entities/course-device-challenge.entity';
 import { CourseDeviceRequest } from '../entities/course-device-request.entity';
@@ -74,6 +79,7 @@ describe('CourseDeviceAccessService admin decisions', () => {
       unusedRepository as Repository<CourseDeviceChallenge>,
       unusedRepository as Repository<CourseDeviceRequest>,
       unusedRepository as never,
+      unusedRepository as Repository<CourseEnrollment>,
     );
 
     await expect(
@@ -95,11 +101,13 @@ describe('CourseDeviceAccessService admin decisions', () => {
   });
 
   it('bypasses Play Integrity when device enforcement is disabled', async () => {
+    const transaction = jest.fn();
     const dataSource = {
-      transaction: jest.fn(),
+      transaction,
     } as unknown as DataSource;
+    const verifyAndroid = jest.fn();
     const attestation = {
-      verifyAndroid: jest.fn(),
+      verifyAndroid,
     } as unknown as CourseDeviceAttestationService;
     const unusedRepository = {} as Repository<never>;
     const service = new CourseDeviceAccessService(
@@ -110,29 +118,32 @@ describe('CourseDeviceAccessService admin decisions', () => {
       unusedRepository as Repository<CourseDeviceChallenge>,
       unusedRepository as Repository<CourseDeviceRequest>,
       unusedRepository as never,
+      unusedRepository as Repository<CourseEnrollment>,
     );
 
-    await expect(
-      service.verifyDevice('user-id', 'course-id', {
-        challengeId: '00000000-0000-4000-8000-000000000000',
-        deviceKeyId: 'device-key-id',
-      }),
-    ).resolves.toEqual({
-      authorized: true,
-      code: 'ENFORCEMENT_DISABLED',
-      accessToken: expect.any(String),
+    const result = await service.verifyDevice('user-id', 'course-id', {
+      challengeId: '00000000-0000-4000-8000-000000000000',
+      deviceKeyId: 'device-key-id',
     });
 
-    expect(dataSource.transaction).not.toHaveBeenCalled();
-    expect(attestation.verifyAndroid).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      authorized: true,
+      code: 'ENFORCEMENT_DISABLED',
+    });
+    expect(typeof result.accessToken).toBe('string');
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(verifyAndroid).not.toHaveBeenCalled();
   });
 
   it('bypasses device binding for free courses', async () => {
+    const transaction = jest.fn();
     const dataSource = {
-      transaction: jest.fn(),
+      transaction,
     } as unknown as DataSource;
+    const verifyAndroid = jest.fn();
     const attestation = {
-      verifyAndroid: jest.fn(),
+      verifyAndroid,
     } as unknown as CourseDeviceAttestationService;
     const courseRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -149,26 +160,28 @@ describe('CourseDeviceAccessService admin decisions', () => {
       unusedRepository as Repository<CourseDeviceChallenge>,
       unusedRepository as Repository<CourseDeviceRequest>,
       courseRepository,
+      unusedRepository as Repository<CourseEnrollment>,
     );
 
-    await expect(
-      service.verifyDevice('user-id', 'course-id', {
-        challengeId: '00000000-0000-4000-8000-000000000000',
-        deviceKeyId: 'device-key-id',
-      }),
-    ).resolves.toEqual({
-      authorized: true,
-      code: 'FREE_COURSE',
-      accessToken: expect.any(String),
+    const result = await service.verifyDevice('user-id', 'course-id', {
+      challengeId: '00000000-0000-4000-8000-000000000000',
+      deviceKeyId: 'device-key-id',
     });
 
-    expect(dataSource.transaction).not.toHaveBeenCalled();
-    expect(attestation.verifyAndroid).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      authorized: true,
+      code: 'FREE_COURSE',
+    });
+    expect(typeof result.accessToken).toBe('string');
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(verifyAndroid).not.toHaveBeenCalled();
   });
 
   it('does not create a device challenge for a free course', async () => {
+    const saveChallenge = jest.fn();
     const challengeRepository = {
-      save: jest.fn(),
+      save: saveChallenge,
     } as unknown as Repository<CourseDeviceChallenge>;
     const courseRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -185,6 +198,7 @@ describe('CourseDeviceAccessService admin decisions', () => {
       challengeRepository,
       unusedRepository as Repository<CourseDeviceRequest>,
       courseRepository,
+      unusedRepository as Repository<CourseEnrollment>,
     );
 
     await expect(
@@ -198,7 +212,7 @@ describe('CourseDeviceAccessService admin decisions', () => {
       enforcementEnabled: false,
     });
 
-    expect(challengeRepository.save).not.toHaveBeenCalled();
+    expect(saveChallenge).not.toHaveBeenCalled();
   });
 
   it('requires device binding for paid courses', async () => {
@@ -209,6 +223,14 @@ describe('CourseDeviceAccessService admin decisions', () => {
       }),
     } as unknown as Repository<Course>;
     const unusedRepository = {} as Repository<never>;
+    const enrollmentRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'enrollment-id',
+        accessType: CourseAccessType.LIFETIME,
+        status: CourseEnrollmentStatus.ACTIVE,
+        expiresAt: null,
+      }),
+    } as unknown as Repository<CourseEnrollment>;
     const service = new CourseDeviceAccessService(
       {} as DataSource,
       {} as CourseDeviceAttestationService,
@@ -217,10 +239,93 @@ describe('CourseDeviceAccessService admin decisions', () => {
       unusedRepository as Repository<CourseDeviceChallenge>,
       unusedRepository as Repository<CourseDeviceRequest>,
       courseRepository,
+      enrollmentRepository,
     );
 
-    await expect(service.requiresCourseDeviceAccess('course-id')).resolves.toBe(
-      true,
+    await expect(
+      service.requiresCourseDeviceAccess('course-id', 'user-id'),
+    ).resolves.toBe(true);
+  });
+
+  it('bypasses device binding while a paid course is only a preview', async () => {
+    const saveChallenge = jest.fn();
+    const challengeRepository = {
+      save: saveChallenge,
+    } as unknown as Repository<CourseDeviceChallenge>;
+    const courseRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'course-id',
+        isFree: false,
+      }),
+    } as unknown as Repository<Course>;
+    const enrollmentRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+    } as unknown as Repository<CourseEnrollment>;
+    const unusedRepository = {} as Repository<never>;
+    const service = new CourseDeviceAccessService(
+      {} as DataSource,
+      {} as CourseDeviceAttestationService,
+      { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
+      unusedRepository as Repository<CourseDeviceAuthorization>,
+      challengeRepository,
+      unusedRepository as Repository<CourseDeviceRequest>,
+      courseRepository,
+      enrollmentRepository,
     );
+
+    await expect(
+      service.createChallenge('user-id', 'course-id', {
+        platform: CourseDevicePlatform.ANDROID,
+        deviceKeyId: 'device-key-id',
+        deviceLabel: 'Test phone',
+      }),
+    ).resolves.toEqual({
+      code: 'ENFORCEMENT_DISABLED',
+      enforcementEnabled: false,
+    });
+
+    const verification = await service.verifyDevice('user-id', 'course-id', {
+      challengeId: '00000000-0000-4000-8000-000000000000',
+      deviceKeyId: 'device-key-id',
+    });
+
+    expect(saveChallenge).not.toHaveBeenCalled();
+    expect(verification).toMatchObject({
+      authorized: true,
+      code: 'ENFORCEMENT_DISABLED',
+    });
+    expect(typeof verification.accessToken).toBe('string');
+  });
+
+  it('does not require binding after time-limited access expires', async () => {
+    const courseRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'course-id',
+        isFree: false,
+      }),
+    } as unknown as Repository<Course>;
+    const enrollmentRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'enrollment-id',
+        accessType: CourseAccessType.TIME_LIMITED,
+        status: CourseEnrollmentStatus.ACTIVE,
+        expiresAt: new Date(Date.now() - 60_000),
+      }),
+    } as unknown as Repository<CourseEnrollment>;
+    const unusedRepository = {} as Repository<never>;
+    const service = new CourseDeviceAccessService(
+      {} as DataSource,
+      {} as CourseDeviceAttestationService,
+      { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService,
+      unusedRepository as Repository<CourseDeviceAuthorization>,
+      unusedRepository as Repository<CourseDeviceChallenge>,
+      unusedRepository as Repository<CourseDeviceRequest>,
+      courseRepository,
+      enrollmentRepository,
+    );
+
+    await expect(
+      service.requiresCourseDeviceAccess('course-id', 'user-id'),
+    ).resolves.toBe(false);
   });
 });

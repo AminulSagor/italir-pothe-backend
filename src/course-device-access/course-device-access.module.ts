@@ -7,6 +7,7 @@ import { Lesson } from '../module-2/lessons/entities/lesson.entity';
 import { QuizSession } from '../module-2/quizzes/entities/quiz-session.entity';
 import { ExamAttempt } from '../module-2/final-exam/entities/exam-attempt.entity';
 import { VocabularyReviewSession } from '../module-2/lessons/entities/vocabulary-review-session.entity';
+import { CourseEnrollment } from '../module-2/course-commerce/entities/course-enrollment.entity';
 import { CourseDeviceAccessController } from './controllers/course-device-access.controller';
 import { CourseDeviceAuthorization } from './entities/course-device-authorization.entity';
 import { CourseDeviceChallenge } from './entities/course-device-challenge.entity';
@@ -28,6 +29,7 @@ import { CourseDeviceAccessGuard } from './guards/course-device-access.guard';
       QuizSession,
       ExamAttempt,
       VocabularyReviewSession,
+      CourseEnrollment,
     ]),
   ],
   controllers: [CourseDeviceAccessController],

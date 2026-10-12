@@ -16,7 +16,11 @@ import {
   Course,
   CourseStatus,
 } from '../../module-2/courses/entities/course.entity';
-import { User } from '../../users/entities/user.entity';
+import { CourseEnrollment } from '../../module-2/course-commerce/entities/course-enrollment.entity';
+import {
+  CourseAccessType,
+  CourseEnrollmentStatus,
+} from '../../module-2/course-commerce/types/course-commerce.type';
 import {
   AdminCourseDeviceRequestsQueryDto,
   CreateCourseDeviceChallengeDto,
@@ -34,6 +38,12 @@ import {
 } from '../enums/course-device-access.enums';
 import { CourseDeviceAttestationService } from './course-device-attestation.service';
 
+export interface CourseDeviceAccessRequirement {
+  courseIsFree: boolean;
+  hasActiveEnrollment: boolean;
+  requiresDeviceAccess: boolean;
+}
+
 @Injectable()
 export class CourseDeviceAccessService {
   constructor(
@@ -48,6 +58,8 @@ export class CourseDeviceAccessService {
     private readonly requestRepository: Repository<CourseDeviceRequest>,
     @InjectRepository(Course)
     private readonly courseRepository: Repository<Course>,
+    @InjectRepository(CourseEnrollment)
+    private readonly enrollmentRepository: Repository<CourseEnrollment>,
   ) {}
 
   @Cron('0 3 * * *')
@@ -67,9 +79,18 @@ export class CourseDeviceAccessService {
       select: { id: true, isFree: true },
     });
     if (!course) throw new NotFoundException('Course not found.');
-    if (!this.enforcementEnabled || course.isFree) {
+    const hasPaidAccess =
+      !course.isFree && (await this.hasActiveEnrollment(userId, courseId));
+    if (!this.enforcementEnabled || course.isFree || !hasPaidAccess) {
+      // Older mobile releases already understand these two bypass codes.
+      // Reuse ENFORCEMENT_DISABLED for preview access instead of introducing
+      // a new enum value into the live API contract.
       return {
-        code: course.isFree ? 'FREE_COURSE' : 'ENFORCEMENT_DISABLED',
+        code: !this.enforcementEnabled
+          ? 'ENFORCEMENT_DISABLED'
+          : course.isFree
+            ? 'FREE_COURSE'
+            : 'ENFORCEMENT_DISABLED',
         enforcementEnabled: false,
       };
     }
@@ -128,10 +149,14 @@ export class CourseDeviceAccessService {
         accessToken: randomBytes(32).toString('base64url'),
       };
     }
-    if (!(await this.requiresCourseDeviceAccess(courseId))) {
+    const requirement = await this.getCourseDeviceAccessRequirement(
+      courseId,
+      userId,
+    );
+    if (!requirement.requiresDeviceAccess) {
       return {
         authorized: true,
-        code: 'FREE_COURSE',
+        code: requirement.courseIsFree ? 'FREE_COURSE' : 'ENFORCEMENT_DISABLED',
         accessToken: randomBytes(32).toString('base64url'),
       };
     }
@@ -297,7 +322,7 @@ export class CourseDeviceAccessService {
         lock: { mode: 'pessimistic_write' },
       });
       const currentIsActive = active.some(
-        (item) => item.id === authorization!.id,
+        (item) => item.id === authorization.id,
       );
       if (currentIsActive) {
         return this.createAuthorizedSession(
@@ -337,9 +362,9 @@ export class CourseDeviceAccessService {
   }
 
   async createRequest(userId: string, courseId: string, deviceKeyId: string) {
-    if (!(await this.requiresCourseDeviceAccess(courseId))) {
+    if (!(await this.requiresCourseDeviceAccess(courseId, userId))) {
       throw new BadRequestException(
-        'Free courses do not require a device access request.',
+        'Free courses and course previews do not require a device access request.',
       );
     }
 
@@ -523,13 +548,78 @@ export class CourseDeviceAccessService {
     }
   }
 
-  async requiresCourseDeviceAccess(courseId: string): Promise<boolean> {
+  async requiresCourseDeviceAccess(
+    courseId: string,
+    userId?: string,
+  ): Promise<boolean> {
+    if (!userId) {
+      const course = await this.courseRepository.findOne({
+        where: { id: courseId },
+        select: { id: true, isFree: true },
+      });
+      if (!course) throw new NotFoundException('Course not found.');
+      return !course.isFree;
+    }
+
+    const requirement = await this.getCourseDeviceAccessRequirement(
+      courseId,
+      userId,
+    );
+    return requirement.requiresDeviceAccess;
+  }
+
+  async getCourseDeviceAccessRequirement(
+    courseId: string,
+    userId: string,
+  ): Promise<CourseDeviceAccessRequirement> {
     const course = await this.courseRepository.findOne({
       where: { id: courseId },
       select: { id: true, isFree: true },
     });
     if (!course) throw new NotFoundException('Course not found.');
-    return !course.isFree;
+    if (course.isFree) {
+      return {
+        courseIsFree: true,
+        hasActiveEnrollment: false,
+        requiresDeviceAccess: false,
+      };
+    }
+
+    const hasActiveEnrollment = await this.hasActiveEnrollment(
+      userId,
+      courseId,
+    );
+    return {
+      courseIsFree: false,
+      hasActiveEnrollment,
+      requiresDeviceAccess: hasActiveEnrollment,
+    };
+  }
+
+  private async hasActiveEnrollment(
+    userId: string,
+    courseId: string,
+  ): Promise<boolean> {
+    const enrollment = await this.enrollmentRepository.findOne({
+      where: {
+        userId,
+        courseId,
+        status: CourseEnrollmentStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        accessType: true,
+        expiresAt: true,
+      },
+    });
+    if (!enrollment) return false;
+
+    return (
+      enrollment.accessType === CourseAccessType.LIFETIME ||
+      Boolean(
+        enrollment.expiresAt && enrollment.expiresAt.getTime() > Date.now(),
+      )
+    );
   }
 
   private async createAuthorizedSession(
