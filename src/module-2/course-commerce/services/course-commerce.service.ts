@@ -54,6 +54,12 @@ import { GooglePlayBillingService } from 'src/billing/google-play/google-play-bi
 import { AppStoreBillingService } from 'src/billing/app-store/services/app-store-billing.service';
 import { Environment, Type } from '@apple/app-store-server-library';
 import { InfluencerHubService } from 'src/influencer-hub/services/influencer-hub.service';
+import { CourseDeviceAuthorization } from 'src/course-device-access/entities/course-device-authorization.entity';
+import { CourseDeviceRequest } from 'src/course-device-access/entities/course-device-request.entity';
+import {
+  CourseDeviceAuthorizationStatus,
+  CourseDeviceRequestStatus,
+} from 'src/course-device-access/enums/course-device-access.enums';
 import {
   InfluencerBillingProvider,
   InfluencerCouponAccessType,
@@ -1960,6 +1966,7 @@ export class CourseCommerceService {
           courseId,
         },
       });
+      const hadActiveAccess = this.hasEnrollmentAccess(enrollment);
 
       const calculatedExpiresAt =
         accessType === CourseAccessType.TIME_LIMITED
@@ -2004,6 +2011,14 @@ export class CourseCommerceService {
 
       enrollment = await enrollmentRepository.save(enrollment);
 
+      if (!hadActiveAccess) {
+        await this.resetDeviceBindingsForFreshPurchase(manager, {
+          userId: order.userId,
+          courseId,
+          revokedAt: now,
+        });
+      }
+
       await this.influencerHubService.convertOrderAttribution(manager, {
         orderDomain: InfluencerOrderDomain.COURSE,
         orderId: order.id,
@@ -2023,6 +2038,34 @@ export class CourseCommerceService {
         },
       };
     });
+  }
+
+  private async resetDeviceBindingsForFreshPurchase(
+    manager: EntityManager,
+    params: {
+      userId: string;
+      courseId: string;
+      revokedAt: Date;
+    },
+  ): Promise<void> {
+    await manager.getRepository(CourseDeviceRequest).delete({
+      userId: params.userId,
+      courseId: params.courseId,
+      status: CourseDeviceRequestStatus.PENDING,
+    });
+
+    await manager.getRepository(CourseDeviceAuthorization).update(
+      {
+        userId: params.userId,
+        courseId: params.courseId,
+      },
+      {
+        status: CourseDeviceAuthorizationStatus.REVOKED,
+        revokedAt: params.revokedAt,
+        accessTokenHash: null,
+        accessTokenExpiresAt: null,
+      },
+    );
   }
 
   private async buildCourseQuoteFromInfluencerResolution(
