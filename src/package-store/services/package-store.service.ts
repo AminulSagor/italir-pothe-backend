@@ -99,6 +99,11 @@ import {
 } from 'src/influencer-hub/types/influencer-hub.type';
 import { Cron } from '@nestjs/schedule';
 import { PackageStoreInvoiceService } from './package-store-invoice.service';
+import { User } from 'src/users/entities/user.entity';
+import {
+  SocialAuthProvider,
+  UserSocialAccount,
+} from 'src/auth/entities/user-social-account.entity';
 
 interface AppliedPackageCoupon {
   code: string | null;
@@ -2257,9 +2262,13 @@ export class PackageStoreService {
 
     if (existing) {
       if (existing.userId !== params.userId) {
+        const accountHint = await this.buildPurchaseOwnerAccountHint(
+          existing.userId,
+        );
         throw new ConflictException({
           code: 'APP_STORE_SUBSCRIPTION_LINKED_TO_ANOTHER_USER',
           message: 'This App Store subscription is linked to another account.',
+          accountHint,
         });
       }
       initialOrder = await this.getOwnedOrderGraph(
@@ -2391,6 +2400,55 @@ export class PackageStoreService {
       },
       subscriptionLifecycle,
     };
+  }
+
+  private async buildPurchaseOwnerAccountHint(userId: string): Promise<{
+    maskedName: string | null;
+    signInMethods: string[];
+  }> {
+    const [user, socialAccounts] = await Promise.all([
+      this.dataSource.getRepository(User).findOne({
+        where: { id: userId },
+        select: { fullName: true, email: true, phone: true },
+      }),
+      this.dataSource.getRepository(UserSocialAccount).find({
+        where: { userId },
+        select: { provider: true },
+      }),
+    ]);
+
+    const socialMethods = socialAccounts.map((account) => account.provider);
+    const signInMethods = Array.from(
+      new Set<string>([
+        ...socialMethods,
+        ...(user?.email ? ['email'] : []),
+        ...(user?.phone ? ['phone'] : []),
+      ]),
+    ).sort((left, right) => {
+      const priority: Record<string, number> = {
+        [SocialAuthProvider.APPLE]: 0,
+        [SocialAuthProvider.GOOGLE]: 1,
+        [SocialAuthProvider.FACEBOOK]: 2,
+        email: 3,
+        phone: 4,
+      };
+      return (priority[left] ?? 99) - (priority[right] ?? 99);
+    });
+
+    return {
+      maskedName: this.maskAccountName(user?.fullName ?? null),
+      signInMethods,
+    };
+  }
+
+  private maskAccountName(value: string | null): string | null {
+    const words = value?.trim().split(/\s+/).filter(Boolean) ?? [];
+    if (words.length === 0) return null;
+
+    return words
+      .slice(0, 3)
+      .map((word) => `${Array.from(word)[0]}***`)
+      .join(' ');
   }
 
   // =========================================================
