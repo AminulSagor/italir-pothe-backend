@@ -2292,6 +2292,25 @@ export class PackageStoreService {
         );
       }
 
+      // Apple has already verified the signed transaction and its embedded
+      // order token. Resolve the original app-account owner before using the
+      // normal owner-scoped lookup. This also covers purchases whose lifecycle
+      // row was not created because the original verification was interrupted.
+      const linkedOrderOwner = await this.orderRepository.findOne({
+        where: { id: linkedOrderId },
+        select: { id: true, userId: true },
+      });
+      if (linkedOrderOwner && linkedOrderOwner.userId !== params.userId) {
+        const accountHint = await this.buildPurchaseOwnerAccountHint(
+          linkedOrderOwner.userId,
+        );
+        throw new ConflictException({
+          code: 'APP_STORE_SUBSCRIPTION_LINKED_TO_ANOTHER_USER',
+          message: 'This App Store subscription is linked to another account.',
+          accountHint,
+        });
+      }
+
       initialOrder = await this.getOwnedOrderGraph(
         params.userId,
         linkedOrderId,
