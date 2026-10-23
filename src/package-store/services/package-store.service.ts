@@ -2257,9 +2257,10 @@ export class PackageStoreService {
 
     if (existing) {
       if (existing.userId !== params.userId) {
-        throw new ConflictException(
-          'This App Store subscription is linked to another account.',
-        );
+        throw new ConflictException({
+          code: 'APP_STORE_SUBSCRIPTION_LINKED_TO_ANOTHER_USER',
+          message: 'This App Store subscription is linked to another account.',
+        });
       }
       initialOrder = await this.getOwnedOrderGraph(
         params.userId,
