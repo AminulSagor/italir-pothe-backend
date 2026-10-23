@@ -1102,7 +1102,15 @@ export class CourseCommerceService {
       );
     }
 
-    const order = await this.getOwnedOrder(params.userId, originalOrderId);
+    const order = await this.getOrder(originalOrderId);
+
+    if (order.userId !== params.userId) {
+      throw new ConflictException({
+        code: 'APP_STORE_PURCHASE_LINKED_TO_ANOTHER_USER',
+        message: 'The App Store purchase belongs to another application user.',
+      });
+    }
+
     this.assertConfirmableProvider(order, CoursePaymentProvider.APP_STORE);
 
     if (order.providerSnapshot.productId !== verified.productId) {
@@ -2501,10 +2509,19 @@ export class CourseCommerceService {
     userId: string,
     orderId: string,
   ): Promise<CoursePurchaseOrder> {
+    const order = await this.getOrder(orderId);
+
+    if (order.userId !== userId) {
+      throw new NotFoundException('Purchase order not found.');
+    }
+
+    return order;
+  }
+
+  private async getOrder(orderId: string): Promise<CoursePurchaseOrder> {
     const order = await this.purchaseOrderRepository.findOne({
       where: {
         id: orderId,
-        userId,
       },
       relations: {
         course: true,
