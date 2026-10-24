@@ -39,7 +39,8 @@ import {
 } from '../entities/video-transcode-job.entity';
 import { CloudFrontSignerService } from './cloudfront-signer.service';
 import { S3Service } from './s3.service';
-import { UserRole } from 'src/users/entities/user.entity';
+import { User, UserRole } from 'src/users/entities/user.entity';
+import { PendingSingleUpload } from '../entities/pending-single-upload.entity';
 
 export interface FileRequestUser {
   id: string;
@@ -135,7 +136,10 @@ export class FilesService {
    *
    * Large videos must use multipart upload instead.
    */
-  async createSignedUploadUrl(dto: CreateSignedUploadUrlDto) {
+  async createSignedUploadUrl(
+    dto: CreateSignedUploadUrlDto,
+    currentUser: FileRequestUser,
+  ) {
     const normalizedMimeType = dto.mimeType.trim().toLowerCase();
 
     this.validateFile(normalizedMimeType, dto.sizeBytes, dto.filePurpose);
@@ -154,10 +158,34 @@ export class FilesService {
       dto.originalName,
     );
 
-    const signedUploadUrl = await this.s3Service.createSignedUploadUrl({
-      storageKey,
-      mimeType: normalizedMimeType,
-    });
+    const signedUploadUrl = await this.dataSource.transaction(
+      async (manager) => {
+        const activeOwner = await manager
+          .getRepository(User)
+          .createQueryBuilder('uploadOwner')
+          .setLock('pessimistic_read')
+          .where('uploadOwner.id = :userId', { userId: currentUser.id })
+          .getOne();
+        if (!activeOwner) {
+          throw new ForbiddenException(
+            'Uploads cannot be prepared for a deleted account.',
+          );
+        }
+
+        const url = await this.s3Service.createSignedUploadUrl({
+          storageKey,
+          mimeType: normalizedMimeType,
+        });
+        await manager.getRepository(PendingSingleUpload).save({
+          storageKey,
+          ownerUserId: currentUser.id,
+          expiresAt: new Date(
+            Date.now() + this.s3Service.getUploadUrlExpiresInSeconds() * 1000,
+          ),
+        });
+        return url;
+      },
+    );
 
     return {
       storageKey,
@@ -740,40 +768,42 @@ export class FilesService {
       originalName,
     );
 
+    await this.dataSource.transaction(async (manager) => {
+      const activeOwner = await manager
+        .getRepository(User)
+        .createQueryBuilder('bufferUploadOwner')
+        .setLock('pessimistic_read')
+        .where('bufferUploadOwner.id = :userId', { userId: currentUser.id })
+        .getOne();
+      if (!activeOwner) {
+        throw new ForbiddenException(
+          'Files cannot be uploaded for a deleted account.',
+        );
+      }
+      await manager.getRepository(PendingSingleUpload).save({
+        storageKey,
+        ownerUserId: currentUser.id,
+        expiresAt: new Date(),
+      });
+    });
+
     await this.s3Service.uploadBuffer({
       storageKey,
       buffer,
       mimeType: normalizedMimeType,
     });
 
-    const isAdmin = currentUser.role === UserRole.ADMIN;
-
-    const file = this.fileRepository.create({
-      ownerUserId: isAdmin ? null : currentUser.id,
-
-      createdByAdminId: isAdmin ? currentUser.id : null,
-
+    const persisted = await this.persistUploadedFile({
       storageKey,
       originalName: originalName.trim(),
-      mimeType: normalizedMimeType,
+      mimeType,
       sizeBytes,
       filePurpose,
       visibility: FileVisibility.PRIVATE,
-      uploadStatus: FileUploadStatus.UPLOADED,
-      uploadedAt: new Date(),
-      pageCount: null,
-      pdfProcessingStatus:
-        normalizedMimeType === 'application/pdf'
-          ? PdfProcessingStatus.PENDING
-          : PdfProcessingStatus.NOT_REQUIRED,
-      pdfLinearized: false,
-      pdfProcessingError: null,
-      pdfProcessedAt: null,
+      currentUser,
+      createMediaAsset: false,
     });
-
-    const savedFile = await this.fileRepository.save(file);
-
-    const finalizedFile = await this.finalizePdfFile(savedFile, {
+    const finalizedFile = await this.finalizePdfFile(persisted.file, {
       failUploadOnError: true,
     });
 
@@ -802,8 +832,22 @@ export class FilesService {
     thumbnailFileId?: string;
     currentUser: FileRequestUser;
     multipartSessionId?: string;
+    createMediaAsset?: boolean;
   }) {
     const result = await this.dataSource.transaction(async (manager) => {
+      const isAdmin = params.currentUser.role === UserRole.ADMIN;
+      const activeOwner = await manager
+        .getRepository(User)
+        .createQueryBuilder('fileOwner')
+        .setLock('pessimistic_read')
+        .where('fileOwner.id = :userId', { userId: params.currentUser.id })
+        .getOne();
+      if (!activeOwner) {
+        throw new ForbiddenException(
+          'Files cannot be attached to a deleted account.',
+        );
+      }
+
       const fileRepository = manager.getRepository(File);
 
       const mediaAssetRepository = manager.getRepository(MediaAsset);
@@ -812,6 +856,21 @@ export class FilesService {
 
       const sessionRepository = manager.getRepository(MultipartUploadSession);
 
+      const pendingUploadRepository =
+        manager.getRepository(PendingSingleUpload);
+      const pendingUpload = await pendingUploadRepository.findOne({
+        where: { storageKey: params.storageKey },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        pendingUpload &&
+        pendingUpload.ownerUserId !== params.currentUser.id
+      ) {
+        throw new ForbiddenException(
+          'This upload URL belongs to another account.',
+        );
+      }
+
       const duplicateFile = await fileRepository.findOne({
         where: {
           storageKey: params.storageKey,
@@ -819,6 +878,9 @@ export class FilesService {
       });
 
       if (duplicateFile) {
+        if (pendingUpload) {
+          await pendingUploadRepository.delete(pendingUpload.id);
+        }
         const duplicateMediaAsset = await mediaAssetRepository.findOne({
           where: {
             fileId: duplicateFile.id,
@@ -833,7 +895,10 @@ export class FilesService {
 
       const normalizedMimeType = params.mimeType.trim().toLowerCase();
 
-      const inferredMediaType = this.inferMediaType(normalizedMimeType);
+      const inferredMediaType =
+        params.createMediaAsset === false
+          ? null
+          : this.inferMediaType(normalizedMimeType);
 
       if (
         params.mediaType &&
@@ -846,8 +911,6 @@ export class FilesService {
       }
 
       const mediaType = params.mediaType ?? inferredMediaType;
-
-      const isAdmin = params.currentUser.role === UserRole.ADMIN;
 
       const file = fileRepository.create({
         ownerUserId: isAdmin ? null : params.currentUser.id,
@@ -935,6 +998,10 @@ export class FilesService {
             completedAt: new Date(),
           },
         );
+      }
+
+      if (pendingUpload) {
+        await pendingUploadRepository.delete(pendingUpload.id);
       }
 
       return {

@@ -150,14 +150,19 @@ export class UserSettingsService {
 
   async prepareAvatarUpload(
     dto: PrepareAvatarUploadDto,
+    userId: string,
+    userRole: string,
   ): Promise<AvatarUploadPreparationResponse> {
-    return this.filesService.createSignedUploadUrl({
-      originalName: dto.originalName.trim(),
-      mimeType: dto.mimeType.trim().toLowerCase(),
-      sizeBytes: dto.sizeBytes,
-      filePurpose: FilePurpose.PROFILE_AVATAR,
-      visibility: FileVisibility.PUBLIC,
-    });
+    return this.filesService.createSignedUploadUrl(
+      {
+        originalName: dto.originalName.trim(),
+        mimeType: dto.mimeType.trim().toLowerCase(),
+        sizeBytes: dto.sizeBytes,
+        filePurpose: FilePurpose.PROFILE_AVATAR,
+        visibility: FileVisibility.PUBLIC,
+      },
+      { id: userId, role: userRole },
+    );
   }
 
   async confirmAvatarUpload(

@@ -1,8 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { AppleSignInTokenService } from '../auth/apple-sign-in-token.service';
 import { SessionSocketRegistryService } from '../auth/session-socket-registry.service';
+import { AiConsentSessionRevocationService } from '../ai-consent/ai-consent-session-revocation.service';
+import { S3DeletionQueueService } from '../files/services/s3-deletion-queue.service';
 import { UserAccountDeletionService } from './user-account-deletion.service';
 import { UserDeletionSource } from './entities/deleted-user-audit.entity';
 
@@ -40,12 +43,21 @@ describe('UserAccountDeletionService Apple revocation', () => {
     const sessionSockets = {
       disconnectSession,
     } as unknown as SessionSocketRegistryService;
+    const aiSessions = {
+      revokeUserSessions: jest.fn().mockResolvedValue({}),
+    } as unknown as AiConsentSessionRevocationService;
+    const s3DeletionQueue = {
+      processDueJobs: jest.fn().mockResolvedValue(undefined),
+    } as unknown as S3DeletionQueueService;
 
     return {
       service: new UserAccountDeletionService(
         dataSource,
         appleTokens,
         sessionSockets,
+        aiSessions,
+        s3DeletionQueue,
+        new ConfigService({}),
       ),
       dataSource,
       appleTokens,
@@ -93,10 +105,19 @@ describe('UserAccountDeletionService content erasure', () => {
   const dataSource = {} as DataSource;
   const appleTokens = {} as AppleSignInTokenService;
   const sessionSockets = {} as SessionSocketRegistryService;
+  const aiSessions = {
+    revokeUserSessions: jest.fn().mockResolvedValue({}),
+  } as unknown as AiConsentSessionRevocationService;
+  const s3DeletionQueue = {
+    processDueJobs: jest.fn().mockResolvedValue(undefined),
+  } as unknown as S3DeletionQueueService;
   const service = new UserAccountDeletionService(
     dataSource,
     appleTokens,
     sessionSockets,
+    aiSessions,
+    s3DeletionQueue,
+    new ConfigService({}),
   );
   const deleteUserAuthoredContent = (
     manager: Pick<EntityManager, 'query'>,
@@ -117,6 +138,9 @@ describe('UserAccountDeletionService content erasure', () => {
       dataSource,
       appleTokens,
       { disconnectSession } as unknown as SessionSocketRegistryService,
+      aiSessions,
+      s3DeletionQueue,
+      new ConfigService({}),
     );
 
     (

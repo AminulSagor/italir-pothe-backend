@@ -49,6 +49,7 @@ export class AiTutorController {
   }
 
   @Post('voice/sessions/:sessionId/heartbeat')
+  @UseGuards(AiConsentGuard)
   async heartbeatVoiceSession(
     @Req() request: AuthenticatedRequest,
     @Param('sessionId') sessionId: string,
@@ -154,6 +155,8 @@ export class AiTutorController {
     return {
       id: userId,
       fullName: request.user?.fullName,
+      deviceId: request.user?.deviceId,
+      sessionId: request.user?.sessionId,
     };
   }
 }

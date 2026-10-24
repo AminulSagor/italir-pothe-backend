@@ -106,8 +106,13 @@ export class UserSettingsController {
   @Post('avatar/upload-url')
   prepareAvatarUpload(
     @Body() dto: PrepareAvatarUploadDto,
+    @Req() request: AuthenticatedRequest,
   ): Promise<AvatarUploadPreparationResponse> {
-    return this.userSettingsService.prepareAvatarUpload(dto);
+    return this.userSettingsService.prepareAvatarUpload(
+      dto,
+      this.getUserId(request),
+      request.user?.role ?? 'user',
+    );
   }
 
   @Post('avatar/confirm')

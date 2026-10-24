@@ -22,6 +22,7 @@ import { DeletedUserAudit } from './entities/deleted-user-audit.entity';
 import { UserAccountDeletionService } from './user-account-deletion.service';
 import { AppleSignInTokenModule } from '../auth/apple-sign-in-token.module';
 import { AuthModule } from '../auth/auth.module';
+import { AiConsentModule } from '../ai-consent/ai-consent.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { AuthModule } from '../auth/auth.module';
     MailModule,
     AppleSignInTokenModule,
     AuthModule,
+    AiConsentModule,
   ],
   providers: [
     UsersService,

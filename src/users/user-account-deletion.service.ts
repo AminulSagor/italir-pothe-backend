@@ -1,13 +1,22 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { ConfigService } from '@nestjs/config';
+import { createHash, randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { AppleSignInTokenService } from '../auth/apple-sign-in-token.service';
 import { SessionSocketRegistryService } from '../auth/session-socket-registry.service';
+import { AiConsentSessionRevocationService } from '../ai-consent/ai-consent-session-revocation.service';
+import {
+  S3DeletionJob,
+  S3DeletionOperation,
+} from '../files/entities/s3-deletion-job.entity';
+import { FileUploadStatus } from '../files/entities/file.entity';
+import { S3DeletionQueueService } from '../files/services/s3-deletion-queue.service';
 import {
   SocialAuthProvider,
   UserSocialAccount,
@@ -27,12 +36,29 @@ interface DeleteAccountParams {
   preventLastAdminDeletion?: boolean;
 }
 
+interface UserStorageDeletionPlan {
+  files: Array<{
+    id: string;
+    storageKey: string;
+    mediaAssetId: string | null;
+    sharedByMessage: boolean;
+    retainedByRecord: boolean;
+  }>;
+  multipartUploads: Array<{ storageKey: string; uploadId: string }>;
+  pendingSingleUploads: Array<{ storageKey: string; expiresAt: Date }>;
+}
+
 @Injectable()
 export class UserAccountDeletionService {
+  private readonly logger = new Logger(UserAccountDeletionService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly appleSignInTokenService: AppleSignInTokenService,
     private readonly sessionSocketRegistry: SessionSocketRegistryService,
+    private readonly aiSessionRevocationService: AiConsentSessionRevocationService,
+    private readonly s3DeletionQueueService: S3DeletionQueueService,
+    private readonly configService: ConfigService,
   ) {}
 
   async deleteAccount(params: DeleteAccountParams) {
@@ -42,7 +68,8 @@ export class UserAccountDeletionService {
       params.targetUserId,
     );
 
-    return this.dataSource.transaction(async (manager) => {
+    const deletionBatchId = randomUUID();
+    const result = await this.dataSource.transaction(async (manager) => {
       const userRepository = manager.getRepository(User);
 
       const user = await userRepository
@@ -83,6 +110,14 @@ export class UserAccountDeletionService {
       ) {
         throw new BadRequestException(
           'An admin cannot delete their own admin account.',
+        );
+      }
+
+      try {
+        await this.aiSessionRevocationService.revokeUserSessions(user.id);
+      } catch {
+        this.logger.error(
+          'Account deletion could not proactively stop every AI session; authentication invalidation will prevent renewed authorization.',
         );
       }
 
@@ -165,6 +200,10 @@ export class UserAccountDeletionService {
       }
 
       await this.deleteUserAuthoredContent(manager, user.id);
+      const storagePlan = await this.collectUserStorageDeletionPlan(
+        manager,
+        user.id,
+      );
 
       try {
         const deleteResult = await userRepository.delete(user.id);
@@ -188,6 +227,13 @@ export class UserAccountDeletionService {
         throw error;
       }
 
+      const storageDeletion = await this.queueUserStorageDeletion(
+        manager,
+        user.id,
+        deletionBatchId,
+        storagePlan,
+      );
+
       return {
         message: 'User account deleted successfully.',
 
@@ -196,8 +242,311 @@ export class UserAccountDeletionService {
         relatedRecordsPreserved: true,
 
         userAuthoredContentDeleted: true,
+
+        storageDeletion,
       };
     });
+
+    void this.s3DeletionQueueService.processDueJobs().catch(() => {
+      this.logger.warn(
+        'Immediate S3 privacy deletion did not complete; the durable retry queue remains active.',
+      );
+    });
+    return result;
+  }
+
+  private async queueUserStorageDeletion(
+    manager: EntityManager,
+    userId: string,
+    batchId: string,
+    plan: UserStorageDeletionPlan,
+  ): Promise<{ queuedObjects: number; preservedSharedOrRetained: number }> {
+    const fileRows = plan.files;
+    const multipartRows = plan.multipartUploads;
+    const pendingSingleUploads = plan.pendingSingleUploads;
+    const inFlightSafetyDelay = new Date(Date.now() + 60 * 60 * 1000);
+    const deletable = fileRows.filter(
+      (file) => !file.sharedByMessage && !file.retainedByRecord,
+    );
+    const preserved = fileRows.filter((file) => !deletable.includes(file));
+    const jobs: Array<{
+      operation: S3DeletionOperation;
+      storageKey: string;
+      uploadId: string | null;
+      nextAttemptAt?: Date;
+    }> = [];
+
+    for (const file of deletable) {
+      jobs.push({
+        operation: S3DeletionOperation.OBJECT,
+        storageKey: file.storageKey,
+        uploadId: null,
+        nextAttemptAt: inFlightSafetyDelay,
+      });
+      if (file.mediaAssetId) {
+        const hlsPrefix =
+          this.configService
+            .get<string>('VIDEO_HLS_STORAGE_PREFIX')
+            ?.trim()
+            .replace(/^\/+|\/+$/g, '') || 'italir-pothe/hls';
+        jobs.push({
+          operation: S3DeletionOperation.PREFIX,
+          storageKey: `${hlsPrefix}/${file.mediaAssetId}/`,
+          uploadId: null,
+          nextAttemptAt: new Date(Date.now() + 60 * 60 * 1000),
+        });
+      }
+    }
+
+    if (deletable.length > 0) {
+      await manager.query(
+        `
+          UPDATE "video_transcode_jobs"
+          SET
+            "status" = 'failed',
+            "maxAttempts" = "attempts",
+            "availableAt" = now() + interval '1 hour',
+            "lastError" = 'Source owner account was deleted.',
+            "updatedAt" = now()
+          WHERE "sourceFileId" = ANY($1::uuid[])
+            AND "status" IN ('pending', 'processing')
+        `,
+        [deletable.map((file) => file.id)],
+      );
+    }
+
+    for (const upload of multipartRows) {
+      jobs.push(
+        {
+          operation: S3DeletionOperation.MULTIPART,
+          storageKey: upload.storageKey,
+          uploadId: upload.uploadId,
+        },
+        {
+          operation: S3DeletionOperation.OBJECT,
+          storageKey: upload.storageKey,
+          uploadId: null,
+          nextAttemptAt: inFlightSafetyDelay,
+        },
+      );
+    }
+
+    for (const upload of pendingSingleUploads) {
+      jobs.push({
+        operation: S3DeletionOperation.OBJECT,
+        storageKey: upload.storageKey,
+        uploadId: null,
+        nextAttemptAt: new Date(
+          Math.max(
+            inFlightSafetyDelay.getTime(),
+            new Date(upload.expiresAt).getTime() + 60_000,
+          ),
+        ),
+      });
+    }
+
+    jobs.push({
+      operation: S3DeletionOperation.PREFIX,
+      storageKey: `resume-studio/generated/${userId}/`,
+      uploadId: null,
+      nextAttemptAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const uniqueJobs = Array.from(
+      new Map(
+        jobs.map((job) => [
+          `${job.operation}\u0000${job.storageKey}\u0000${job.uploadId ?? ''}`,
+          job,
+        ]),
+      ).values(),
+    );
+    if (uniqueJobs.length > 0) {
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(S3DeletionJob)
+        .values(
+          uniqueJobs.map((job) => ({
+            ...job,
+            batchId,
+            attempts: 0,
+            nextAttemptAt: job.nextAttemptAt ?? new Date(),
+            lockedAt: null,
+            lastError: null,
+          })),
+        )
+        .orIgnore()
+        .execute();
+    }
+
+    if (deletable.length > 0) {
+      await manager.query(
+        `
+          UPDATE "files"
+          SET
+            "ownerUserId" = NULL,
+            "originalName" = 'deleted-account-file',
+            "uploadStatus" = $2,
+            "pdfProcessingError" = NULL,
+            "updatedAt" = now()
+          WHERE "id" = ANY($1::uuid[])
+        `,
+        [
+          deletable.map((file) => file.id),
+          FileUploadStatus.ARCHIVED,
+        ],
+      );
+    }
+    if (preserved.length > 0) {
+      await manager.query(
+        `
+          UPDATE "files"
+          SET "ownerUserId" = NULL, "updatedAt" = now()
+          WHERE "id" = ANY($1::uuid[])
+        `,
+        [preserved.map((file) => file.id)],
+      );
+    }
+
+    return {
+      queuedObjects: uniqueJobs.length,
+      preservedSharedOrRetained: preserved.length,
+    };
+  }
+
+  private async collectUserStorageDeletionPlan(
+    manager: EntityManager,
+    userId: string,
+  ): Promise<UserStorageDeletionPlan> {
+    const files: UserStorageDeletionPlan['files'] = await manager.query(
+      `
+        SELECT
+          file."id",
+          file."storageKey",
+          media."id" AS "mediaAssetId",
+          EXISTS (
+            SELECT 1
+            FROM "message_attachments" AS attachment
+            WHERE attachment."fileUrl" LIKE '%' || file."storageKey" || '%'
+          ) AS "sharedByMessage",
+          (
+            EXISTS (
+              SELECT 1 FROM "user_reports"
+              WHERE "evidenceFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "ai_content_reports"
+              WHERE "aiContentFileId" = file."id"
+                 OR "screenshotFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "report_visual_evidence"
+              WHERE "evidenceFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "certificates"
+              WHERE "pdfFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "exam_answers"
+              WHERE "audioFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "users"
+              WHERE "profilePhotoFileId" = file."id"
+                AND "id" <> $1
+            )
+            OR EXISTS (
+              SELECT 1 FROM "cv_assistant_sessions"
+              WHERE "userId" <> $1
+                AND (
+                  "profilePhotoFileId" = file."id"
+                  OR "referenceImageFileIds" ? file."id"::text
+                )
+            )
+            OR EXISTS (
+              SELECT 1 FROM "cv_generations"
+              WHERE "userId" <> $1
+                AND (
+                  "profilePhotoFileId" = file."id"
+                  OR "generatedImageFileId" = file."id"
+                  OR "referenceImageFileIds" ? file."id"::text
+                )
+            )
+            OR EXISTS (
+              SELECT 1 FROM "media_assets" AS referencing_media
+              INNER JOIN "files" AS source_file
+                ON source_file."id" = referencing_media."fileId"
+              WHERE referencing_media."thumbnailFileId" = file."id"
+                AND source_file."ownerUserId" IS DISTINCT FROM $1
+            )
+            OR EXISTS (
+              SELECT 1 FROM "survival_situations"
+              WHERE "resourceFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "notification_events"
+              WHERE "imageFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "scheduled_notifications"
+              WHERE "imageFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "quiz_questions"
+              WHERE "mediaFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "skill_builder_sentences"
+              WHERE "aiVoiceFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "lessons"
+              WHERE "videoFileId" = file."id"
+                 OR "theoryAudioFileId" = file."id"
+                 OR "supplementaryMaterialFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "skill_builder_career_tracks"
+              WHERE "introVideoFileId" = file."id"
+                 OR "theoryResourceFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "lesson_vocabularies"
+              WHERE "aiPronunciationFileId" = file."id"
+            )
+            OR EXISTS (
+              SELECT 1 FROM "exam_questions"
+              WHERE "audioFileId" = file."id"
+                 OR "imageFileId" = file."id"
+            )
+          ) AS "retainedByRecord"
+        FROM "files" AS file
+        LEFT JOIN "media_assets" AS media ON media."fileId" = file."id"
+        WHERE file."ownerUserId" = $1
+        FOR UPDATE OF file
+      `,
+      [userId],
+    );
+    const multipartUploads: UserStorageDeletionPlan['multipartUploads'] =
+      await manager.query(
+        `
+          DELETE FROM "multipart_upload_sessions"
+          WHERE "ownerUserId" = $1
+          RETURNING "storageKey", "uploadId"
+        `,
+        [userId],
+      );
+    const pendingSingleUploads: UserStorageDeletionPlan['pendingSingleUploads'] =
+      await manager.query(
+        `
+          DELETE FROM "pending_single_uploads"
+          WHERE "ownerUserId" = $1
+          RETURNING "storageKey", "expiresAt"
+        `,
+        [userId],
+      );
+    return { files, multipartUploads, pendingSingleUploads };
   }
 
   private async deleteUserAuthoredContent(

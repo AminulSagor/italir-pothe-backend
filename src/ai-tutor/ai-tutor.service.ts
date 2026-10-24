@@ -23,10 +23,14 @@ import { StoreWalletService } from '../package-store/services/store-wallet.servi
 import { AiTutorUsageService } from './ai-tutor-usage.service';
 import { AiTutorLiveSessionService } from './ai-tutor-live-session.service';
 import { GeminiLiveService } from './gemini-live.service';
+import { UserDeviceService } from '../devices/services/user-device.service';
+import { DevicePlatform } from '../devices/enums/device.enums';
 
 interface AiTutorAuthenticatedUser {
   id: string;
   fullName?: string;
+  deviceId?: string;
+  sessionId?: string;
 }
 
 interface UploadedAudioFile {
@@ -71,12 +75,14 @@ export class AiTutorService {
     private readonly liveSessionService: AiTutorLiveSessionService,
     private readonly geminiLiveService: GeminiLiveService,
     private readonly dataSource: DataSource,
+    private readonly userDeviceService: UserDeviceService,
   ) {}
 
   async startVoiceSession(
     user: AiTutorAuthenticatedUser,
     dto: StartAiTutorVoiceSessionDto,
   ) {
+    await this.assertVoiceTransportAllowed(user, dto.voiceTransport);
     const requestedTtlSeconds = dto.ttlSeconds ?? 900;
     const usageSession = await this.usageService.beginVoiceSession(
       user.id,
@@ -179,6 +185,24 @@ export class AiTutorService {
           : 'Session initialization failed',
       );
       throw error;
+    }
+  }
+
+  private async assertVoiceTransportAllowed(
+    user: AiTutorAuthenticatedUser,
+    voiceTransport?: 'gemini_live',
+  ): Promise<void> {
+    if (voiceTransport === 'gemini_live') return;
+
+    const device = await this.userDeviceService.assertAuthSessionActive({
+      userId: user.id,
+      deviceId: user.deviceId,
+      sessionId: user.sessionId,
+    });
+    if (device.platform !== DevicePlatform.ANDROID) {
+      throw new ForbiddenException(
+        'Legacy AI voice transport is available only to the published Android client.',
+      );
     }
   }
 

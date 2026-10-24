@@ -10,6 +10,9 @@ import { MultipartUploadSession } from './entities/multipart-upload-session.enti
 import { VideoTranscodeJob } from './entities/video-transcode-job.entity';
 import { CloudFrontSignerService } from './services/cloudfront-signer.service';
 import { PdfProcessingService } from './services/pdf-processing.service';
+import { S3DeletionJob } from './entities/s3-deletion-job.entity';
+import { S3DeletionQueueService } from './services/s3-deletion-queue.service';
+import { PendingSingleUpload } from './entities/pending-single-upload.entity';
 
 @Module({
   imports: [
@@ -18,6 +21,8 @@ import { PdfProcessingService } from './services/pdf-processing.service';
       MediaAsset,
       MultipartUploadSession,
       VideoTranscodeJob,
+      S3DeletionJob,
+      PendingSingleUpload,
     ]),
   ],
   controllers: [FilesController],
@@ -26,7 +31,13 @@ import { PdfProcessingService } from './services/pdf-processing.service';
     S3Service,
     CloudFrontSignerService,
     PdfProcessingService,
+    S3DeletionQueueService,
   ],
-  exports: [FilesService, S3Service, CloudFrontSignerService],
+  exports: [
+    FilesService,
+    S3Service,
+    CloudFrontSignerService,
+    S3DeletionQueueService,
+  ],
 })
 export class FilesModule {}

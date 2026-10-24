@@ -28,8 +28,14 @@ export class FilesController {
   constructor(private readonly filesService: FilesService) {}
 
   @Post('signed-upload-url')
-  async createSignedUploadUrl(@Body() dto: CreateSignedUploadUrlDto) {
-    return this.filesService.createSignedUploadUrl(dto);
+  async createSignedUploadUrl(
+    @Body() dto: CreateSignedUploadUrlDto,
+    @Req() request: authenticatedRequestInterface.AuthenticatedRequest,
+  ) {
+    return this.filesService.createSignedUploadUrl(
+      dto,
+      this.getCurrentUser(request),
+    );
   }
 
   @Post('confirm-upload')

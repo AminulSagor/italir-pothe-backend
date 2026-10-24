@@ -2,6 +2,7 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -362,7 +363,7 @@ export class S3Service {
         ) ?? [];
 
       if (objects.length > 0) {
-        await this.s3Client.send(
+        const deletion = await this.s3Client.send(
           new DeleteObjectsCommand({
             Bucket: this.bucketName,
             Delete: {
@@ -371,12 +372,26 @@ export class S3Service {
             },
           }),
         );
+        if (deletion.Errors?.length) {
+          throw new InternalServerErrorException(
+            'S3 did not delete every object in the requested prefix.',
+          );
+        }
       }
 
       continuationToken = result.IsTruncated
         ? result.NextContinuationToken
         : undefined;
     } while (continuationToken);
+  }
+
+  async deleteObject(storageKey: string): Promise<void> {
+    await this.s3Client.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucketName,
+        Key: storageKey,
+      }),
+    );
   }
 
   createPublicUrl(storageKey: string): string {

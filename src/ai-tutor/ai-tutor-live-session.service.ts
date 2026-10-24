@@ -4,6 +4,7 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 
+import { AiConsentService } from '../ai-consent/ai-consent.service';
 import { AiTutorLearnerProfile } from './entities/ai-tutor-learner-profile.entity';
 import { AiTutorLearningMemory } from './entities/ai-tutor-learning-memory.entity';
 import {
@@ -32,6 +33,7 @@ export class AiTutorLiveSessionService {
     private readonly configService: ConfigService,
     private readonly geminiLiveService: GeminiLiveService,
     private readonly dataSource: DataSource,
+    private readonly aiConsentService: AiConsentService,
   ) {}
 
   async create(options: {
@@ -226,6 +228,10 @@ export class AiTutorLiveSessionService {
   private async processSummary(id: string) {
     const claimed = await this.claim(id);
     if (!claimed) return;
+    if (!(await this.aiConsentService.hasCurrentConsent(claimed.userId))) {
+      await this.abortSummaryAfterConsentWithdrawal(claimed.id);
+      return;
+    }
     const finalizing = claimed.status === AiTutorLiveSessionStatus.FINALIZING;
     const transcript = [...claimed.pendingTranscript];
 
@@ -247,7 +253,9 @@ export class AiTutorLiveSessionService {
         where: { id: claimed.id },
         lock: { mode: 'pessimistic_write' },
       });
-      if (!current) return;
+      if (!current || current.status === AiTutorLiveSessionStatus.FAILED) {
+        return;
+      }
       const summarizedIds = new Set(transcript.map((event) => event.eventId));
       current.pendingTranscript = current.pendingTranscript.filter(
         (event) => !summarizedIds.has(event.eventId),
@@ -309,6 +317,20 @@ export class AiTutorLiveSessionService {
 
   private async releaseLease(id: string) {
     await this.sessionRepository.update({ id }, { summaryLeaseUntil: null });
+  }
+
+  private async abortSummaryAfterConsentWithdrawal(id: string) {
+    await this.sessionRepository.update(
+      { id },
+      {
+        status: AiTutorLiveSessionStatus.FAILED,
+        endedAt: new Date(),
+        summaryLeaseUntil: null,
+        summaryError: 'AI data-sharing permission was withdrawn.',
+        pendingTranscript: [],
+        resumptionHandle: null,
+      },
+    );
   }
 
   private async recordSummaryFailure(id: string, message: string) {
