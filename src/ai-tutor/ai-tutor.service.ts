@@ -194,6 +194,12 @@ export class AiTutorService {
   ): Promise<void> {
     if (voiceTransport === 'gemini_live') return;
 
+    if (!user.deviceId || !user.sessionId) {
+      throw new ForbiddenException(
+        'Legacy AI voice transport requires an authenticated Android device session.',
+      );
+    }
+
     const device = await this.userDeviceService.assertAuthSessionActive({
       userId: user.id,
       deviceId: user.deviceId,
