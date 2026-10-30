@@ -39,7 +39,9 @@ export class S3DeletionQueueService {
   }
 
   private async claimNextJob(): Promise<S3DeletionJob | null> {
-    const rows: S3DeletionJob[] = await this.deletionJobRepository.query(
+    const [rows] = await this.deletionJobRepository.query<
+      [S3DeletionJob[], number]
+    >(
       `
         UPDATE "s3_deletion_jobs"
         SET
@@ -62,10 +64,24 @@ export class S3DeletionQueueService {
       `,
       [STALE_LOCK_MINUTES],
     );
-    return rows[0] ?? null;
+    const job = rows[0] ?? null;
+    if (job && !this.hasValidId(job)) {
+      this.logger.error(
+        'Claimed an S3 privacy deletion job without a valid identifier; it was left locked for investigation.',
+      );
+      return null;
+    }
+    return job;
   }
 
   private async processJob(job: S3DeletionJob): Promise<void> {
+    if (!this.hasValidId(job)) {
+      this.logger.error(
+        'Refusing to process an S3 privacy deletion job without a valid identifier.',
+      );
+      return;
+    }
+
     try {
       if (job.operation === S3DeletionOperation.PREFIX) {
         await this.s3Service.deletePrefix(job.storageKey);
@@ -108,5 +124,14 @@ export class S3DeletionQueueService {
       return error.name.slice(0, 160);
     }
     return 'S3DeletionError';
+  }
+
+  private hasValidId(job: Pick<S3DeletionJob, 'id'>): boolean {
+    return (
+      typeof job.id === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        job.id,
+      )
+    );
   }
 }
