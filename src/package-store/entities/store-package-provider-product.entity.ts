@@ -16,9 +16,7 @@ import {
 import { StorePackage } from './store-package.entity';
 
 @Entity('store_package_provider_products')
-@Index(['provider', 'productId'], {
-  unique: true,
-})
+@Index(['provider', 'productId', 'basePlanId'])
 @Index(['packageId', 'provider', 'isActive'])
 export class StorePackageProviderProduct {
   @PrimaryGeneratedColumn('uuid')

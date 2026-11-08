@@ -4,6 +4,7 @@ export enum StorePackageType {
   AI_BUNDLE = 'ai_bundle',
   STREAK_FREEZE = 'streak_freeze',
   CV_CREDIT = 'cv_credit',
+  AD_FREE = 'ad_free',
 }
 
 export enum CvGenerationChargeSource {
@@ -27,6 +28,7 @@ export enum StoreMarketingBadge {
 export enum StoreBillingModel {
   ONE_TIME = 'one_time',
   MONTHLY = 'monthly',
+  YEARLY = 'yearly',
 }
 
 export enum StreakProtectionMode {
@@ -94,6 +96,7 @@ export enum PurchaseHistoryCategory {
   AI_REFILL = 'ai_refill',
   STREAK_FREEZE = 'streak_freeze',
   CV_CREDIT = 'cv_credit',
+  AD_FREE = 'ad_free',
 }
 
 export enum PurchaseHistorySortBy {

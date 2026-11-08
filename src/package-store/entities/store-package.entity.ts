@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   Index,
   OneToMany,
@@ -76,6 +77,12 @@ export class StorePackage {
     type: 'timestamptz',
   })
   updatedAt: Date;
+
+  @DeleteDateColumn({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  deletedAt: Date | null;
 
   @OneToOne(() => StorePackageCommerce, (commerce) => commerce.package, {
     cascade: true,

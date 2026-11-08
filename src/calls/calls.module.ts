@@ -18,6 +18,7 @@ import { CallOrchestratorService } from './services/call-orchestrator.service';
 import { CallRealtimeService } from './services/call-realtime.service';
 import { CallService } from './services/call.service';
 import { AuthModule } from 'src/auth/auth.module';
+import { RewardedAdsModule } from 'src/rewarded-ads/rewarded-ads.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AuthModule } from 'src/auth/auth.module';
     UserBlocksModule,
     DevicesModule,
     FirebaseModule,
+    RewardedAdsModule,
 
     TypeOrmModule.forFeature([Call, DirectConversation, User]),
 

@@ -54,6 +54,7 @@ import { ResumeStudioModule } from './resume-studio/resume-studio.module';
 import { AppUpdateModule } from './app-update/app-update.module';
 import { CourseDeviceAccessModule } from './course-device-access/course-device-access.module';
 import { AiConsentModule } from './ai-consent/ai-consent.module';
+import { RewardedAdsModule } from './rewarded-ads/rewarded-ads.module';
 
 @Module({
   imports: [
@@ -72,6 +73,8 @@ import { AiConsentModule } from './ai-consent/ai-consent.module';
         // must never attempt to create constraints before data repair runs.
         const isProduction =
           configService.get<string>('NODE_ENV') === 'production';
+        const runMigrations =
+          configService.get<string>('TYPEORM_RUN_MIGRATIONS') === 'true';
         return {
           type: 'postgres' as const,
           host: configService.get<string>('DB_HOST'),
@@ -84,7 +87,9 @@ import { AiConsentModule } from './ai-consent/ai-consent.module';
             !isProduction &&
             configService.get<string>('TYPEORM_SYNC') === 'true',
           migrations: [__dirname + '/database/migrations/*.js'],
-          migrationsRun: isProduction,
+          // Production deployments must not implicitly execute every pending
+          // migration. Run audited migrations as an explicit release step.
+          migrationsRun: runMigrations,
         };
       },
     }),
@@ -138,6 +143,7 @@ import { AiConsentModule } from './ai-consent/ai-consent.module';
     AppUpdateModule,
     CourseDeviceAccessModule,
     AiConsentModule,
+    RewardedAdsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

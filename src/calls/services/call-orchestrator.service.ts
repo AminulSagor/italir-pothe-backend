@@ -17,6 +17,7 @@ import { FirebaseAdminService } from 'src/firebase/services/firebase-admin.servi
 import { DevicePlatform } from 'src/devices/enums/device.enums';
 import { CallStatus } from '../enums/call.enums';
 import { AppleVoipPushService } from './apple-voip-push.service';
+import { RewardedAdsService } from 'src/rewarded-ads/services/rewarded-ads.service';
 
 interface PendingIncomingAck {
   receiverId: string;
@@ -44,6 +45,7 @@ export class CallOrchestratorService implements OnModuleDestroy {
     private readonly userDeviceService: UserDeviceService,
     private readonly firebaseAdminService: FirebaseAdminService,
     private readonly appleVoipPushService: AppleVoipPushService,
+    private readonly rewardedAdsService: RewardedAdsService,
   ) {}
 
   async initiate(callerId: string, dto: InitiateCallDto) {
@@ -53,6 +55,7 @@ export class CallOrchestratorService implements OnModuleDestroy {
     );
 
     await this.userBlocksService.assertCanMessage(caller.id, receiver.id);
+    await this.rewardedAdsService.assertOutgoingCallAvailable(caller.id);
 
     /*
      * Do not reject when the receiver socket is disconnected.
@@ -65,6 +68,10 @@ export class CallOrchestratorService implements OnModuleDestroy {
       receiver,
       dto,
     });
+
+    if (created) {
+      await this.rewardedAdsService.consumeOutgoingCall(caller.id);
+    }
 
     this.scheduleRingingTimeout(call);
 

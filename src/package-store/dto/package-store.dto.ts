@@ -41,6 +41,39 @@ const upper = ({ value }: { value: unknown }) =>
 
 const productIdPattern = /^[A-Za-z0-9._-]+$/;
 
+export class CreateStoreProviderProductDto {
+  @IsEnum(StorePaymentProvider)
+  provider: StorePaymentProvider;
+
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  @Matches(productIdPattern, {
+    message:
+      'productId may contain only letters, numbers, dots, underscores and hyphens.',
+  })
+  productId: string;
+
+  @IsEnum(StoreProviderProductType)
+  productType: StoreProviderProductType;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  basePlanId?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(255)
+  offerId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
 export class CreateStorePackageDto {
   @IsEnum(StorePackageType)
   packageType: StorePackageType;
@@ -123,6 +156,12 @@ export class CreateStorePackageDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateStoreProviderProductDto)
+  providerProducts?: CreateStoreProviderProductDto[];
 }
 
 export class UpdateStorePackageDto {
@@ -204,37 +243,9 @@ export class UpdateStorePackageDto {
   sortOrder?: number;
 }
 
-export class CreateStoreProviderProductDto {
-  @IsEnum(StorePaymentProvider)
-  provider: StorePaymentProvider;
-
-  @Transform(trim)
-  @IsString()
-  @MaxLength(255)
-  @Matches(productIdPattern, {
-    message:
-      'productId may contain only letters, numbers, dots, underscores and hyphens.',
-  })
-  productId: string;
-
-  @IsEnum(StoreProviderProductType)
-  productType: StoreProviderProductType;
-
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(255)
-  basePlanId?: string;
-
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(255)
-  offerId?: string;
-
-  @IsOptional()
+export class SetStorePackageAvailabilityDto {
   @IsBoolean()
-  isActive?: boolean;
+  enabled: boolean;
 }
 
 export class UpdateStoreProviderProductDto {

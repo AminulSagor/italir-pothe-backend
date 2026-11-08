@@ -28,6 +28,7 @@ import {
   CreateStoreProviderProductDto,
   RefundStoreOrderDto,
   ReorderStorePackagesDto,
+  SetStorePackageAvailabilityDto,
   StorePackageQueryDto,
   UpdateCvEconomyConfigDto,
   UpdateStorePackageDto,
@@ -92,6 +93,18 @@ export class AdminPackageStoreController {
     @Body() dto: UpdateStorePackageDto,
   ) {
     return this.packageStoreService.updatePackage(packageId, dto);
+  }
+
+  @Patch('packages/:packageId/availability')
+  async setPackageAvailability(
+    @Param('packageId', new ParseUUIDPipe({ version: '4' }))
+    packageId: string,
+    @Body() dto: SetStorePackageAvailabilityDto,
+  ) {
+    return this.packageStoreService.setPackageAvailability(
+      packageId,
+      dto.enabled,
+    );
   }
 
   @Delete('packages/:packageId')

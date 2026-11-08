@@ -445,6 +445,7 @@ export class PackageStoreService {
   // =========================================================
 
   async createPackage(dto: CreateStorePackageDto) {
+    this.validateAdFreePackageCreation(dto);
     const normalized = this.normalizePackageValues(dto.packageType, {
       priceEur: dto.priceEur,
       billingModel: dto.billingModel,
@@ -464,6 +465,27 @@ export class PackageStoreService {
 
     const packageId = await this.dataSource.transaction(async (manager) => {
       const packageRepository = manager.getRepository(StorePackage);
+
+      if (dto.packageType === StorePackageType.AD_FREE) {
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+          `ad-free:${normalized.billingModel}`,
+        ]);
+        const duplicate = await packageRepository
+          .createQueryBuilder('storePackage')
+          .innerJoin('storePackage.commerce', 'commerce')
+          .where('storePackage.packageType = :packageType', {
+            packageType: StorePackageType.AD_FREE,
+          })
+          .andWhere('commerce.billingModel = :billingModel', {
+            billingModel: normalized.billingModel,
+          })
+          .getOne();
+        if (duplicate) {
+          throw new ConflictException(
+            `A non-deleted ${normalized.billingModel} Ad-Free package already exists.`,
+          );
+        }
+      }
 
       const commerceRepository = manager.getRepository(StorePackageCommerce);
 
@@ -521,6 +543,37 @@ export class PackageStoreService {
           protectionDurationDays: normalized.protectionDurationDays,
         }),
       );
+
+      if (dto.packageType === StorePackageType.AD_FREE) {
+        const providerRepository = manager.getRepository(
+          StorePackageProviderProduct,
+        );
+        for (const mapping of dto.providerProducts ?? []) {
+          const productId = mapping.productId.trim();
+          const basePlanId = mapping.basePlanId?.trim() || null;
+          await this.assertProviderProductIdentityAvailable(manager, {
+            provider: mapping.provider,
+            productId,
+            basePlanId,
+          });
+          await this.assertProductNotMappedToCourse(
+            mapping.provider,
+            productId,
+            manager,
+          );
+          await providerRepository.save(
+            providerRepository.create({
+              packageId: storePackage.id,
+              provider: mapping.provider,
+              productId,
+              productType: StoreProviderProductType.SUBSCRIPTION,
+              basePlanId,
+              offerId: null,
+              isActive: true,
+            }),
+          );
+        }
+      }
 
       return storePackage.id;
     });
@@ -594,6 +647,12 @@ export class PackageStoreService {
 
   async updatePackage(packageId: string, dto: UpdateStorePackageDto) {
     const current = await this.getPackageById(packageId);
+
+    if (current.packageType === StorePackageType.AD_FREE) {
+      throw new BadRequestException(
+        'Ad-Free packages are immutable after creation. Disable or delete the package instead.',
+      );
+    }
 
     const normalized = this.normalizePackageValues(current.packageType, {
       priceEur: dto.priceEur ?? current.commerce.priceEur,
@@ -689,6 +748,12 @@ export class PackageStoreService {
   ) {
     const storePackage = await this.getPackageById(packageId);
 
+    if (storePackage.packageType === StorePackageType.AD_FREE) {
+      throw new BadRequestException(
+        'Ad-Free store mappings must be supplied during package creation and cannot be edited later.',
+      );
+    }
+
     const productId = dto.productId.trim();
     const basePlanId = dto.basePlanId?.trim() || null;
     const offerId = dto.offerId?.trim() || null;
@@ -770,6 +835,11 @@ export class PackageStoreService {
     dto: UpdateStoreProviderProductDto,
   ) {
     const storePackage = await this.getPackageById(packageId);
+    if (storePackage.packageType === StorePackageType.AD_FREE) {
+      throw new BadRequestException(
+        'Ad-Free store mappings are immutable after package creation.',
+      );
+    }
     const current = await this.getProviderProductEntity(
       packageId,
       providerProductId,
@@ -880,6 +950,12 @@ export class PackageStoreService {
   }
 
   async deleteProviderProduct(packageId: string, providerProductId: string) {
+    const storePackage = await this.getPackageById(packageId);
+    if (storePackage.packageType === StorePackageType.AD_FREE) {
+      throw new BadRequestException(
+        'Ad-Free store mappings are removed only with their package.',
+      );
+    }
     const providerProduct = await this.getProviderProductEntity(
       packageId,
       providerProductId,
@@ -912,6 +988,25 @@ export class PackageStoreService {
   async archivePackage(packageId: string) {
     const storePackage = await this.getPackageById(packageId);
 
+    if (storePackage.packageType === StorePackageType.AD_FREE) {
+      await this.dataSource.transaction(async (manager) => {
+        await manager.delete(StorePackageProviderProduct, { packageId });
+        await manager.update(
+          StorePackage,
+          { id: packageId },
+          {
+            status: StorePackageStatus.ARCHIVED,
+            archivedAt: new Date(),
+          },
+        );
+        await manager.softDelete(StorePackage, packageId);
+      });
+      return {
+        message: 'Ad-Free package deleted successfully.',
+        packageId,
+      };
+    }
+
     storePackage.status = StorePackageStatus.ARCHIVED;
 
     storePackage.archivedAt = new Date();
@@ -921,6 +1016,32 @@ export class PackageStoreService {
     return {
       message: 'Package archived successfully.',
       packageId,
+    };
+  }
+
+  async setPackageAvailability(packageId: string, enabled: boolean) {
+    const storePackage = await this.getPackageById(packageId);
+    if (storePackage.packageType !== StorePackageType.AD_FREE) {
+      throw new BadRequestException(
+        'This availability operation is reserved for Ad-Free packages.',
+      );
+    }
+    storePackage.status = enabled
+      ? StorePackageStatus.PUBLISHED
+      : StorePackageStatus.ARCHIVED;
+    storePackage.publishedAt = enabled
+      ? (storePackage.publishedAt ?? new Date())
+      : storePackage.publishedAt;
+    storePackage.archivedAt = enabled ? null : new Date();
+    await this.packageRepository.save(storePackage);
+    await this.providerProductRepository.update(
+      { packageId },
+      { isActive: enabled },
+    );
+    return {
+      message: `Ad-Free package ${enabled ? 'enabled' : 'disabled'} successfully.`,
+      packageId,
+      enabled,
     };
   }
 
@@ -1044,6 +1165,7 @@ export class PackageStoreService {
       StorePackageType.AI_BUNDLE,
       StorePackageType.CV_CREDIT,
       StorePackageType.STREAK_FREEZE,
+      StorePackageType.AD_FREE,
     ];
 
     const sections = packageTypes.map((packageType) => {
@@ -1066,14 +1188,18 @@ export class PackageStoreService {
             ? 'Refill AI Credits'
             : packageType === StorePackageType.CV_CREDIT
               ? 'CV Credit Pack'
-              : 'Buy Streak Freeze',
+              : packageType === StorePackageType.STREAK_FREEZE
+                ? 'Buy Streak Freeze'
+                : 'Remove Ads',
 
         subtitle:
           packageType === StorePackageType.AI_BUNDLE
             ? 'Buy more minutes and tokens.'
             : packageType === StorePackageType.CV_CREDIT
               ? 'Generate and export professional resumes.'
-              : 'Protect your learning streak.',
+              : packageType === StorePackageType.STREAK_FREEZE
+                ? 'Protect your learning streak.'
+                : 'Disable advertising across the app.',
 
         packageCount: matching.length,
 
@@ -1232,6 +1358,11 @@ export class PackageStoreService {
     let storeProduct = this.mapProviderProduct(providerProduct);
 
     if (query.couponCode?.trim()) {
+      if (storePackage.packageType === StorePackageType.AD_FREE) {
+        throw new BadRequestException(
+          'Ad-Free subscriptions do not support coupons.',
+        );
+      }
       couponResolution =
         await this.influencerHubService.resolveCouponForCheckout({
           couponCode: query.couponCode,
@@ -1368,6 +1499,14 @@ export class PackageStoreService {
 
     const storePackage = await this.getPublishedPackage(dto.packageId);
     await this.assertMonthlyStreakPurchaseAllowed(userId, storePackage);
+    if (
+      storePackage.packageType === StorePackageType.AD_FREE &&
+      dto.couponCode?.trim()
+    ) {
+      throw new BadRequestException(
+        'Ad-Free subscriptions do not support coupons.',
+      );
+    }
     const regularProviderProduct = this.requireActiveProviderProduct(
       storePackage,
       dto.paymentProvider,
@@ -3907,10 +4046,13 @@ export class PackageStoreService {
       basePlanId: string | null;
     },
   ) {
-    if (storePackage.commerce.billingModel === StoreBillingModel.MONTHLY) {
+    if (
+      storePackage.commerce.billingModel === StoreBillingModel.MONTHLY ||
+      storePackage.commerce.billingModel === StoreBillingModel.YEARLY
+    ) {
       if (input.productType !== StoreProviderProductType.SUBSCRIPTION) {
         throw new BadRequestException(
-          'Monthly packages must map to a subscription product.',
+          'Recurring packages must map to a subscription product.',
         );
       }
 
@@ -3926,7 +4068,19 @@ export class PackageStoreService {
       return;
     }
 
-    if (input.productType !== StoreProviderProductType.CONSUMABLE) {
+    if (
+      storePackage.packageType === StorePackageType.AD_FREE &&
+      input.productType !== StoreProviderProductType.NON_CONSUMABLE
+    ) {
+      throw new BadRequestException(
+        'A one-time Ad-Free package must use a non-consumable store product.',
+      );
+    }
+
+    if (
+      storePackage.packageType !== StorePackageType.AD_FREE &&
+      input.productType !== StoreProviderProductType.CONSUMABLE
+    ) {
       throw new BadRequestException(
         'One-time AI, CV-credit and finite streak-freeze packages must use consumable store products.',
       );
@@ -3935,6 +4089,123 @@ export class PackageStoreService {
     if (input.basePlanId) {
       throw new BadRequestException(
         'A one-time consumable product cannot have a basePlanId.',
+      );
+    }
+  }
+
+  private validateAdFreePackageCreation(dto: CreateStorePackageDto): void {
+    if (dto.packageType !== StorePackageType.AD_FREE) {
+      if (dto.providerProducts?.length) {
+        throw new BadRequestException(
+          'Inline store mappings are supported only for Ad-Free package creation.',
+        );
+      }
+      return;
+    }
+
+    if (
+      dto.billingModel !== StoreBillingModel.MONTHLY &&
+      dto.billingModel !== StoreBillingModel.YEARLY
+    ) {
+      throw new BadRequestException(
+        'Ad-Free packages must use monthly or yearly subscription billing.',
+      );
+    }
+
+    const expectedName =
+      dto.billingModel === StoreBillingModel.MONTHLY
+        ? 'Ad-Free Monthly'
+        : 'Ad-Free Yearly';
+    const expectedPrice =
+      dto.billingModel === StoreBillingModel.MONTHLY ? '1.99' : '15.00';
+    if (dto.name.trim() !== expectedName) {
+      throw new BadRequestException(`Package name must be ${expectedName}.`);
+    }
+    if (Number(dto.priceEur) !== Number(expectedPrice)) {
+      throw new BadRequestException(
+        `${expectedName} must use the ${expectedPrice} USD reference price.`,
+      );
+    }
+    if (dto.couponsEnabled || dto.couponCode?.trim()) {
+      throw new BadRequestException('Ad-Free packages do not support coupons.');
+    }
+
+    const mappings = dto.providerProducts ?? [];
+    if (mappings.length !== 2) {
+      throw new BadRequestException(
+        'Ad-Free creation requires exactly one App Store and one Google Play mapping.',
+      );
+    }
+    for (const provider of [
+      StorePaymentProvider.APP_STORE,
+      StorePaymentProvider.GOOGLE_PLAY,
+    ]) {
+      const matches = mappings.filter((item) => item.provider === provider);
+      if (matches.length !== 1) {
+        throw new BadRequestException(
+          `Ad-Free creation requires exactly one ${provider} mapping.`,
+        );
+      }
+      const mapping = matches[0];
+      if (mapping.productType !== StoreProviderProductType.SUBSCRIPTION) {
+        throw new BadRequestException(
+          'Ad-Free store mappings must be auto-renewing subscription products.',
+        );
+      }
+      if (mapping.isActive === false) {
+        throw new BadRequestException(
+          'New Ad-Free store mappings must be active.',
+        );
+      }
+      if (mapping.offerId?.trim()) {
+        throw new BadRequestException(
+          'Ad-Free packages do not support promotional offer mappings.',
+        );
+      }
+      if (
+        provider === StorePaymentProvider.GOOGLE_PLAY &&
+        !mapping.basePlanId?.trim()
+      ) {
+        throw new BadRequestException(
+          'Google Play Ad-Free subscriptions require a basePlanId.',
+        );
+      }
+      if (
+        provider === StorePaymentProvider.APP_STORE &&
+        mapping.basePlanId?.trim()
+      ) {
+        throw new BadRequestException(
+          'App Store subscriptions do not use Google Play basePlanId values.',
+        );
+      }
+    }
+  }
+
+  private async assertProviderProductIdentityAvailable(
+    manager: EntityManager,
+    input: {
+      provider: StorePaymentProvider;
+      productId: string;
+      basePlanId: string | null;
+    },
+  ): Promise<void> {
+    const query = manager
+      .getRepository(StorePackageProviderProduct)
+      .createQueryBuilder('providerProduct')
+      .where('providerProduct.provider = :provider', {
+        provider: input.provider,
+      })
+      .andWhere('providerProduct.productId = :productId', {
+        productId: input.productId,
+      });
+    if (input.provider === StorePaymentProvider.GOOGLE_PLAY) {
+      query.andWhere('providerProduct.basePlanId = :basePlanId', {
+        basePlanId: input.basePlanId,
+      });
+    }
+    if (await query.getOne()) {
+      throw new ConflictException(
+        'This provider product and base-plan mapping is already in use.',
       );
     }
   }
@@ -4881,6 +5152,10 @@ export class PackageStoreService {
 
     if (packageType === StorePackageType.STREAK_FREEZE) {
       return PurchaseHistoryCategory.STREAK_FREEZE;
+    }
+
+    if (packageType === StorePackageType.AD_FREE) {
+      return PurchaseHistoryCategory.AD_FREE;
     }
 
     return PurchaseHistoryCategory.CV_CREDIT;

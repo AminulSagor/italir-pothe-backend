@@ -23,6 +23,7 @@ import {
 } from 'src/billing/types/google-play-subscription.type';
 
 import { StoreOrder } from 'src/package-store/entities/store-order.entity';
+import { StoreOrderPackageSnapshot } from 'src/package-store/entities/store-order-package-snapshot.entity';
 import { StoreOrderProviderTransaction } from 'src/package-store/entities/store-order-provider-transaction.entity';
 import { UserStoreWallet } from 'src/package-store/entities/user-store-wallet.entity';
 import {
@@ -31,6 +32,7 @@ import {
   StorePaymentProvider,
   StoreProviderEnvironment,
   StoreProviderProductType,
+  StorePackageType,
   StreakProtectionMode,
 } from 'src/package-store/types/package-store.type';
 
@@ -487,6 +489,11 @@ export class GooglePlaySubscriptionLifecycleService {
 
     const subscription = await repository
       .createQueryBuilder('subscription')
+      .innerJoin(
+        StoreOrderPackageSnapshot,
+        'snapshot',
+        'snapshot.orderId = subscription.initialOrderId',
+      )
       .where('subscription.userId = :userId', {
         userId,
       })
@@ -496,6 +503,12 @@ export class GooglePlaySubscriptionLifecycleService {
       .andWhere('subscription.expiresAt IS NOT NULL')
       .andWhere('subscription.expiresAt > :now', {
         now: new Date(),
+      })
+      .andWhere('snapshot.packageType = :packageType', {
+        packageType: StorePackageType.STREAK_FREEZE,
+      })
+      .andWhere('snapshot.streakProtectionMode = :protectionMode', {
+        protectionMode: StreakProtectionMode.MONTHLY_UNLIMITED,
       })
       .orderBy('subscription.expiresAt', 'DESC')
       .addOrderBy('subscription.updatedAt', 'DESC')
@@ -1045,13 +1058,18 @@ export class GooglePlaySubscriptionLifecycleService {
       throw new BadRequestException('Order is not a subscription product.');
     }
 
-    if (
-      order.snapshot.billingModel !== StoreBillingModel.MONTHLY ||
-      order.snapshot.streakProtectionMode !==
-        StreakProtectionMode.MONTHLY_UNLIMITED
-    ) {
+    const isMonthlyStreak =
+      order.snapshot.packageType === StorePackageType.STREAK_FREEZE &&
+      order.snapshot.billingModel === StoreBillingModel.MONTHLY &&
+      order.snapshot.streakProtectionMode ===
+        StreakProtectionMode.MONTHLY_UNLIMITED;
+    const isAdFree =
+      order.snapshot.packageType === StorePackageType.AD_FREE &&
+      (order.snapshot.billingModel === StoreBillingModel.MONTHLY ||
+        order.snapshot.billingModel === StoreBillingModel.YEARLY);
+    if (!isMonthlyStreak && !isAdFree) {
       throw new BadRequestException(
-        'Only monthly unlimited streak-protection packages are supported.',
+        'This package is not a supported auto-renewing subscription.',
       );
     }
   }
@@ -1409,11 +1427,22 @@ export class GooglePlaySubscriptionLifecycleService {
     const result = await manager
       .getRepository(StoreSubscription)
       .createQueryBuilder('subscription')
+      .innerJoin(
+        StoreOrderPackageSnapshot,
+        'snapshot',
+        'snapshot.orderId = subscription.initialOrderId',
+      )
       .select('MAX(subscription.expiresAt)', 'maxExpiry')
       .where('subscription.userId = :userId', { userId })
       .andWhere('subscription.entitlementActive = true')
       .andWhere('subscription.expiresAt > :now', {
         now: new Date(),
+      })
+      .andWhere('snapshot.packageType = :packageType', {
+        packageType: StorePackageType.STREAK_FREEZE,
+      })
+      .andWhere('snapshot.streakProtectionMode = :protectionMode', {
+        protectionMode: StreakProtectionMode.MONTHLY_UNLIMITED,
       })
       .getRawOne<{
         maxExpiry: string | Date | null;
