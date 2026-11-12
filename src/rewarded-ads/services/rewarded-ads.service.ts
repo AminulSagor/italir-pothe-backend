@@ -4,6 +4,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -32,6 +33,7 @@ interface SsvKey {
 
 @Injectable()
 export class RewardedAdsService {
+  private readonly logger = new Logger(RewardedAdsService.name);
   private ssvKeys: { expiresAt: number; keys: SsvKey[] } | null = null;
 
   constructor(
@@ -97,8 +99,8 @@ export class RewardedAdsService {
       return { required: false, reason: 'ad_free' };
     }
 
-    const state = await this.getOrCreateState(userId);
     if (dto.placement === RewardedPlacement.DAILY_CHALLENGE_XP) {
+      const state = await this.getOrCreateState(userId);
       this.resetDailyCounter(state);
       if (
         state.dailyBonusCount >= this.integer('REWARDED_DAILY_CHALLENGE_MAX', 3)
@@ -114,15 +116,8 @@ export class RewardedAdsService {
       return { required: false, reason: 'disabled' };
     }
 
-    if (INTERVAL_PLACEMENTS.has(dto.placement)) {
-      const nextCount = (state.counters[dto.placement] ?? 0) + 1;
-      const interval = this.intervalFor(dto.placement);
-      if (nextCount % interval !== 0) {
-        state.counters = { ...state.counters, [dto.placement]: nextCount };
-        await this.states.save(state);
-        return { required: false, reason: 'interval', count: nextCount };
-      }
-    }
+    if (INTERVAL_PLACEMENTS.has(dto.placement))
+      return this.createIntervalSession(userId, dto);
 
     const session = this.sessions.create({
       userId,
@@ -130,17 +125,15 @@ export class RewardedAdsService {
       contextId: dto.contextId?.trim() || null,
       status: RewardedSessionStatus.PENDING,
       transactionId: null,
+      adShownAt: null,
+      clientEarnedAt: null,
+      canceledAt: null,
       verifiedAt: null,
       grantedAt: null,
       expiresAt: new Date(Date.now() + 15 * 60 * 1000),
     });
     await this.sessions.save(session);
-    return {
-      required: true,
-      sessionId: session.id,
-      customData: session.id,
-      expiresAt: session.expiresAt,
-    };
+    return this.requiredSession(session, false);
   }
 
   async getSession(userId: string, sessionId: string) {
@@ -153,20 +146,31 @@ export class RewardedAdsService {
       session.status = RewardedSessionStatus.EXPIRED;
       await this.sessions.save(session);
     }
-    return {
-      id: session.id,
-      placement: session.placement,
-      status: session.status,
-      granted: session.status === RewardedSessionStatus.GRANTED,
-    };
+    return this.sessionResponse(session);
+  }
+
+  async markClientShown(userId: string, sessionId: string) {
+    return this.updateClientLifecycle(userId, sessionId, 'shown');
+  }
+
+  async markClientEarned(userId: string, sessionId: string) {
+    return this.updateClientLifecycle(userId, sessionId, 'earned');
+  }
+
+  async cancelSession(userId: string, sessionId: string) {
+    return this.updateClientLifecycle(userId, sessionId, 'canceled');
   }
 
   async completeDevelopmentSession(userId: string, sessionId: string) {
     const environment = this.config.get<string>('NODE_ENV');
-    if (environment !== 'development' && environment !== 'test')
+    if (environment !== 'development' && environment !== 'test') {
+      this.logger.warn(
+        `Rejected development completion session=${this.shortId(sessionId)} environment=${environment ?? 'unset'}`,
+      );
       throw new ForbiddenException(
         'Development reward confirmation is disabled.',
       );
+    }
     return this.verifyAndGrant(sessionId, `test-${sessionId}`, userId);
   }
 
@@ -232,7 +236,12 @@ export class RewardedAdsService {
         .setLock('pessimistic_write')
         .where('session.id = :sessionId', { sessionId })
         .getOne();
-      if (!session || session.expiresAt <= new Date())
+      if (
+        !session ||
+        session.expiresAt <= new Date() ||
+        session.status === RewardedSessionStatus.EXPIRED ||
+        session.canceledAt != null
+      )
         throw new BadRequestException(
           'Rewarded session is invalid or expired.',
         );
@@ -252,6 +261,9 @@ export class RewardedAdsService {
       session.status = RewardedSessionStatus.GRANTED;
       session.grantedAt = new Date();
       await manager.save(session);
+      this.logger.log(
+        `Reward granted session=${this.shortId(session.id)} placement=${session.placement}`,
+      );
       return { granted: true, placement: session.placement };
     });
   }
@@ -347,24 +359,170 @@ export class RewardedAdsService {
   }
 
   private async lockState(manager: EntityManager, userId: string) {
-    let state = await manager
+    await manager
+      .createQueryBuilder()
+      .insert()
+      .into(RewardedUserState)
+      .values({
+        userId,
+        counters: {},
+        outgoingCallsUsed: 0,
+        callCredits: 0,
+        dailyBonusDate: null,
+        dailyBonusCount: 0,
+      })
+      .orIgnore()
+      .execute();
+    const state = await manager
       .getRepository(RewardedUserState)
       .createQueryBuilder('state')
       .setLock('pessimistic_write')
       .where('state.userId = :userId', { userId })
       .getOne();
     if (!state)
-      state = await manager.save(
-        manager.create(RewardedUserState, {
-          userId,
-          counters: {},
-          outgoingCallsUsed: 0,
-          callCredits: 0,
-          dailyBonusDate: null,
-          dailyBonusCount: 0,
-        }),
-      );
+      throw new BadRequestException('Unable to initialize rewarded state.');
     return state;
+  }
+
+  private async createIntervalSession(
+    userId: string,
+    dto: CreateRewardedSessionDto,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const state = await this.lockState(manager, userId);
+      const existing = await manager
+        .getRepository(RewardedAdSession)
+        .createQueryBuilder('session')
+        .where('session.userId = :userId', { userId })
+        .andWhere('session.placement = :placement', {
+          placement: dto.placement,
+        })
+        .andWhere('session.status = :status', {
+          status: RewardedSessionStatus.PENDING,
+        })
+        .andWhere('session.expiresAt > :now', { now: new Date() })
+        .andWhere('session.canceledAt IS NULL')
+        .orderBy('session.createdAt', 'DESC')
+        .getOne();
+
+      if (existing) {
+        this.logger.debug(
+          `Reusing rewarded session=${this.shortId(existing.id)} placement=${dto.placement} pendingVerification=${this.hasClientStarted(existing)}`,
+        );
+        return this.requiredSession(existing, true);
+      }
+
+      const nextCount = (state.counters[dto.placement] ?? 0) + 1;
+      const interval = this.intervalFor(dto.placement);
+      if (nextCount % interval !== 0) {
+        state.counters = { ...state.counters, [dto.placement]: nextCount };
+        await manager.save(state);
+        return { required: false, reason: 'interval', count: nextCount };
+      }
+
+      const session = manager.create(RewardedAdSession, {
+        userId,
+        placement: dto.placement,
+        contextId: dto.contextId?.trim() || null,
+        status: RewardedSessionStatus.PENDING,
+        transactionId: null,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        adShownAt: null,
+        clientEarnedAt: null,
+        canceledAt: null,
+        verifiedAt: null,
+        grantedAt: null,
+      });
+      await manager.save(session);
+      this.logger.debug(
+        `Created rewarded session=${this.shortId(session.id)} placement=${dto.placement} count=${nextCount} interval=${interval}`,
+      );
+      return this.requiredSession(session, false);
+    });
+  }
+
+  private requiredSession(session: RewardedAdSession, resumed: boolean) {
+    return {
+      required: true,
+      sessionId: session.id,
+      customData: session.id,
+      expiresAt: session.expiresAt,
+      resumed,
+      verificationPending: resumed && this.hasClientStarted(session),
+    };
+  }
+
+  private sessionResponse(session: RewardedAdSession) {
+    const canceled = session.canceledAt != null;
+    return {
+      id: session.id,
+      placement: session.placement,
+      status: canceled ? 'canceled' : session.status,
+      granted: session.status === RewardedSessionStatus.GRANTED,
+      verificationPending:
+        !canceled &&
+        session.status === RewardedSessionStatus.PENDING &&
+        this.hasClientStarted(session),
+      adShown: session.adShownAt != null,
+      expiresAt: session.expiresAt,
+    };
+  }
+
+  private async updateClientLifecycle(
+    userId: string,
+    sessionId: string,
+    event: 'shown' | 'earned' | 'canceled',
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const session = await manager
+        .getRepository(RewardedAdSession)
+        .createQueryBuilder('session')
+        .setLock('pessimistic_write')
+        .where('session.id = :sessionId', { sessionId })
+        .andWhere('session.userId = :userId', { userId })
+        .getOne();
+      if (!session)
+        throw new BadRequestException('Rewarded session not found.');
+      if (session.status === RewardedSessionStatus.GRANTED)
+        return this.sessionResponse(session);
+      if (
+        session.status === RewardedSessionStatus.EXPIRED ||
+        session.expiresAt <= new Date() ||
+        session.canceledAt != null
+      ) {
+        if (
+          session.status !== RewardedSessionStatus.EXPIRED ||
+          (event === 'canceled' && session.canceledAt == null)
+        ) {
+          session.status = RewardedSessionStatus.EXPIRED;
+          if (event === 'canceled') session.canceledAt = new Date();
+          await manager.save(session);
+        }
+        return this.sessionResponse(session);
+      }
+
+      const now = new Date();
+      if (event === 'shown' && session.adShownAt == null)
+        session.adShownAt = now;
+      if (event === 'earned') {
+        session.adShownAt ??= now;
+        session.clientEarnedAt ??= now;
+      }
+      if (event === 'canceled') {
+        session.canceledAt = now;
+        session.status = RewardedSessionStatus.EXPIRED;
+      }
+      await manager.save(session);
+      return this.sessionResponse(session);
+    });
+  }
+
+  private shortId(value: string) {
+    return value.slice(0, 8);
+  }
+
+  private hasClientStarted(session: RewardedAdSession) {
+    return session.adShownAt != null || session.clientEarnedAt != null;
   }
 
   private resetDailyCounter(state: RewardedUserState) {

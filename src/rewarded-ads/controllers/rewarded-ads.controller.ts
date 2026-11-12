@@ -39,6 +39,24 @@ export class RewardedAdsController {
     return this.rewardedAds.getSession(this.userId(request), id);
   }
 
+  @Post('sessions/:id/shown')
+  @UseGuards(JwtAuthGuard)
+  shown(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.rewardedAds.markClientShown(this.userId(request), id);
+  }
+
+  @Post('sessions/:id/earned')
+  @UseGuards(JwtAuthGuard)
+  earned(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.rewardedAds.markClientEarned(this.userId(request), id);
+  }
+
+  @Post('sessions/:id/cancel')
+  @UseGuards(JwtAuthGuard)
+  cancel(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.rewardedAds.cancelSession(this.userId(request), id);
+  }
+
   @Post('sessions/:id/complete-test')
   @UseGuards(JwtAuthGuard)
   completeTest(@Req() request: AuthenticatedRequest, @Param('id') id: string) {

@@ -31,6 +31,9 @@ export class RewardedAdSession {
   @Column({ type: 'varchar', length: 160, nullable: true })
   transactionId: string | null;
   @Column({ type: 'timestamptz' }) expiresAt: Date;
+  @Column({ type: 'timestamptz', nullable: true }) adShownAt: Date | null;
+  @Column({ type: 'timestamptz', nullable: true }) clientEarnedAt: Date | null;
+  @Column({ type: 'timestamptz', nullable: true }) canceledAt: Date | null;
   @Column({ type: 'timestamptz', nullable: true }) verifiedAt: Date | null;
   @Column({ type: 'timestamptz', nullable: true }) grantedAt: Date | null;
   @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
