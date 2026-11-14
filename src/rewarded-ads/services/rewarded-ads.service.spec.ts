@@ -358,7 +358,7 @@ describe('RewardedAdsService', () => {
       namedCurve: 'prime256v1',
     });
     const signedData =
-      'ad_unit=ca-app-pub-123/456&transaction_id=verification-probe';
+      'ad_unit=admob-console-verifier&transaction_id=verification-probe';
     const signature = sign(
       'sha256',
       Buffer.from(signedData),
@@ -374,7 +374,7 @@ describe('RewardedAdsService', () => {
       ],
     };
     const query = {
-      ad_unit: 'ca-app-pub-123/456',
+      ad_unit: 'admob-console-verifier',
       transaction_id: 'verification-probe',
       signature,
       key_id: '123',

@@ -215,12 +215,12 @@ export class RewardedAdsService implements OnModuleInit {
       !(await this.verifySsv(signedData, query.signature, Number(query.key_id)))
     )
       throw new ForbiddenException('Invalid SSV signature.');
-    if (!this.isAllowedSsvAdUnit(adUnitId))
-      throw new ForbiddenException('SSV ad unit is not allowed.');
     if (!sessionId && !ssvUserId) {
       this.logger.log('Accepted signed AdMob SSV verification probe.');
       return { verified: true, granted: false };
     }
+    if (!this.isAllowedSsvAdUnit(adUnitId))
+      throw new ForbiddenException('SSV ad unit is not allowed.');
     if (!sessionId || !ssvUserId)
       throw new BadRequestException('Incomplete SSV reward context.');
     return this.verifyAndGrant(sessionId, transactionId, ssvUserId, true);
