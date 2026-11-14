@@ -349,6 +349,87 @@ describe('RewardedAdsService', () => {
     expect(state.counters.verb_detail).toBe(3);
   });
 
+  it('accepts a signed AdMob verification probe without granting a reward', async () => {
+    const { service, sessionRows } = build(false, {
+      NODE_ENV: 'production',
+      ADMOB_REWARDED_ALLOWED_AD_UNIT_IDS: 'ca-app-pub-123/456',
+    });
+    const { privateKey, publicKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+    });
+    const signedData =
+      'ad_unit=ca-app-pub-123/456&transaction_id=verification-probe';
+    const signature = sign(
+      'sha256',
+      Buffer.from(signedData),
+      privateKey,
+    ).toString('base64url');
+    (service as unknown as { ssvKeys: unknown }).ssvKeys = {
+      expiresAt: Date.now() + 60_000,
+      keys: [
+        {
+          keyId: 123,
+          pem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+        },
+      ],
+    };
+    const query = {
+      ad_unit: 'ca-app-pub-123/456',
+      transaction_id: 'verification-probe',
+      signature,
+      key_id: '123',
+    };
+    const originalUrl =
+      `/rewarded-ads/ssv?${signedData}` +
+      `&signature=${signature}&key_id=123`;
+
+    await expect(
+      service.handleSsvCallback(originalUrl, query),
+    ).resolves.toEqual({ verified: true, granted: false });
+    expect(sessionRows).toHaveLength(0);
+  });
+
+  it('rejects a signed SSV callback with partial reward context', async () => {
+    const { service } = build(false, {
+      NODE_ENV: 'production',
+      ADMOB_REWARDED_ALLOWED_AD_UNIT_IDS: 'ca-app-pub-123/456',
+    });
+    const { privateKey, publicKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+    });
+    const signedData =
+      'ad_unit=ca-app-pub-123/456&custom_data=session-1' +
+      '&transaction_id=partial-context';
+    const signature = sign(
+      'sha256',
+      Buffer.from(signedData),
+      privateKey,
+    ).toString('base64url');
+    (service as unknown as { ssvKeys: unknown }).ssvKeys = {
+      expiresAt: Date.now() + 60_000,
+      keys: [
+        {
+          keyId: 123,
+          pem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+        },
+      ],
+    };
+    const query = {
+      ad_unit: 'ca-app-pub-123/456',
+      custom_data: 'session-1',
+      transaction_id: 'partial-context',
+      signature,
+      key_id: '123',
+    };
+    const originalUrl =
+      `/rewarded-ads/ssv?${signedData}` +
+      `&signature=${signature}&key_id=123`;
+
+    await expect(
+      service.handleSsvCallback(originalUrl, query),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it('bypasses all rewarded placements for a verified purchaser', async () => {
     const { service, sessionRows } = build(true);
     await expect(

@@ -200,10 +200,8 @@ export class RewardedAdsService implements OnModuleInit {
     const adUnitId = query.ad_unit;
     const ssvUserId = query.user_id;
     if (
-      !sessionId ||
       !transactionId ||
       !adUnitId ||
-      !ssvUserId ||
       !query.signature ||
       !query.key_id
     )
@@ -219,6 +217,12 @@ export class RewardedAdsService implements OnModuleInit {
       throw new ForbiddenException('Invalid SSV signature.');
     if (!this.allowedSsvAdUnits().has(adUnitId))
       throw new ForbiddenException('SSV ad unit is not allowed.');
+    if (!sessionId && !ssvUserId) {
+      this.logger.log('Accepted signed AdMob SSV verification probe.');
+      return { verified: true, granted: false };
+    }
+    if (!sessionId || !ssvUserId)
+      throw new BadRequestException('Incomplete SSV reward context.');
     return this.verifyAndGrant(sessionId, transactionId, ssvUserId, true);
   }
 
