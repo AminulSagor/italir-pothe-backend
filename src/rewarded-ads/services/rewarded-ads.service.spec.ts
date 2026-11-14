@@ -294,7 +294,10 @@ describe('RewardedAdsService', () => {
   });
 
   it('verifies signed SSV and makes duplicate callbacks idempotent', async () => {
-    const { service, state } = build(false, { NODE_ENV: 'production' });
+    const { service, state } = build(false, {
+      NODE_ENV: 'production',
+      ADMOB_REWARDED_ALLOWED_AD_UNIT_IDS: 'ca-app-pub-123/456',
+    });
     await service.createSession('user-id', {
       placement: RewardedPlacement.VERB_DETAIL,
     });
@@ -307,7 +310,9 @@ describe('RewardedAdsService', () => {
     const { privateKey, publicKey } = generateKeyPairSync('ec', {
       namedCurve: 'prime256v1',
     });
-    const signedData = `custom_data=${due.sessionId}&transaction_id=tx-1`;
+    const signedData =
+      `ad_unit=ca-app-pub-123/456&custom_data=${due.sessionId}` +
+      '&transaction_id=tx-1&user_id=user-id';
     const signature = sign(
       'sha256',
       Buffer.from(signedData),
@@ -323,8 +328,10 @@ describe('RewardedAdsService', () => {
       ],
     };
     const query = {
+      ad_unit: 'ca-app-pub-123/456',
       custom_data: due.sessionId,
       transaction_id: 'tx-1',
+      user_id: 'user-id',
       signature,
       key_id: '123',
     };

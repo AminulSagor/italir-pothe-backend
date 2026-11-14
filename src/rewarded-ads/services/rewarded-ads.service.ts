@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Injectable,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -32,7 +33,7 @@ interface SsvKey {
 }
 
 @Injectable()
-export class RewardedAdsService {
+export class RewardedAdsService implements OnModuleInit {
   private readonly logger = new Logger(RewardedAdsService.name);
   private ssvKeys: { expiresAt: number; keys: SsvKey[] } | null = null;
 
@@ -46,6 +47,22 @@ export class RewardedAdsService {
     @InjectRepository(CoursePurchaseOrder)
     private readonly courseOrders: Repository<CoursePurchaseOrder>,
   ) {}
+
+  onModuleInit() {
+    const production = this.config.get<string>('NODE_ENV') === 'production';
+    if (!production || !this.bool('ADS_ENABLED', true)) return;
+
+    const allowedAdUnits = this.allowedSsvAdUnits();
+    if (
+      allowedAdUnits.size === 0 ||
+      [...allowedAdUnits].some((value) => !/^ca-app-pub-\d+\/\d+$/.test(value))
+    ) {
+      throw new Error(
+        'ADS_ENABLED requires valid production IDs in ' +
+          'ADMOB_REWARDED_ALLOWED_AD_UNIT_IDS.',
+      );
+    }
+  }
 
   async getConfiguration(userId: string) {
     const [isAdFree, state] = await Promise.all([
@@ -180,7 +197,16 @@ export class RewardedAdsService {
   ) {
     const sessionId = query.custom_data;
     const transactionId = query.transaction_id;
-    if (!sessionId || !transactionId || !query.signature || !query.key_id)
+    const adUnitId = query.ad_unit;
+    const ssvUserId = query.user_id;
+    if (
+      !sessionId ||
+      !transactionId ||
+      !adUnitId ||
+      !ssvUserId ||
+      !query.signature ||
+      !query.key_id
+    )
       throw new BadRequestException('Incomplete SSV callback.');
     const signatureIndex = originalUrl.indexOf('&signature=');
     const question = originalUrl.indexOf('?');
@@ -191,7 +217,9 @@ export class RewardedAdsService {
       !(await this.verifySsv(signedData, query.signature, Number(query.key_id)))
     )
       throw new ForbiddenException('Invalid SSV signature.');
-    return this.verifyAndGrant(sessionId, transactionId, query.user_id);
+    if (!this.allowedSsvAdUnits().has(adUnitId))
+      throw new ForbiddenException('SSV ad unit is not allowed.');
+    return this.verifyAndGrant(sessionId, transactionId, ssvUserId, true);
   }
 
   async assertOutgoingCallAvailable(userId: string) {
@@ -228,6 +256,7 @@ export class RewardedAdsService {
     sessionId: string,
     transactionId: string,
     expectedUserId?: string,
+    allowDelayedSsv = false,
   ) {
     return this.dataSource.transaction(async (manager) => {
       const session = await manager
@@ -236,19 +265,30 @@ export class RewardedAdsService {
         .setLock('pessimistic_write')
         .where('session.id = :sessionId', { sessionId })
         .getOne();
-      if (
-        !session ||
-        session.expiresAt <= new Date() ||
-        session.status === RewardedSessionStatus.EXPIRED ||
-        session.canceledAt != null
-      )
-        throw new BadRequestException(
-          'Rewarded session is invalid or expired.',
-        );
+      if (!session)
+        throw new BadRequestException('Rewarded session was not found.');
       if (expectedUserId && expectedUserId !== session.userId)
         throw new ForbiddenException('Rewarded session user mismatch.');
       if (session.status === RewardedSessionStatus.GRANTED)
         return { granted: true, duplicate: true };
+      const now = new Date();
+      const delayedSsvDeadline = new Date(
+        session.createdAt.getTime() +
+          this.boundedInteger('REWARDED_SSV_MAX_DELAY_HOURS', 24, 1, 168) *
+            60 *
+            60 *
+            1000,
+      );
+      if (
+        allowDelayedSsv
+          ? delayedSsvDeadline <= now
+          : session.expiresAt <= now ||
+            session.status === RewardedSessionStatus.EXPIRED ||
+            session.canceledAt != null
+      )
+        throw new BadRequestException(
+          'Rewarded session is invalid or expired.',
+        );
       const duplicate = await manager
         .getRepository(RewardedAdSession)
         .findOneBy({ transactionId });
@@ -446,6 +486,7 @@ export class RewardedAdsService {
       required: true,
       sessionId: session.id,
       customData: session.id,
+      ssvUserId: session.userId,
       expiresAt: session.expiresAt,
       resumed,
       verificationPending: resumed && this.hasClientStarted(session),
@@ -710,6 +751,17 @@ export class RewardedAdsService {
       Buffer.from(data),
       createPublicKey(key.pem),
       signature,
+    );
+  }
+
+  private allowedSsvAdUnits() {
+    const configured =
+      this.config.get<string>('ADMOB_REWARDED_ALLOWED_AD_UNIT_IDS') ?? '';
+    return new Set(
+      configured
+        .split(',')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
     );
   }
 
