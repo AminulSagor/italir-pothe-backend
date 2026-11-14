@@ -215,7 +215,7 @@ export class RewardedAdsService implements OnModuleInit {
       !(await this.verifySsv(signedData, query.signature, Number(query.key_id)))
     )
       throw new ForbiddenException('Invalid SSV signature.');
-    if (!this.allowedSsvAdUnits().has(adUnitId))
+    if (!this.isAllowedSsvAdUnit(adUnitId))
       throw new ForbiddenException('SSV ad unit is not allowed.');
     if (!sessionId && !ssvUserId) {
       this.logger.log('Accepted signed AdMob SSV verification probe.');
@@ -767,6 +767,17 @@ export class RewardedAdsService implements OnModuleInit {
         .map((value) => value.trim())
         .filter((value) => value.length > 0),
     );
+  }
+
+  private isAllowedSsvAdUnit(callbackAdUnitId: string) {
+    return [...this.allowedSsvAdUnits()].some((configuredAdUnitId) => {
+      if (configuredAdUnitId === callbackAdUnitId) return true;
+      const separator = configuredAdUnitId.lastIndexOf('/');
+      return (
+        separator >= 0 &&
+        configuredAdUnitId.slice(separator + 1) === callbackAdUnitId
+      );
+    });
   }
 
   private async getSsvKeys() {
