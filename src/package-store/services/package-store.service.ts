@@ -85,14 +85,18 @@ import { StoreSubscription } from 'src/billing/google-play-subscriptions/entitie
  * How an Ad-Free checkout relates to the user's current Ad-Free subscription.
  * - new: no active Ad-Free subscription.
  * - already_subscribed: the requested plan is the one already active (blocked).
- * - switch: another plan is active in the same store; the store purchase must
- *   replace it (Google Play replacement / App Store same-group change).
+ * - upgrade: monthly -> yearly in the same store. Allowed in-app; the store
+ *   replaces the plan immediately and credits unused time.
+ * - downgrade: yearly -> monthly. Blocked in-app so the paid year is not cut
+ *   short; the user turns off renewal in the store and buys monthly after
+ *   the year ends (industry practice: downgrades apply at renewal).
  * - managed_elsewhere: another plan is active in the other store (blocked).
  */
 export type AdFreeSubscriptionChangeMode =
   | 'new'
   | 'already_subscribed'
-  | 'switch'
+  | 'upgrade'
+  | 'downgrade'
   | 'managed_elsewhere';
 
 export interface AdFreeSubscriptionChange {
@@ -4133,6 +4137,11 @@ export class PackageStoreService {
   private async findActiveAdFreeSubscription(
     userId: string,
   ): Promise<StoreSubscription | null> {
+    // A missed renewal notification leaves a stale expiry; re-check Google
+    // Play before treating the subscriber as lapsed.
+    await this.googlePlaySubscriptionLifecycleService.refreshLapsedSubscriptionsForUser(
+      userId,
+    );
     return this.dataSource
       .getRepository(StoreSubscription)
       .createQueryBuilder('subscription')
@@ -4173,12 +4182,21 @@ export class PackageStoreService {
       };
     }
 
+    const currentCommerce = await this.packageCommerceRepository.findOne({
+      where: { packageId: current.packageId },
+    });
+    const isDowngrade =
+      currentCommerce?.billingModel === StoreBillingModel.YEARLY &&
+      storePackage.commerce.billingModel === StoreBillingModel.MONTHLY;
+
     const mode: AdFreeSubscriptionChangeMode =
       current.packageId === storePackage.id
         ? 'already_subscribed'
         : current.provider !== provider
           ? 'managed_elsewhere'
-          : 'switch';
+          : isDowngrade
+            ? 'downgrade'
+            : 'upgrade';
 
     return {
       mode,
@@ -4203,6 +4221,11 @@ export class PackageStoreService {
     );
     if (change?.mode === 'already_subscribed') {
       throw new ConflictException('You already have this Ad-Free plan.');
+    }
+    if (change?.mode === 'downgrade') {
+      throw new ConflictException(
+        'Your yearly Ad-Free plan stays active until it ends. Turn off renewal in your store subscriptions to move to monthly after that.',
+      );
     }
     if (change?.mode === 'managed_elsewhere') {
       throw new ConflictException(

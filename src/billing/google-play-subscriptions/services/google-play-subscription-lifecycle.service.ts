@@ -2,10 +2,19 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, Repository } from 'typeorm';
+import {
+  Brackets,
+  DataSource,
+  EntityManager,
+  In,
+  LessThan,
+  LessThanOrEqual,
+  Repository,
+} from 'typeorm';
 
 import { GooglePlayBillingService } from 'src/billing/google-play/google-play-billing.service';
 import type {
@@ -122,6 +131,74 @@ export class GooglePlaySubscriptionLifecycleService {
 
     private readonly tokenCipherService: GooglePlaySubscriptionTokenCipherService,
   ) {}
+
+  private readonly refreshLogger = new Logger(
+    GooglePlaySubscriptionLifecycleService.name,
+  );
+
+  /**
+   * Re-reads a user's Google Play subscriptions that look lapsed (stored
+   * expiry passed) straight from the Google Play Developer API.
+   *
+   * Renewals normally arrive via RTDN. When an RTDN is missed or RTDN is not
+   * configured, the stored expiry goes stale and an active subscriber would
+   * be treated as expired. Callers run this before deciding entitlement.
+   * Throttled per subscription by lastSyncedAt; failures are logged and
+   * never block the caller.
+   */
+  async refreshLapsedSubscriptionsForUser(
+    userId: string,
+    minIntervalMs = 30_000,
+  ): Promise<void> {
+    const now = new Date();
+    const lapsed = await this.subscriptionRepository.find({
+      where: {
+        userId,
+        provider: StorePaymentProvider.GOOGLE_PLAY,
+        expiresAt: LessThanOrEqual(now),
+        lastSyncedAt: LessThan(new Date(now.getTime() - minIntervalMs)),
+        status: In([
+          StoreSubscriptionStatus.ACTIVE,
+          StoreSubscriptionStatus.IN_GRACE_PERIOD,
+          StoreSubscriptionStatus.ON_HOLD,
+          StoreSubscriptionStatus.PAUSED,
+          StoreSubscriptionStatus.CANCELED,
+          StoreSubscriptionStatus.PENDING,
+          StoreSubscriptionStatus.UNKNOWN,
+        ]),
+      },
+      take: 5,
+    });
+
+    for (const subscription of lapsed) {
+      try {
+        const purchaseToken = this.tokenCipherService.decrypt({
+          ciphertext: subscription.tokenCiphertext,
+          iv: subscription.tokenIv,
+          authTag: subscription.tokenAuthTag,
+        });
+        const purchase =
+          await this.googlePlayBillingService.getSubscriptionPurchaseByToken({
+            purchaseToken,
+          });
+        await this.syncSubscription({
+          purchaseToken,
+          purchase,
+          notificationType: GooglePlaySubscriptionNotificationType.RENEWED,
+          eventTime: new Date(),
+          rtdnEventId: null,
+          initialOrderId: subscription.initialOrderId,
+          expectedUserId: subscription.userId,
+        });
+      } catch (error) {
+        this.refreshLogger.warn(
+          `Lapsed Google Play subscription refresh failed for ${subscription.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
 
   async registerInitialPurchase(params: {
     initialOrderId: string;

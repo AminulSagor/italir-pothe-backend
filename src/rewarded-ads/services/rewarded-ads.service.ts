@@ -1,3 +1,4 @@
+import { GooglePlaySubscriptionLifecycleService } from 'src/billing/google-play-subscriptions/services/google-play-subscription-lifecycle.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -46,6 +47,7 @@ export class RewardedAdsService implements OnModuleInit {
     private readonly states: Repository<RewardedUserState>,
     @InjectRepository(CoursePurchaseOrder)
     private readonly courseOrders: Repository<CoursePurchaseOrder>,
+    private readonly googlePlaySubscriptions: GooglePlaySubscriptionLifecycleService,
   ) {}
 
   onModuleInit() {
@@ -199,12 +201,7 @@ export class RewardedAdsService implements OnModuleInit {
     const transactionId = query.transaction_id;
     const adUnitId = query.ad_unit;
     const ssvUserId = query.user_id;
-    if (
-      !transactionId ||
-      !adUnitId ||
-      !query.signature ||
-      !query.key_id
-    )
+    if (!transactionId || !adUnitId || !query.signature || !query.key_id)
       throw new BadRequestException('Incomplete SSV callback.');
     const signatureIndex = originalUrl.indexOf('&signature=');
     const question = originalUrl.indexOf('?');
@@ -363,6 +360,11 @@ export class RewardedAdsService implements OnModuleInit {
   }
 
   private async isAdFree(userId: string) {
+    // Missed renewal notifications leave a stale expiry; re-check Google
+    // Play so an active subscriber is not shown ads.
+    await this.googlePlaySubscriptions.refreshLapsedSubscriptionsForUser(
+      userId,
+    );
     const [course, storeSubscription] = await Promise.all([
       this.courseOrders.exist({
         where: { userId, status: CoursePurchaseStatus.PAID },

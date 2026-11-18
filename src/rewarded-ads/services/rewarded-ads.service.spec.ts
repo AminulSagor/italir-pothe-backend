@@ -176,6 +176,9 @@ describe('RewardedAdsService', () => {
       sessions as never,
       states as never,
       { exist: jest.fn(async () => storePurchase) } as never,
+      {
+        refreshLapsedSubscriptionsForUser: jest.fn(async () => undefined),
+      } as never,
     );
     return { service, state, sessionRows };
   };
@@ -380,8 +383,7 @@ describe('RewardedAdsService', () => {
       key_id: '123',
     };
     const originalUrl =
-      `/rewarded-ads/ssv?${signedData}` +
-      `&signature=${signature}&key_id=123`;
+      `/rewarded-ads/ssv?${signedData}` + `&signature=${signature}&key_id=123`;
 
     await expect(
       service.handleSsvCallback(originalUrl, query),
@@ -419,8 +421,7 @@ describe('RewardedAdsService', () => {
       key_id: '123',
     };
     const originalUrl =
-      `/rewarded-ads/ssv?${signedData}` +
-      `&signature=${signature}&key_id=123`;
+      `/rewarded-ads/ssv?${signedData}` + `&signature=${signature}&key_id=123`;
 
     await expect(
       service.handleSsvCallback(originalUrl, query),
@@ -461,8 +462,7 @@ describe('RewardedAdsService', () => {
       key_id: '123',
     };
     const originalUrl =
-      `/rewarded-ads/ssv?${signedData}` +
-      `&signature=${signature}&key_id=123`;
+      `/rewarded-ads/ssv?${signedData}` + `&signature=${signature}&key_id=123`;
 
     await expect(
       service.handleSsvCallback(originalUrl, query),

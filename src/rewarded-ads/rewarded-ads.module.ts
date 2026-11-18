@@ -1,3 +1,4 @@
+import { GooglePlaySubscriptionsModule } from 'src/billing/google-play-subscriptions/google-play-subscriptions.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CoursePurchaseOrder } from 'src/module-2/course-commerce/entities/course-purchase-order.entity';
@@ -10,6 +11,7 @@ import { RewardedAdsService } from './services/rewarded-ads.service';
 
 @Module({
   imports: [
+    GooglePlaySubscriptionsModule,
     TypeOrmModule.forFeature([
       RewardedAdSession,
       RewardedUserState,
