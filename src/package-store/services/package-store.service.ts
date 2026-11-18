@@ -79,6 +79,31 @@ import { CourseProviderProduct } from 'src/module-2/course-commerce/entities/cou
 import { CourseOrderProviderTransaction } from 'src/module-2/course-commerce/entities/course-order-provider-transaction.entity';
 import { GooglePlayBillingService } from 'src/billing/google-play/google-play-billing.service';
 import { ProviderRefundOperation } from 'src/billing/entities/provider-refund-operation.entity';
+import { StoreSubscription } from 'src/billing/google-play-subscriptions/entities/store-subscription.entity';
+
+/**
+ * How an Ad-Free checkout relates to the user's current Ad-Free subscription.
+ * - new: no active Ad-Free subscription.
+ * - already_subscribed: the requested plan is the one already active (blocked).
+ * - switch: another plan is active in the same store; the store purchase must
+ *   replace it (Google Play replacement / App Store same-group change).
+ * - managed_elsewhere: another plan is active in the other store (blocked).
+ */
+export type AdFreeSubscriptionChangeMode =
+  | 'new'
+  | 'already_subscribed'
+  | 'switch'
+  | 'managed_elsewhere';
+
+export interface AdFreeSubscriptionChange {
+  mode: AdFreeSubscriptionChangeMode;
+  currentPackageId: string | null;
+  currentProvider: StorePaymentProvider | null;
+  currentProductId: string | null;
+  currentBasePlanId: string | null;
+  currentExpiresAt: string | null;
+  currentAutoRenewEnabled: boolean | null;
+}
 import {
   BillingOrderDomain,
   BillingPaymentProvider,
@@ -1406,9 +1431,16 @@ export class PackageStoreService {
       quote = await this.calculateStoreQuote(storePackage, currency);
     }
 
+    const subscriptionChange = await this.resolveAdFreeSubscriptionChange(
+      userId,
+      storePackage,
+      query.provider,
+    );
+
     return {
       package: this.mapPackage(storePackage, false, query.provider),
       storeProduct,
+      subscriptionChange,
       pricing: {
         baseCurrency: CommerceCurrency.EUR,
         selectedCurrency: quote.selectedCurrency,
@@ -1499,6 +1531,11 @@ export class PackageStoreService {
 
     const storePackage = await this.getPublishedPackage(dto.packageId);
     await this.assertMonthlyStreakPurchaseAllowed(userId, storePackage);
+    await this.assertAdFreePurchaseAllowed(
+      userId,
+      storePackage,
+      dto.paymentProvider,
+    );
     if (
       storePackage.packageType === StorePackageType.AD_FREE &&
       dto.couponCode?.trim()
@@ -4089,6 +4126,87 @@ export class PackageStoreService {
     if (input.basePlanId) {
       throw new BadRequestException(
         'A one-time consumable product cannot have a basePlanId.',
+      );
+    }
+  }
+
+  private async findActiveAdFreeSubscription(
+    userId: string,
+  ): Promise<StoreSubscription | null> {
+    return this.dataSource
+      .getRepository(StoreSubscription)
+      .createQueryBuilder('subscription')
+      .innerJoin(
+        StoreOrderPackageSnapshot,
+        'snapshot',
+        'snapshot.orderId = subscription.initialOrderId',
+      )
+      .where('subscription.userId = :userId', { userId })
+      .andWhere('subscription.entitlementActive = true')
+      .andWhere('subscription.expiresAt > :now', { now: new Date() })
+      .andWhere('snapshot.packageType = :packageType', {
+        packageType: StorePackageType.AD_FREE,
+      })
+      .orderBy('subscription.expiresAt', 'DESC')
+      .getOne();
+  }
+
+  private async resolveAdFreeSubscriptionChange(
+    userId: string,
+    storePackage: StorePackage,
+    provider: StorePaymentProvider,
+  ): Promise<AdFreeSubscriptionChange | null> {
+    if (storePackage.packageType !== StorePackageType.AD_FREE) {
+      return null;
+    }
+
+    const current = await this.findActiveAdFreeSubscription(userId);
+    if (!current) {
+      return {
+        mode: 'new',
+        currentPackageId: null,
+        currentProvider: null,
+        currentProductId: null,
+        currentBasePlanId: null,
+        currentExpiresAt: null,
+        currentAutoRenewEnabled: null,
+      };
+    }
+
+    const mode: AdFreeSubscriptionChangeMode =
+      current.packageId === storePackage.id
+        ? 'already_subscribed'
+        : current.provider !== provider
+          ? 'managed_elsewhere'
+          : 'switch';
+
+    return {
+      mode,
+      currentPackageId: current.packageId,
+      currentProvider: current.provider,
+      currentProductId: current.productId,
+      currentBasePlanId: current.basePlanId,
+      currentExpiresAt: current.expiresAt?.toISOString() ?? null,
+      currentAutoRenewEnabled: current.autoRenewEnabled,
+    };
+  }
+
+  private async assertAdFreePurchaseAllowed(
+    userId: string,
+    storePackage: StorePackage,
+    provider: StorePaymentProvider,
+  ): Promise<void> {
+    const change = await this.resolveAdFreeSubscriptionChange(
+      userId,
+      storePackage,
+      provider,
+    );
+    if (change?.mode === 'already_subscribed') {
+      throw new ConflictException('You already have this Ad-Free plan.');
+    }
+    if (change?.mode === 'managed_elsewhere') {
+      throw new ConflictException(
+        'Your Ad-Free subscription is managed in the other app store. Change or cancel it there.',
       );
     }
   }

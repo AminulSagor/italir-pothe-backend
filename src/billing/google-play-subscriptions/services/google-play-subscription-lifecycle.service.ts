@@ -636,6 +636,25 @@ export class GooglePlaySubscriptionLifecycleService {
         true,
       );
 
+      // After a plan switch (replacement), Google Play keeps sending events
+      // for the replaced token (canceled/expired). That token is now stale:
+      // syncing it would overwrite the live subscription with the old
+      // plan's terminal state and revoke the entitlement.
+      if (
+        subscription &&
+        subscription.purchaseTokenHash !== tokenHash &&
+        (subscription.linkedPurchaseTokenHash === tokenHash ||
+          (subscription.previousPurchaseTokenHashes ?? []).includes(tokenHash))
+      ) {
+        return {
+          matched: true,
+          ignored: true,
+          subscription: this.mapSubscription(subscription),
+          renewalRecorded: false,
+          sanitizedPayload: this.sanitizePurchase(params.purchase),
+        };
+      }
+
       let orderContext: OrderContext | null = null;
 
       if (params.initialOrderId) {
